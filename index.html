@@ -6,8 +6,8 @@
     <title>London City Approach Noise Model</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" type="text/css" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/p5@2.3.4/lib/p5.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js"></script>
+    <script defer src="p5.js"></script>
+    <script defer src="sketch.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -42,29 +42,29 @@
               <label for="source-slider" id="source-label"></label>
               <output id="source-value"></output>
             </div>
-            <input type="range" id="source-slider" step="0.05">
+            <input type="range" id="source-slider" step="0.05" aria-describedby="source-hint">
             <div class="evidence" id="source-evidence">
               <div class="band-track"><span class="band band-slate" id="band-source"></span></div>
-              <ul class="band-key">
+              <ul class="band-key" role="list">
                 <li><i class="band-slate"></i><span id="source-evidence-text"></span></li>
               </ul>
             </div>
-            <p class="hint">How much louder the A320neo is on the same flight path</p>
+            <p class="hint" id="source-hint">How much louder the A320neo is on the same flight path</p>
           </div>
 
           <div class="field">
             <div class="field-head">
-              <label for="thrust-slider">Thrust Δ on the 4.49° approach</label>
+              <label for="thrust-slider" id="thrust-label"></label>
               <output id="thrust-value"></output>
             </div>
-            <input type="range" id="thrust-slider" step="0.1">
+            <input type="range" id="thrust-slider" step="0.1" aria-describedby="thrust-hint">
             <div class="evidence" id="thrust-evidence">
               <div class="band-track"><span class="band band-slate" id="band-thrust"></span></div>
-              <ul class="band-key">
-                <li><i class="band-slate"></i>0 (lower limit) to 2.5 dB (upper limit)</li>
+              <ul class="band-key" role="list">
+                <li><i class="band-slate"></i><span id="thrust-evidence-text"></span></li>
               </ul>
             </div>
-            <p class="hint">Extra thrust on the shallower descent, while both aircraft are descending</p>
+            <p class="hint" id="thrust-hint">Estimate: how much more noise the 5.5° aircraft sheds by using less thrust than the A320neo does, compared with a 3° approach. Applies below about 3 nm.</p>
           </div>
         </section>
 
@@ -87,10 +87,12 @@
         <dl class="readout" aria-live="off">
           <div><dt>From threshold</dt><dd id="r-distance"></dd></div>
           <div><dt id="r-curr-label"></dt><dd id="r-curr"></dd></div>
-          <div><dt>A320neo altitude (4.49°)</dt><dd id="r-prop"></dd></div>
+          <div><dt>A320neo altitude (4.49° AMSL)</dt><dd id="r-prop"></dd></div>
           <div><dt>Height difference</dt><dd id="r-drop"></dd></div>
           <div class="model-only"><dt>Height + air</dt><dd id="r-geom"></dd></div>
           <div class="model-only"><dt>Aircraft + thrust</dt><dd id="r-source"></dd></div>
+          <div class="model-only"><dt>Evidence range</dt><dd id="r-range"></dd></div>
+          <div class="model-only"><dt>Airport table</dt><dd id="r-table"></dd></div>
           <div class="readout-net">
             <dt id="r-net-label"></dt>
             <dd><span id="r-net"></span> <span class="chip" id="r-chip"></span></dd>
@@ -98,9 +100,8 @@
         </dl>
         <div class="chart" id="chart"></div>
         <p class="chart-hint">Move across the charts to read any distance. Arrow keys also work when the chart is focused.</p>
+        <div class="visually-hidden" id="probe-status" role="status" aria-live="polite" aria-atomic="true"></div>
       </main>
     </div>
-
-    <script src="sketch.js"></script>
   </body>
 </html>
