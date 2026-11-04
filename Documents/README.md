@@ -15,10 +15,14 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | `04_LCY_Consultation_Summary_Document.pdf` | The airport's qualitative noise summary | Noise summary section |
 | `08_AEF_Noise_Lessons_for_London_City_Airport.pdf` | Certification comparison; measured arrivals at Reagan National (LAmax, 1.8–2.2 dB) | Table 4, p.6; Table 5, p.8 |
 | | Reproduction of the airport's Stage 2 arrival tables, which match Stage 3 | Table 7, p.10 |
+| | "Doubling or halving the altitude results in a 10dBA" change in LAmax, given as a general rule with no reference | p.9 |
 | `09_EASA_TCDSN_A.064.3_A320_Issue42.pdf` | A320neo certified approach levels | A320-251N from p.175; A320-271N from p.226 |
 | `10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf` | E190 certified approach levels; E190-E2 (ERJ 190-300) and E195-E2 (ERJ 190-400) | ERJ 190-100 STD from p.78; ERJ 190-300 from p.190 |
 | `11_EASA_TCDSN_A.064_Cover_Issue93.pdf` | Confirms A320 models are in Volume 3 | p.2 |
 | `18_EASA_TCDSN_IM.A.570_BD500_A220_Issue14.pdf` | A220-100 certified approach level | BD-500-1A10 records, pp.3–5 |
+| `19_EU_Directive_2015-996_Doc29_Noise_Method.pdf` | The Doc 29 aircraft noise method as adopted in 2015. Exposure over an infinite flight path is proportional to distance over speed times peak squared pressure, which gives 10 log for SEL against 20 log for peak. The text says real data don't necessarily follow this and calls the algorithm semi-empirical. | Appendix E, equation E-8 and section E3, pp.122–123 |
+| | Average atmospheric attenuation rates in the notional AIR-1845 atmosphere: 0.131, 0.295 and 0.590 dB/100 m at 250, 500 and 1,000 Hz, which is 0.4, 0.9 and 1.8 dB/1,000 ft | Appendix D, Table D-1, p.118 |
+| `20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf` | Contouring programs assumed a duration coefficient of 10, so SEL falls 10 log. Measured: 8.4 for a Boeing 747 and 5.5 for a T-38, and 6 was recommended after tests on military aircraft. SEL then falls by 20 minus the coefficient: about 11.6 log for the 747. These are lateral attenuation flights, not approaches. | pp.3–6, Table 1 |
 
 ## Certified approach levels extracted from the EASA sheets
 
@@ -39,7 +43,7 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | E195-E2 (ERJ 190-400) | 54,000 kg | 91.7 |
 | A220-100 (BD-500-1A10; PW1519G, PW1521G, PW1524G) | 54,658 kg | 91.9 |
 
-These were extracted by script from the PDF text and are ranges across all listed records. The airport's example E190 (flyover 81.9, sideline 91.7, approach 92.5 EPNdB; file 12, p.33) matches EASA records A19104, A19555, A19112 and A19556. The sources don't say which E190 modifications or which A320neo engine would be used at London City. Certification figures are in EPNdB and come from standard certification test conditions, not London City's approach angles.
+These were extracted by script from the PDF text and are ranges across all listed records. They were re-extracted and matched on 4 November 2026. The AEF report quotes other NoisedB values in Table 4, p.6: A220 91.5 and A320neo 92.1–92.3. The model uses the EASA sheets. The airport's example E190 (flyover 81.9, sideline 91.7, approach 92.5 EPNdB; file 12, p.33) matches EASA records A19104, A19555, A19112 and A19556. The sources don't say which E190 modifications or which A320neo engine would be used at London City. Certification figures are in EPNdB and come from standard certification test conditions, not London City's approach angles.
 
 ## Searched, with no figure used
 
@@ -54,10 +58,21 @@ These were extracted by script from the PDF text and are ranges across all liste
 | Value | Used in | Status |
 |---|---|---|
 | +1.2 dB thrust/config | All four "EASA" scenarios | Assumed, about the middle of the 0 to 2.5 dB range; no document here gives this figure. See "Evidence on the thrust effect" |
-| 0.6 dB per 1,000 ft atmospheric absorption | All model curves | No document here gives this figure |
-| 10 log for SEL | All model curves in SEL | A rule of thumb with no document behind it |
-| Thrust term fades to zero over 0.3 nm around the 5.5° top of descent | Thrust slider | Spread over a distance because noise doesn't change at a single point. No thrust difference is modelled beyond that point, although the E190 is level there and the A320neo still descending. |
+| 0.6 dB per 1,000 ft atmospheric absorption | All model curves | Assumed; no document here gives this figure. File 19 gives 0.4 at 250 Hz, 0.9 at 500 Hz and 1.8 at 1 kHz, so it may be low for A-weighted aircraft noise. At the largest height gap, 528 ft, 0.6 gives 0.3 dB and 1.8 would give 1.0 dB. |
+| Thrust term fades to zero over 0.3 nm around the 5.5° top of descent | Thrust slider | Model choice. Spread over a distance because noise doesn't change at a single point. No thrust difference is modelled beyond that point, although the E190 is level there and the A320neo still descending. |
 | Certificate comparison | All four "EASA" scenarios | The A320neo at its lowest listed landing mass, 66.3 t (92.0–92.7 across both engines, midpoint 92.35), minus the other type: E190 92.5 gives −0.15, E190-E2 +0.95, E195-E2 +0.65, A220 +0.45. Choosing 66.3 t assumes London City landings are nearer the lowest listed mass; no document gives typical weights. The midpoint is a simple choice for an unknown engine, not a sourced method. These replace an earlier midpoint method (92.45, with E190 92.3), which mixed landing masses and included the Flap 06 inhibitor records. |
+
+## SEL against distance
+
+The model uses 10 log plus air. This now has a source (files 19 and 20), but it is the theoretical value and the evidence points to a steeper fall:
+
+| Basis | Fall with height | Note |
+|---|---:|---|
+| Model, 1–4 km on the 4.49° path | about 11 log | 10 log plus 0.6 dB/1,000 ft |
+| Boeing 747 duration coefficient (file 20) | about 11.6 log, plus air | Not an approach |
+| Airport's A320neo SEL table, Figure 17 (file 01), fitted against 4.49° height | about 15 log | 14.4 log from 0.5 to 2.5 km. Modelled, and includes air and any thrust change along the path |
+
+The 14.4 log used in the Heathrow calculation below is that near-threshold fit. Using about 15 log instead of the model's SEL height term would add about 0.1–0.3 dB.
 
 ## Altitude waypoints
 
@@ -138,6 +153,8 @@ A text search of files 01–04 found no mention of flap, landing gear, spoiler, 
 
 The UK CAA noise sheet cited for the "EASA: E190-E2" scenario was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
 
+ECAC Doc 29 itself was not obtained: the fourth edition link at ECAC did not return the PDF. File 19 is used instead, as adopted in 2015. It has since been amended, and the amended text was not checked. ISO 9613-2 and SAE ARP 866A are paid standards and were not obtained.
+
 ## Where each file came from
 
 - **01–07:** London City Airport, RNP-AR consultation: https://consultations.airspacechange.co.uk/london-city-airport/rnp-ar-approaches/
@@ -149,4 +166,6 @@ The UK CAA noise sheet cited for the "EASA: E190-E2" scenario was not obtained; 
 - **13–14:** Heathrow Airport: https://www.heathrow.com/content/dam/heathrow/web/common/documents/company/local-community/noise/reports-and-statistics/reports/operational-trial-reports/slightly-steeper-approach-trial/
 - **15:** NASA Technical Reports Server: https://ntrs.nasa.gov/api/citations/19680001785/downloads/19680001785.pdf
 - **18:** EASA: https://www.easa.europa.eu/en/downloads/20962/en
+- **19:** legislation.gov.uk copy of Commission Directive (EU) 2015/996: https://www.legislation.gov.uk/eudr/2015/996/pdfs/eudr_20150996_adopted_en.pdf
+- **20:** NASA Technical Reports Server: https://ntrs.nasa.gov/api/citations/19820003987/downloads/19820003987.pdf
 - **16–17:** CAA airspace change portal, ACP-2025-003: https://airspacechange.caa.co.uk/PublicProposalArea?pID=695

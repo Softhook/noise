@@ -26,7 +26,7 @@ const WAYPOINTS_BY_RUNWAY = {
   ]
 };
 
-const MODEL_NOTE = "Distance: 6 dB per doubling (LCY Annex C p.41). SEL 10 log: rule of thumb, no source. Air: 0.6 dB/1,000 ft, no source.";
+const MODEL_NOTE = "LAmax distance: 6 dB per doubling (LCY Annex C p.41, which names no metric); AEF p.9 gives 10 dB as a general rule. SEL distance: 10 log, the theoretical dipole result (Doc 29 method, Directive 2015/996 p.122). A Boeing 747 test implies about 11.6 log (NASA TM 83214), and the airport's A320neo table falls about 15 log including air and any thrust change. Air: 0.6 dB/1,000 ft is assumed, no source. Doc 29 rates are 0.4 at 250 Hz, 0.9 at 500 Hz and 1.8 at 1 kHz (Directive p.118), so it may be low.";
 
 const SOURCE_SLIDER = { min: -4.0, max: 3.0 };
 const THRUST_SLIDER = { min: 0.0, max: 4.0 };
@@ -39,7 +39,7 @@ const SOURCE_RANGES = {
   "A220":    { range: [0.1, 2.5],  text: "vs A220: +0.1 to +0.8 certificates, +2.5 measured" }
 };
 const THRUST_RANGE = [0.0, 2.5];       // 0 is a lower limit, not a finding; about 2.5 is an upper limit (NASA turbojet study)
-const THRUST_FADE_NM = 0.3;            // Noise doesn't change at a single point when thrust changes; no source
+const THRUST_FADE_NM = 0.3;            // Model choice, no source: noise doesn't change at a single point when thrust changes
 const NOTICEABLE_DB = 3;               // LCY Consultation 5.4.11: "noticeable differences of 3dB or more"
 
 // LCY Stage 3 Consultation Document (Issue 1.1, Apr 2026), arrivals: Fig. 17 (RWY 27) and Fig. 18 (RWY 09).
@@ -71,7 +71,7 @@ function airportPreset(aircraft, basis) {
     desc: () => `LCY consultation Figs. 17–18: A320neo at 4.49° vs ${aircraft} at 5.5° (SEL, net, modelled). Dashed: no airport figures, estimate only.`,
     sources: () => [
       `AEDT 3g model, not measured. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (pp.8, 12).`,
-      "Thrust: estimated within flight profiles, no value published (p.7). Flap, gear, engine variant, weight, weather: none stated. Data: Consultation pp.30–31."
+      "Thrust: estimated within flight profiles, no value published (p.7). Weight: estimated from destination, no value published (p.7). Flap, gear, engine variant, weather: none stated. Data: Consultation pp.30–31."
     ]
   };
 }
@@ -88,7 +88,7 @@ function easaPreset(aircraft, certificate, landingMass, sourceDelta, note = "") 
     sourceDelta,
     sources: () => [
       modelSource(),
-      `Certificates are in EPNdB, at standard test conditions and certified landing masses, not London City's approach or typical weights, so part of the difference may reflect the heavier A320neo. Thrust ${signed(EASA_THRUST_DB, 1)} dB: assumed. A shallower descent needs more thrust, so 0 is a lower limit, not a finding. The Heathrow trials can't separate thrust from scatter (scaled, very roughly 0–2 dB); NASA 1968, a turbojet, gives about 2–2.5 dB as an upper limit. ${note}`.trim()
+      `Certificates are in EPNdB, at standard test conditions and certified landing masses, not London City's approach or typical weights, so part of the difference may reflect the heavier A320neo. Using an EPNdB difference as a dB(A) difference is an assumption. Thrust ${signed(EASA_THRUST_DB, 1)} dB: assumed. A shallower descent needs more thrust unless drag or speed also changes, so 0 is a lower limit only if they don't. The Heathrow trials can't separate thrust from scatter (scaled, very roughly 0–2 dB); NASA 1967, a turbojet, gives about 2–2.5 dB as an upper limit. The thrust term fades out over ${THRUST_FADE_NM} nm around the 5.5° top of descent: a model choice, no source. ${note}`.trim()
     ]
   };
 }
@@ -98,8 +98,8 @@ const PRESETS = [
   easaPreset("E190", "E190 92.5", "43 t", -0.15, "E190 92.5: the most common record and the airport's own example (noise scheme p.33). Its 91.8 records need a Flap 06 inhibitor, so they aren't used. Measured on arrival at Reagan National: about −2 dB LAmax (AEF report, Table 5, p.8)."),
   airportPreset("E190-E2", "E190-E2: EMB190 data −0.9 dB (LCY Annex C p.10)."),
   easaPreset("E190-E2", "E190-E2 91.4", "49.05 t", 0.95),
-  airportPreset("E195-E2", "E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). The largest type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
-  easaPreset("E195-E2", "E195-E2 91.7", "54.0 t", 0.65, "The largest type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
+  airportPreset("E195-E2", "E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). The most-flown type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
+  easaPreset("E195-E2", "E195-E2 91.7", "54.0 t", 0.65, "The most-flown type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
   airportPreset("A220", "A220-100: 737-500 data −1.5 dB (LCY Annex C p.10). Its table differs from the E190's by exactly 3.0 dB because both use that data."),
   easaPreset("A220", "A220-100 91.9", "54.7 t", 0.45, "Measured on arrival at Reagan National: +2.5 dB LAmax, 19 arrivals each (AEF report, Table 6, p.9).")
 ];
@@ -152,7 +152,7 @@ function listenerNote() {
 
 function modelSource() {
   const correction = activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft";
-  return `Altitudes: LCY Consultation ${altitudeFigure()} (${correction}). ${MODEL_NOTE} ${listenerNote()}`;
+  return `Altitudes: LCY Consultation ${altitudeFigure()} (${correction}). Threshold heights (55 and 70 ft) and top-of-descent distances are not given there; they fit the slopes. ${MODEL_NOTE} ${listenerNote()}`;
 }
 
 // The sliders at 0 show height and air alone
@@ -232,7 +232,7 @@ function getAcoustics(nm) {
   let coeff = (metricMode === "LAmax") ? 20.0 : 10.0;
   let geomDB = coeff * (Math.log(ratio) / Math.log(10));
 
-  // Atmospheric absorption (~0.6 dB per 1000 ft for A-weighted aircraft spectra)
+  // Atmospheric absorption: 0.6 dB per 1000 ft is assumed, see MODEL_NOTE
   let deltaFt = alts.curr - alts.prop;
   let atmDB = (deltaFt / 1000.0) * 0.6;
 
