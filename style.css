@@ -9,7 +9,6 @@
   --line-strong: #c9c9c3;
   --accent: #2a78d6;
   --band-slate: #71747b;
-  --band-aqua: #1baf7a;
   --louder: #b42318;
   --louder-bg: #fdecea;
   --quieter: #006300;
@@ -114,6 +113,8 @@ button:disabled { cursor: not-allowed; }
 }
 
 .segmented button:hover:not(:disabled) { color: var(--ink); }
+
+.segmented-tight button { padding: 0 2px; }
 
 .segmented button[aria-pressed="true"] {
   background: var(--surface);
@@ -271,11 +272,11 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   position: absolute;
   top: 0;
   bottom: 0;
+  min-width: 4px; /* A single measured value is still visible */
   border-radius: 2px;
 }
 
 .band-slate { background: var(--band-slate); }
-.band-aqua { background: var(--band-aqua); }
 
 .band-key {
   display: flex;
@@ -360,6 +361,8 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   font-weight: 600;
   vertical-align: 2px;
 }
+
+.chip[hidden] { display: none; }
 
 .chip.is-louder { background: var(--louder-bg); color: var(--louder); }
 .chip.is-quieter { background: var(--quieter-bg); color: var(--quieter); }

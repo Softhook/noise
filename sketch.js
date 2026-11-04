@@ -1,96 +1,65 @@
 /**
- * LCY Runway 27 Approach Slope & Acoustic Differential Model
- * Compares Current 5.5° Steep Approach vs Proposed 4.49° Shallow Approach (0 to 6.5 nm)
- * The controls are in index.html; this file holds the data, the model and the charts.
+ * London City approach noise model: page controls and charts.
+ * The data and calculations are in model.js; the controls are in index.html.
  */
-// LCY Stage 3 Consultation Document: RWY 27 descends from 3,000 ft (Fig. 9), RWY 09 from 2,000 ft (Fig. 8).
-// Two labels are replaced by the 4.49° slope value: 574 ft at 1 nm in Fig. 9 (547 ft) and 1,692 ft in Fig. 8 (1,656 ft).
-const WAYPOINTS_BY_RUNWAY = {
-  "27": [
-    { nm: 0.0,  curr: 55,   prop: 70,   label: "Rwy 27", loc: "Woolwich" },
-    { nm: 1.0,  curr: 640,  prop: 547,  label: "1nm",    loc: "Thamesmead" },
-    { nm: 2.0,  curr: 1225, prop: 1024, label: "2nm",    loc: "Abbey Wood" },
-    { nm: 3.0,  curr: 1810, prop: 1501, label: "3nm",    loc: "Belvedere" },
-    { nm: 4.0,  curr: 2395, prop: 1978, label: "4nm",    loc: "Erith" },
-    { nm: 5.03, curr: 3000, prop: 2472, label: "Curr TOD", loc: "Rainham" },
-    { nm: 6.14, curr: 3000, prop: 3000, label: "Prop TOD", loc: "Purfleet" }
-  ],
-  "09": [
-    { nm: 0.0,  curr: 55,   prop: 70,   label: "Rwy 09", loc: "Silvertown" },
-    { nm: 1.0,  curr: 640,  prop: 547,  label: "1nm",    loc: "Royal Victoria" },
-    { nm: 2.0,  curr: 1225, prop: 1024, label: "2nm",    loc: "Blackwall" },
-    { nm: 3.0,  curr: 1810, prop: 1501, label: "3nm",    loc: "Limehouse" },
-    { nm: 3.32, curr: 2000, prop: 1656, label: "Curr TOD", loc: "Rotherhithe Tunnel", locRow: 1 },
-    { nm: 4.05, curr: 2000, prop: 2000, label: "Prop TOD", loc: "Wapping" }
-  ]
-};
-
 const SOURCE_SLIDER = { min: -4.0, max: 3.0 };
 const THRUST_SLIDER = { min: 0.0, max: 4.0 };
-// Evidence ranges shown under the sliders; sources are listed in Documents/README.md
-const SOURCE_RANGE_E190 = [-2.0, 1.1]; // Measured at Reagan National (about -2) to least favourable certificate pairing
-const SOURCE_RANGE_E2 = [0.6, 1.5];    // Certificates: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB
-const THRUST_RANGE = [0.0, 2.5];       // About 0 (LCY scheme, Heathrow trials) to about 2.5 (NASA turbojet study)
 
-// LCY Stage 3 Consultation Document (Issue 1.1, Apr 2026), arrivals: Fig. 17 (RWY 27) and Fig. 18 (RWY 09).
-// [km from threshold, E190 at 5.5° minus A320neo at 4.49°, dB(A) SEL]. Positive means the E190 is louder.
-// These are net figures: the lower A320neo altitude is already included. The tables stop at 5 km.
-const LCY_E190_ARRIVALS = {
-  "27": [
-    [0.5, 2.2], [1.0, 1.7], [1.5, 1.5], [2.0, 1.3], [2.5, 1.2],
-    [3.0, 1.2], [3.5, 0.7], [4.0, 0.3], [4.5, -0.2], [5.0, -1.0]
-  ],
-  "09": [
-    [0.5, 2.2], [1.0, 1.7], [1.5, 1.5], [2.0, 1.3], [2.5, 1.3],
-    [3.0, 1.2], [3.5, 0.7], [4.0, 0.3], [4.5, -0.2], [5.0, -0.9]
-  ]
-};
-const KM_PER_NM = 1.852;
+const ALTITUDE_AND_AIR_NOTE = "Distance: 6 dB per doubling (Annex C p.41). SEL 10 log: rule of thumb, no source; the airport's A320neo levels fall about 14.5 log with height. Air: 0.6 dB/1,000 ft, no source.";
 
 const PRESETS = [
   {
     name: "Geometry",
-    desc: "Isolates the 20log10(d1/d2) proximity & atmospheric effect of dropping from 5.5° to 4.49°.",
-    sourceDelta: 0.0,
+    desc: "Altitude and air only, as if the same aircraft flew both slopes. Not a real scenario: only the A320neo is planned to use 4.49°.",
+    sameAircraft: true,
+    sourceDelta: () => 0.0,
     thrustDelta: 0.0,
     sources: () => [
-      `Same aircraft, thrust, speed and flaps on both slopes. Altitudes: LCY Consultation ${altitudeFigure()} (${activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft"}).`,
-      "Distance: 6 dB per doubling (Annex C p.41); SEL 10 log, standard rule. Air: 0.6 dB/1,000 ft, no source. Listener directly below path, flat ground."
+      `Same aircraft, thrust, speed and flaps on both slopes. Altitudes: LCY Consultation ${altitudeFigure()} (${activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft"}). Listener directly below path, flat ground.`,
+      ALTITUDE_AND_AIR_NOTE
     ]
   },
   {
-    name: "Airport claim",
-    desc: "LCY consultation Figs. 17–18: A320neo at 4.49° vs E190 at 5.5° (SEL, net). Dashed: no airport figures, estimate only.",
-    sourceDelta: 0.0, // Not used: the airport publishes one net figure, which already includes source and thrust
-    thrustDelta: 0.0,
+    name: "Airport tables",
+    desc: "LCY consultation Figs. 17–18: A320neo at 4.49° against each other type at 5.5° (SEL, net). Published for 0.5–5 km only.",
     usesAirportTable: true,
+    sourceDelta: () => 0.0, // Not used: the airport publishes one net figure, which already includes source and thrust
+    thrustDelta: 0.0,
     sources: () => [
-      "AEDT 3g model, not measured. E190: 737-500 data +1.5 dB (LCY Annex C p.10). A320neo: unadjusted AEDT data on LCY profile at 4.49° (pp.8, 12).",
-      "Thrust: estimated within flight profiles, no value published (p.7). Flap, gear, engine variant, weight, weather: none stated. Data: Consultation pp.30–31."
+      "AEDT 3g model, not measured. A320neo: unadjusted AEDT data on LCY profile at 4.49° (Annex C pp.8, 12). Thrust: estimated within flight profiles, no value published (p.7). Flap, gear, engine variant, weight, weather: none stated.",
+      "E190 and A220 differ by exactly 3.0 dB at every point: both are 737-500 data, adjusted +1.5 and −1.5 dB (Annex C p.10). Their change with distance reflects that shared data, not necessarily either aircraft."
     ]
   },
   {
-    name: "EASA empirical",
-    desc: "EASA TCDSN approach delta (-0.6 dB for heavier 66t airframe) + 1.2 dB thrust/config penalty.",
-    sourceDelta: -0.6,
+    name: "Illustrative",
+    desc: "Assumed values against the E190, not a finding: −0.6 dB from certificates plus 1.2 dB of assumed thrust.",
+    compare: "E190",
+    sourceDelta: () => -0.6,
     thrustDelta: 1.2,
     sources: () => [
-      `Altitudes: LCY Consultation ${altitudeFigure()}. Distance: 6 dB per doubling (LCY Annex C p.41); SEL 10 log, standard rule. Air: 0.6 dB/1,000 ft, no source.`,
-      "Source −0.6 dB: in EASA range (−0.8 to +1.1), pair not traced. Thrust +1.2 dB: assumed; evidence spans ~0 (LCY ANCS, Heathrow) to 2.5 dB (NASA 1968)."
+      `Altitudes: LCY Consultation ${altitudeFigure()}. ${ALTITUDE_AND_AIR_NOTE}`,
+      "Source −0.6 dB: within certificates (−0.8 to +1.1, EPNdB at 3° and maximum landing mass), pair not traced; measured arrivals at Reagan National give about −2 dB. Thrust +1.2 dB: assumed."
     ]
   },
   {
-    name: "vs E190-E2",
-    desc: "A320neo 91.8 (est.) vs E190-E2 91.4 EPNdB approach (UK CAA TCDSN): +0.4 dB.",
-    sourceDelta: 0.4,
-    thrustDelta: 1.0
+    name: "Fit to E190-E2",
+    desc: "A constant source difference fitted to the airport's E190-E2 column in SEL. It restates the airport's model and is not independent evidence.",
+    compare: "E190-E2",
+    sourceDelta: () => Math.round(NoiseModel.fittedSourceDB(activeRunway, "E190-E2") * 10) / 10,
+    thrustDelta: 0.0, // The fit is net, so any thrust effect is already inside the source figure
+    sources: () => [
+      "Source: average of the airport's A320neo minus E190-E2 figure, less altitude and air, across 0.5–5 km; it fits within 0.6 dB. Thrust is 0 because the fit already contains it.",
+      "Certificates give +0.6 to +1.5 dB: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB (EASA). Figures: Consultation pp.30–31."
+    ]
   }
 ];
 
 const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 const ALTITUDE_SCALE_FT = 3400; // Headroom above the 3,000 ft level segment
-const MIN_DB = -3;
+const MIN_DB = -3; // The noise chart grows beyond this range when the data needs it
 const MAX_DB = 6;
+const SAMPLE_NM = 0.05;
+const FIRST_NOISE_NM = 0.2;
 
 // Series colours checked with the dataviz palette validator against white
 const COLORS = {
@@ -105,111 +74,71 @@ const COLORS = {
   proposed: "#eb6834",
   proposedTint: "rgba(235, 104, 52, 0.12)",
   net: "#6250d6",
-  netTint: "rgba(98, 80, 214, 0.10)",
+  netTint: "rgba(98, 80, 214, 0.13)",
+  airport: "#199e70",
   component: "#71747b"
 };
 
-let activePreset = 2; // Default to EASA Empirical
+let activePreset = 0;       // Geometry: the only scenario with no assumed aircraft difference
 let sourceSlider, thrustSlider;
-let metricMode = "LAmax"; // "LAmax" (20log) or "SEL" (10log)
-let probeNM = 2.0;        // Default highlight at 2.0 nm
+let metricMode = "SEL";     // "LAmax" (20 log) or "SEL" (10 log). SEL matches the airport's tables.
+let compareAircraft = "E195-E2"; // The largest type in the airport's 2038 forecast without the change
+let probeNM = 2.0;          // Default highlight at 2.0 nm
 let activeRunway = "27";
 
 function distanceToX(nm, left, right) {
-  const fraction = nm / 6.5;
+  const fraction = nm / NoiseModel.MAX_NM;
   return activeRunway === "27"
     ? lerp(left, right, fraction)
     : lerp(right, left, fraction);
 }
 
 function waypoints() {
-  return WAYPOINTS_BY_RUNWAY[activeRunway];
+  return NoiseModel.WAYPOINTS[activeRunway];
 }
 
 function altitudeFigure() {
   return activeRunway === "27" ? "Fig. 9, p.23" : "Fig. 8, p.22";
 }
 
+function currentPreset() {
+  return activePreset >= 0 ? PRESETS[activePreset] : null;
+}
+
 function usingAirportTable() {
-  return activePreset >= 0 && PRESETS[activePreset].usesAirportTable === true;
+  const preset = currentPreset();
+  return preset !== null && preset.usesAirportTable === true;
 }
 
-// The airport's predicted A320neo minus E190 difference at nm, or null outside its 0.5–5 km table
-function airportPrediction(nm) {
-  const km = nm * KM_PER_NM;
-  const table = LCY_E190_ARRIVALS[activeRunway];
-  for (let i = 0; i < table.length - 1; i++) {
-    if (km >= table[i][0] && km <= table[i + 1][0]) {
-      const t = (km - table[i][0]) / (table[i + 1][0] - table[i][0]);
-      return -lerp(table[i][1], table[i + 1][1], t);
-    }
-  }
-  return null;
+function isSameAircraft() {
+  const preset = currentPreset();
+  return preset !== null && preset.sameAircraft === true;
 }
 
-// Geometry + atmosphere in SEL, the metric the airport's table is published in
-function selGeometryDB(nm) {
-  const alts = getAltitudes(nm);
-  return 10 * Math.log10(alts.curr / alts.prop) + ((alts.curr - alts.prop) / 1000) * 0.6;
-}
-
-// Not an airport figure: outside its table, continue from the nearest published value using altitude change only
-function airportExtrapolation(nm) {
-  const table = LCY_E190_ARRIVALS[activeRunway];
-  const last = table[table.length - 1];
-  const edge = nm * KM_PER_NM < (table[0][0] + last[0]) / 2 ? table[0] : last; // Nearest end of the table
-  return -edge[1] + selGeometryDB(nm) - selGeometryDB(edge[0] / KM_PER_NM);
-}
-
-// Interpolate altitudes at any distance x (in nm)
-function getAltitudes(nm) {
-  nm = constrain(nm, 0.1, 6.5);
-  const points = waypoints();
-
-  for (let i = 0; i < points.length - 1; i++) {
-    let w1 = points[i];
-    let w2 = points[i + 1];
-    if (nm >= w1.nm && nm <= w2.nm) {
-      let t = (nm - w1.nm) / (w2.nm - w1.nm);
-      let cAlt = lerp(w1.curr, w2.curr, t);
-      let pAlt = lerp(w1.prop, w2.prop, t);
-      return { curr: cAlt, prop: pAlt };
-    }
-  }
-  // Level flight beyond the proposed top of descent
-  const level = points[points.length - 1];
-  return { curr: level.curr, prop: level.prop };
-}
-
-// Compute acoustic components at distance nm
 function getAcoustics(nm) {
-  let alts = getAltitudes(nm);
-  let ratio = alts.curr / alts.prop;
+  return NoiseModel.acoustics(activeRunway, nm, {
+    metric: metricMode,
+    sourceDB: Number(sourceSlider.value),
+    thrustDB: Number(thrustSlider.value)
+  });
+}
 
-  // 20*log10 for peak SPL (LAmax), 10*log10 for Sound Exposure Level (SEL)
-  let coeff = (metricMode === "LAmax") ? 20.0 : 10.0;
-  let geomDB = coeff * (Math.log(ratio) / Math.log(10));
+function getEvidenceRange(nm) {
+  return NoiseModel.evidenceRange(activeRunway, nm, {
+    metric: metricMode,
+    sourceRange: isSameAircraft() ? [0, 0] : NoiseModel.SOURCE_RANGES[compareAircraft].range,
+    thrustRange: NoiseModel.THRUST_RANGE
+  });
+}
 
-  // Atmospheric absorption (~0.6 dB per 1000 ft for A-weighted aircraft spectra)
-  let deltaFt = alts.curr - alts.prop;
-  let atmDB = (deltaFt / 1000.0) * 0.6;
+// Distances from one end to the other at the sampling step, always including both ends
+function samplesNM(from, to) {
+  const count = Math.round((to - from) / SAMPLE_NM);
+  return Array.from({ length: count + 1 }, (_, i) => i === count ? to : from + i * SAMPLE_NM);
+}
 
-  // Operational thrust penalty applies when descending on the 4.49° glide slope
-  const propTopOfDescent = waypoints()[waypoints().length - 1].nm;
-  let sDelta = Number(sourceSlider.value);
-  let tDelta = (nm < propTopOfDescent) ? Number(thrustSlider.value) : 0.0;
-
-  let netDB = geomDB + atmDB + sDelta + tDelta;
-  return {
-    currAlt: alts.curr,
-    propAlt: alts.prop,
-    deltaFt: deltaFt,
-    geomDB: geomDB,
-    atmDB: atmDB,
-    sourceDB: sDelta,
-    thrustDB: tDelta,
-    netDB: netDB
-  };
+function airportTableNM() {
+  return NoiseModel.ARRIVAL_KM.map(km => km / NoiseModel.KM_PER_NM);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,9 +170,7 @@ function setup() {
     });
   }
 
-  placeBand(byId("band-e190"), SOURCE_RANGE_E190, SOURCE_SLIDER);
-  placeBand(byId("band-e2"), SOURCE_RANGE_E2, SOURCE_SLIDER);
-  placeBand(byId("band-thrust"), THRUST_RANGE, THRUST_SLIDER);
+  placeBand(byId("band-thrust"), NoiseModel.THRUST_RANGE, THRUST_SLIDER);
 
   PRESETS.forEach((preset, i) => {
     const button = document.createElement("button");
@@ -256,6 +183,7 @@ function setup() {
   document.querySelectorAll("[data-runway]").forEach(button => {
     button.addEventListener("click", () => {
       activeRunway = button.dataset.runway;
+      if (currentPreset()) setSliders(currentPreset()); // A fitted source differs by runway
       refresh();
     });
   });
@@ -263,6 +191,15 @@ function setup() {
   document.querySelectorAll("[data-metric]").forEach(button => {
     button.addEventListener("click", () => {
       metricMode = button.dataset.metric;
+      refresh();
+    });
+  });
+
+  document.querySelectorAll("[data-compare]").forEach(button => {
+    button.addEventListener("click", () => {
+      compareAircraft = button.dataset.compare;
+      // A scenario tied to one aircraft no longer describes what is shown
+      if (currentPreset() && currentPreset().compare) activePreset = -1;
       refresh();
     });
   });
@@ -296,10 +233,15 @@ function placeBand(element, range, slider) {
   element.style.width = `${toPercent(range[1]) - toPercent(range[0])}%`;
 }
 
+function setSliders(preset) {
+  sourceSlider.value = preset.sourceDelta();
+  thrustSlider.value = preset.thrustDelta;
+}
+
 function applyPreset(idx) {
   activePreset = idx;
-  sourceSlider.value = PRESETS[idx].sourceDelta;
-  thrustSlider.value = PRESETS[idx].thrustDelta;
+  setSliders(PRESETS[idx]);
+  if (PRESETS[idx].compare) compareAircraft = PRESETS[idx].compare;
   refresh();
 }
 
@@ -314,7 +256,7 @@ function setPressed(button, pressed) {
 
 function syncControls() {
   const airport = usingAirportTable();
-  const preset = activePreset >= 0 ? PRESETS[activePreset] : null;
+  const preset = currentPreset();
 
   [...byId("scenarios").children].forEach((button, i) => setPressed(button, i === activePreset));
   document.querySelectorAll("[data-runway]").forEach(button => {
@@ -324,6 +266,16 @@ function syncControls() {
     setPressed(button, button.dataset.metric === currentMetric());
     button.disabled = airport;
   });
+
+  document.querySelectorAll("[data-compare]").forEach(button => {
+    setPressed(button, button.dataset.compare === compareAircraft);
+  });
+  const flights = NoiseModel.FLIGHTS_WITHOUT_CHANGE[compareAircraft];
+  byId("compare-hint").textContent = `Forecast without the change: ${flights[2027].toLocaleString("en-GB")} flights in 2027, ${flights[2038].toLocaleString("en-GB")} in 2038 (Fig. 3).`;
+
+  const evidence = NoiseModel.SOURCE_RANGES[compareAircraft];
+  placeBand(byId("band-source"), evidence.range, SOURCE_SLIDER);
+  byId("source-evidence-text").textContent = evidence.text;
 
   byId("scenario-desc").textContent = preset ? preset.desc : "Custom values set with the sliders below.";
   byId("metric-hint").textContent = airport
@@ -380,7 +332,7 @@ function movePointer(event) {
   const fraction = activeRunway === "27"
     ? map(x, area.L, area.R, 0, 1)
     : map(x, area.R, area.L, 0, 1);
-  probeNM = constrain(fraction * 6.5, 0.2, 6.5);
+  probeNM = constrain(fraction * NoiseModel.MAX_NM, FIRST_NOISE_NM, NoiseModel.MAX_NM);
   redraw();
 }
 
@@ -391,7 +343,7 @@ function moveProbeWithKeys(event) {
   const rightward = event.key === "ArrowRight";
   // RWY 09 is drawn with distance increasing to the left
   const further = activeRunway === "27" ? rightward : !rightward;
-  probeNM = constrain(probeNM + (further ? step : -step), 0.2, 6.5);
+  probeNM = constrain(probeNM + (further ? step : -step), FIRST_NOISE_NM, NoiseModel.MAX_NM);
   redraw();
 }
 
@@ -403,39 +355,57 @@ function chartLayout() {
   const compact = width < 620;
   const L = compact ? 48 : 64;
   const R = width - (compact ? 16 : 32);
-  const stackedLegend = width < 700;
 
   const locations = locationLabels(L, R);
   const rowCount = Math.max(...locations.map(label => label.row)) + 1;
+  const profileLegend = placeLegend(profileLegendItems());
+  const noiseLegend = placeLegend(noiseLegendItems());
 
-  const titleH = 22;
-  const legendH = stackedLegend ? 40 : 20;
-  const head = titleH + legendH + 8;
+  const headHeight = legend => 22 + (Math.max(...legend.map(item => item.row)) + 1) * 18 + 10;
+  const profileHeadH = headHeight(profileLegend);
+  const noiseHeadH = headHeight(noiseLegend);
   const locationsH = 8 + rowCount * 17;
   const betweenCharts = 16;
   const axisH = 24;
 
-  const plots = height - head * 2 - locationsH - betweenCharts - axisH;
+  const plots = height - profileHeadH - noiseHeadH - locationsH - betweenCharts - axisH;
   const profileH = plots * 0.55;
 
-  const profileTop = head;
+  const profileTop = profileHeadH;
   const profileBottom = profileTop + profileH;
   const noiseHead = profileBottom + locationsH + betweenCharts;
-  const noiseTop = noiseHead + head;
+  const noiseTop = noiseHead + noiseHeadH;
   const noiseBottom = height - axisH;
 
   return {
     compact,
-    stackedLegend,
     L,
     R,
     locations,
+    profileLegend,
+    noiseLegend,
     locationsTop: profileBottom + 8,
     profileHead: 0,
     noiseHead,
     profile: { top: profileTop, bottom: profileBottom },
-    noise: { top: noiseTop, bottom: noiseBottom }
+    noise: { top: noiseTop, bottom: noiseBottom, ...noiseDomain() }
   };
+}
+
+// The noise chart's dB range: the usual range, extended to whole dB when anything drawn goes beyond it
+function noiseDomain() {
+  const values = [MIN_DB, MAX_DB];
+  if (usingAirportTable()) {
+    for (const aircraft of NoiseModel.AIRCRAFT) {
+      values.push(...NoiseModel.ARRIVALS[activeRunway][aircraft].map(value => -value));
+    }
+  } else {
+    for (const nm of samplesNM(FIRST_NOISE_NM, NoiseModel.MAX_NM)) {
+      const range = getEvidenceRange(nm);
+      values.push(getAcoustics(nm).netDB, range.low, range.high);
+    }
+  }
+  return { minDB: Math.floor(Math.min(...values)), maxDB: Math.ceil(Math.max(...values)) };
 }
 
 // Place names along the distance axis, moved to a second row when they would touch
@@ -485,25 +455,85 @@ function chartTitle(label, y) {
   textStyle(NORMAL);
 }
 
-// items: { label, color, dashed }. Text stays in ink; the swatch carries identity.
-function drawLegend(items, area, y) {
+function profileLegendItems() {
+  const points = waypoints();
+  const propTOD = points[points.length - 1];
+  const currTOD = points[points.length - 2];
+  const levelFt = propTOD.curr.toLocaleString("en-GB");
+  return [
+    { label: `Current 5.5° (${levelFt} ft top of descent at ${currTOD.nm} nm)`, color: COLORS.current },
+    { label: `Proposed 4.49° (${levelFt} ft top of descent at ${propTOD.nm} nm)`, color: COLORS.proposed }
+  ];
+}
+
+function hasAdjustments() {
+  return Number(sourceSlider.value) !== 0 || Number(thrustSlider.value) !== 0;
+}
+
+function noiseLegendItems() {
+  if (usingAirportTable()) {
+    return [
+      { label: `Airport table: A320neo vs ${compareAircraft}`, color: COLORS.airport },
+      { label: "Airport table: other aircraft", color: COLORS.component }
+    ];
+  }
+  const items = hasAdjustments()
+    ? [
+      { label: "Total (altitude + atmosphere + source + thrust)", color: COLORS.net },
+      { label: "Altitude + atmosphere only", color: COLORS.component, dashed: true }
+    ]
+    : [{ label: "Altitude + atmosphere", color: COLORS.net }];
+  items.push({
+    label: isSameAircraft() ? "Range if thrust adds 0 to 2.5 dB" : "Evidence range, source + thrust",
+    color: COLORS.netTint,
+    band: true
+  });
+  items.push({
+    label: `Airport table vs ${compareAircraft} (${metricMode === "SEL" ? "SEL" : "SEL, not LAmax"})`,
+    color: COLORS.airport
+  });
+  return items;
+}
+
+// Gives each legend item a position, wrapping to a new row when it wouldn't fit
+function placeLegend(items) {
+  textSize(12);
+  textStyle(NORMAL);
+  let x = 0, row = 0;
+  return items.map(item => {
+    const itemWidth = 24 + textWidth(item.label);
+    if (x > 0 && x + itemWidth > width) {
+      x = 0;
+      row++;
+    }
+    const placed = { ...item, x, row };
+    x += itemWidth + 20;
+    return placed;
+  });
+}
+
+// Text stays in ink; the swatch carries identity
+function drawLegend(items, y) {
   textSize(12);
   textAlign(LEFT, CENTER);
-  let x = 0;
-  items.forEach((item, i) => {
-    const rowY = area.stackedLegend ? y + i * 18 : y;
-    if (area.stackedLegend) x = 0;
-    stroke(item.color);
-    strokeWeight(2);
-    if (item.dashed) drawingContext.setLineDash([4, 3]);
-    line(x, rowY, x + 18, rowY);
-    drawingContext.setLineDash([]);
+  for (const item of items) {
+    const rowY = y + item.row * 18;
+    if (item.band) {
+      noStroke();
+      fill(item.color);
+      rect(item.x, rowY - 5, 18, 10, 2);
+    } else {
+      stroke(item.color);
+      strokeWeight(2);
+      if (item.dashed) drawingContext.setLineDash([4, 3]);
+      line(item.x, rowY, item.x + 18, rowY);
+      drawingContext.setLineDash([]);
+    }
     noStroke();
     strokeWeight(1);
     fill(COLORS.inkSecondary);
-    text(item.label, x + 24, rowY);
-    x += 24 + textWidth(item.label) + 20;
-  });
+    text(item.label, item.x + 24, rowY);
+  }
 }
 
 function altitudeToY(ft, area) {
@@ -511,15 +541,14 @@ function altitudeToY(ft, area) {
 }
 
 function dbToY(db, area) {
-  return map(constrain(db, MIN_DB, MAX_DB), MIN_DB, MAX_DB, area.noise.bottom, area.noise.top);
+  return map(db, area.noise.minDB, area.noise.maxDB, area.noise.bottom, area.noise.top);
 }
 
 function traceAltitude(key, area) {
   beginShape();
-  for (let nm = 0; nm <= 6.5; nm += 0.05) {
-    vertex(distanceToX(nm, area.L, area.R), altitudeToY(getAltitudes(nm)[key], area));
+  for (const nm of samplesNM(0, NoiseModel.MAX_NM)) {
+    vertex(distanceToX(nm, area.L, area.R), altitudeToY(NoiseModel.altitudes(activeRunway, nm)[key], area));
   }
-  vertex(distanceToX(6.5, area.L, area.R), altitudeToY(getAltitudes(6.5)[key], area));
   endShape();
 }
 
@@ -527,16 +556,11 @@ function drawFlightProfile(area) {
   const { L, R, profile } = area;
   const points = waypoints();
   const propTOD = points[points.length - 1];
-  const currTOD = points[points.length - 2];
-  const levelFt = propTOD.curr.toLocaleString("en-GB");
 
   chartTitle(activeRunway === "27"
     ? "Flight profile: RWY 27, approach from the east"
     : "Flight profile: RWY 09, approach from the west", area.profileHead);
-  drawLegend([
-    { label: `Current 5.5° (${levelFt} ft top of descent at ${currTOD.nm} nm)`, color: COLORS.current },
-    { label: `Proposed 4.49° (${levelFt} ft top of descent at ${propTOD.nm} nm)`, color: COLORS.proposed }
-  ], area, area.profileHead + 32);
+  drawLegend(area.profileLegend, area.profileHead + 32);
 
   // Altitude grid
   textSize(11);
@@ -561,11 +585,12 @@ function drawFlightProfile(area) {
   noStroke();
   fill(COLORS.proposedTint);
   beginShape();
-  for (let nm = 0; nm <= 6.5; nm += 0.05) {
-    vertex(distanceToX(nm, L, R), altitudeToY(getAltitudes(nm).curr, area));
+  const distances = samplesNM(0, NoiseModel.MAX_NM);
+  for (const nm of distances) {
+    vertex(distanceToX(nm, L, R), altitudeToY(NoiseModel.altitudes(activeRunway, nm).curr, area));
   }
-  for (let nm = 6.5; nm >= 0; nm -= 0.05) {
-    vertex(distanceToX(nm, L, R), altitudeToY(getAltitudes(nm).prop, area));
+  for (const nm of [...distances].reverse()) {
+    vertex(distanceToX(nm, L, R), altitudeToY(NoiseModel.altitudes(activeRunway, nm).prop, area));
   }
   endShape(CLOSE);
 
@@ -614,7 +639,7 @@ function drawFlightProfile(area) {
     const nm = activeRunway === "27" ? 4.5 : 2.5;
     const x = distanceToX(nm, L, R);
     const lean = activeRunway === "27" ? 1 : -1; // Which way the slope rises across the screen
-    const alts = getAltitudes(nm);
+    const alts = NoiseModel.altitudes(activeRunway, nm);
     noStroke();
     fill(COLORS.ink);
     textSize(12);
@@ -656,24 +681,16 @@ function drawMarker(x, y, col, size) {
 
 function drawNoiseGraph(area) {
   const { L, R, noise } = area;
-  const airport = usingAirportTable();
+  const leftAligned = activeRunway === "09"; // Keeps notes over the far end of the chart, away from the runway
 
   chartTitle(`Ground noise difference (Δ ${currentMetric()})`, area.noiseHead);
-  drawLegend(airport
-    ? [
-      { label: "Airport prediction (0.5–5 km)", color: COLORS.net },
-      { label: "Not predicted by the airport: estimate from altitude change only", color: COLORS.net, dashed: true }
-    ]
-    : [
-      { label: "Total (altitude + atmosphere + source + thrust)", color: COLORS.net },
-      { label: "Altitude + atmosphere only", color: COLORS.component, dashed: true }
-    ], area, area.noiseHead + 32);
+  drawLegend(area.noiseLegend, area.noiseHead + 32);
 
   // dB grid; every 3 dB when the plot is too short for every 1 dB
-  const tickStep = (noise.bottom - noise.top) / (MAX_DB - MIN_DB) < 18 ? 3 : 1;
+  const tickStep = (noise.bottom - noise.top) / (noise.maxDB - noise.minDB) < 18 ? 3 : 1;
   textSize(11);
   textAlign(RIGHT, CENTER);
-  for (let db = MIN_DB; db <= MAX_DB; db += tickStep) {
+  for (let db = Math.ceil(noise.minDB / tickStep) * tickStep; db <= noise.maxDB; db += tickStep) {
     const y = dbToY(db, area);
     if (db !== 0) {
       stroke(COLORS.grid);
@@ -684,14 +701,15 @@ function drawNoiseGraph(area) {
     text(`${db > 0 ? "+" : (db < 0 ? "−" : "")}${Math.abs(db)} dB`, L - 8, y);
   }
 
-  // Which side of zero means what
+  // Which side of zero means what. Only Geometry is a pure slope effect; the rest also change the aircraft.
+  const subject = isSameAircraft() ? "on 4.49°" : "A320neo at 4.49°";
+  const sideX = leftAligned ? L + 8 : R - 8;
   fill(COLORS.inkMuted);
   textSize(11);
-  textAlign(activeRunway === "27" ? RIGHT : LEFT, TOP);
-  const sideX = activeRunway === "27" ? R - 8 : L + 8;
-  text("↑ Louder on 4.49°", sideX, noise.top + 4);
-  textAlign(activeRunway === "27" ? RIGHT : LEFT, BOTTOM);
-  text("↓ Quieter on 4.49°", sideX, noise.bottom - 4);
+  textAlign(leftAligned ? LEFT : RIGHT, TOP);
+  text(isSameAircraft() ? `↑ Louder ${subject}` : `↑ ${subject} louder`, sideX, noise.top + 4);
+  textAlign(leftAligned ? LEFT : RIGHT, BOTTOM);
+  text(isSameAircraft() ? `↓ Quieter ${subject}` : `↓ ${subject} quieter`, sideX, noise.bottom - 4);
 
   // +3 dB reference
   const y3 = dbToY(3, area);
@@ -701,17 +719,19 @@ function drawNoiseGraph(area) {
   drawingContext.setLineDash([]);
   noStroke();
 
-  if (airport) {
-    drawAirportCurve(area);
+  if (usingAirportTable()) {
+    drawAirportTables(area);
   } else {
     drawModelCurves(area);
+    drawAirportCurve(compareAircraft, area, true);
+    drawAirportCurveLabels([compareAircraft], area);
   }
 
   fill(COLORS.inkSecondary);
   textSize(11);
-  const refLabel = area.compact ? "+3 dB: double acoustic energy" : "+3 dB: double acoustic energy, clearly perceptible threshold";
-  textAlign(activeRunway === "27" ? RIGHT : LEFT, BOTTOM);
-  haloText(refLabel, activeRunway === "27" ? R - 8 : L + 8, y3 - 3);
+  const refLabel = area.compact ? "+3 dB: double acoustic energy" : "+3 dB: double acoustic energy, the airport's \"noticeable\" level";
+  textAlign(leftAligned ? LEFT : RIGHT, BOTTOM);
+  haloText(refLabel, sideX, y3 - 3);
 
   // Zero line and distance axis, over the fill
   stroke(COLORS.baseline);
@@ -731,83 +751,100 @@ function drawNoiseGraph(area) {
   noStroke();
 }
 
-function drawAirportCurve(area) {
+function drawAirportTables(area) {
+  const others = NoiseModel.AIRCRAFT.filter(aircraft => aircraft !== compareAircraft);
+  for (const aircraft of others) drawAirportCurve(aircraft, area, false);
+  drawAirportCurve(compareAircraft, area, true);
+  drawAirportCurveLabels(NoiseModel.AIRCRAFT, area);
+}
+
+// Only the published points are joined: the airport gives no figures outside 0.5–5 km
+function drawAirportCurve(aircraft, area, emphasised) {
   const { L, R } = area;
-  const table = LCY_E190_ARRIVALS[activeRunway];
-  const firstNM = table[0][0] / KM_PER_NM;
-  const lastNM = table[table.length - 1][0] / KM_PER_NM;
+  const distances = airportTableNM();
+  const heights = NoiseModel.ARRIVALS[activeRunway][aircraft].map(value => dbToY(-value, area));
 
   noFill();
-  stroke(COLORS.net);
-  strokeWeight(2);
-
-  // Dashed: distances the airport does not predict
-  drawingContext.setLineDash([6, 5]);
-  for (const [fromNM, toNM] of [[0.2, firstNM], [lastNM, 6.5]]) {
-    beginShape();
-    for (let nm = fromNM; nm < toNM; nm += 0.05) {
-      vertex(distanceToX(nm, L, R), dbToY(airportExtrapolation(nm), area));
-    }
-    vertex(distanceToX(toNM, L, R), dbToY(airportExtrapolation(toNM), area));
-    endShape();
-  }
-  drawingContext.setLineDash([]);
-
-  // Solid: the airport's published figures
-  strokeWeight(2.5);
+  stroke(emphasised ? COLORS.airport : COLORS.component);
+  strokeWeight(emphasised ? 2.5 : 1.5);
   beginShape();
-  for (const [km, e190Louder] of table) {
-    vertex(distanceToX(km / KM_PER_NM, L, R), dbToY(-e190Louder, area));
-  }
+  distances.forEach((nm, i) => vertex(distanceToX(nm, L, R), heights[i]));
   endShape();
   strokeWeight(1);
+
+  if (emphasised) {
+    distances.forEach((nm, i) => drawMarker(distanceToX(nm, L, R), heights[i], COLORS.airport, 6));
+  }
+}
+
+// Names beside the 5 km end of each curve, spread out where the curves end close together
+function drawAirportCurveLabels(aircraftList, area) {
+  const { L, R } = area;
+  const lastIndex = NoiseModel.ARRIVAL_KM.length - 1;
+  const x = distanceToX(airportTableNM()[lastIndex], L, R) + (activeRunway === "27" ? 10 : -10);
+  // A lone label goes above its curve, clear of the model lines that continue past 5 km
+  const lift = aircraftList.length === 1 ? 11 : 0;
+  const lineHeight = 14;
+
+  const labels = aircraftList
+    .map(aircraft => ({ aircraft, y: dbToY(-NoiseModel.ARRIVALS[activeRunway][aircraft][lastIndex], area) }))
+    .sort((a, b) => a.y - b.y);
+  labels.forEach((label, i) => {
+    if (i > 0) label.y = Math.max(label.y, labels[i - 1].y + lineHeight);
+  });
+
+  textSize(11);
+  textAlign(activeRunway === "27" ? LEFT : RIGHT, CENTER);
+  for (const label of labels) {
+    textStyle(label.aircraft === compareAircraft ? BOLD : NORMAL);
+    fill(label.aircraft === compareAircraft ? COLORS.ink : COLORS.inkSecondary);
+    haloText(label.aircraft, x, label.y - lift);
+  }
+  textStyle(NORMAL);
 }
 
 function drawModelCurves(area) {
   const { L, R } = area;
+  const distances = samplesNM(FIRST_NOISE_NM, NoiseModel.MAX_NM);
 
-  // Shaded area between the total and zero
+  // Band: what the evidence ranges allow at each distance
+  const ranges = distances.map(getEvidenceRange);
   noStroke();
   fill(COLORS.netTint);
   beginShape();
-  vertex(distanceToX(0.2, L, R), dbToY(0, area));
-  for (let nm = 0.2; nm <= 6.5; nm += 0.05) {
-    vertex(distanceToX(nm, L, R), dbToY(getAcoustics(nm).netDB, area));
+  distances.forEach((nm, i) => vertex(distanceToX(nm, L, R), dbToY(ranges[i].high, area)));
+  for (let i = distances.length - 1; i >= 0; i--) {
+    vertex(distanceToX(distances[i], L, R), dbToY(ranges[i].low, area));
   }
-  vertex(distanceToX(6.5, L, R), dbToY(0, area));
   endShape(CLOSE);
 
-  // Dashed: altitude and atmosphere alone
   noFill();
-  stroke(COLORS.component);
-  strokeWeight(2);
-  drawingContext.setLineDash([5, 4]);
-  beginShape();
-  for (let nm = 0.2; nm <= 6.5; nm += 0.05) {
-    const ac = getAcoustics(nm);
-    vertex(distanceToX(nm, L, R), dbToY(ac.geomDB + ac.atmDB, area));
+  if (hasAdjustments()) {
+    // Dashed: altitude and atmosphere alone
+    stroke(COLORS.component);
+    strokeWeight(2);
+    drawingContext.setLineDash([5, 4]);
+    beginShape();
+    for (const nm of distances) {
+      vertex(distanceToX(nm, L, R), dbToY(getAcoustics(nm).geometryDB, area));
+    }
+    endShape();
+    drawingContext.setLineDash([]);
   }
-  endShape();
-  drawingContext.setLineDash([]);
 
   // Solid: the total
   stroke(COLORS.net);
   strokeWeight(2.5);
   beginShape();
-  for (let nm = 0.2; nm <= 6.5; nm += 0.05) {
+  for (const nm of distances) {
     vertex(distanceToX(nm, L, R), dbToY(getAcoustics(nm).netDB, area));
   }
   endShape();
   strokeWeight(1);
 }
 
-// The airport's figure at nm, or its estimate outside the table; null means use the model's total
-function probeAirportValues(nm) {
-  if (!usingAirportTable()) return null;
-  const predicted = airportPrediction(nm);
-  return predicted === null
-    ? { predicted: false, db: airportExtrapolation(nm) }
-    : { predicted: true, db: predicted };
+function airportFigureAtProbe() {
+  return NoiseModel.airportDifference(activeRunway, compareAircraft, probeNM);
 }
 
 function drawCrosshair(area) {
@@ -821,11 +858,12 @@ function drawCrosshair(area) {
 function drawProbeDots(area) {
   const x = distanceToX(probeNM, area.L, area.R);
   const ac = getAcoustics(probeNM);
-  const airport = probeAirportValues(probeNM);
+  const airport = airportFigureAtProbe();
 
   drawProbeDot(x, altitudeToY(ac.currAlt, area), COLORS.current);
   drawProbeDot(x, altitudeToY(ac.propAlt, area), COLORS.proposed);
-  drawProbeDot(x, dbToY(airport ? airport.db : ac.netDB, area), COLORS.net);
+  if (!usingAirportTable()) drawProbeDot(x, dbToY(ac.netDB, area), COLORS.net);
+  if (airport !== null) drawProbeDot(x, dbToY(airport, area), COLORS.airport);
 }
 
 function drawProbeDot(x, y, col) {
@@ -839,23 +877,47 @@ function drawProbeDot(x, y, col) {
 
 function updateReadout() {
   const ac = getAcoustics(probeNM);
-  const airport = probeAirportValues(probeNM);
-  const db = airport ? airport.db : ac.netDB;
+  const airport = airportFigureAtProbe();
+  const airportText = airport === null ? "None here" : `${signed(airport, 1)} dB`;
 
   byId("r-distance").textContent = `${probeNM.toFixed(2)} nm`;
   byId("r-curr").textContent = feet(ac.currAlt);
   byId("r-prop").textContent = feet(ac.propAlt);
   byId("r-drop").textContent = `${signed(-Math.round(ac.deltaFt), 0)} ft`;
-  byId("r-geom").textContent = `${signed(ac.geomDB + ac.atmDB, 2)} dB`;
-  byId("r-source").textContent = `${signed(ac.sourceDB + ac.thrustDB, 2)} dB`;
+  byId("r-geom").textContent = `${signed(ac.geometryDB, 1)} dB`;
+  byId("r-source").textContent = `${signed(ac.sourceDB + ac.thrustDB, 1)} dB`;
+  byId("r-airport-label").textContent = `Airport vs ${compareAircraft} (SEL)`;
+  byId("r-airport").textContent = airportText;
 
-  byId("r-net-label").textContent = !airport
-    ? "Net ground difference"
-    : (airport.predicted ? "Airport prediction, A320neo vs E190" : "Not predicted by the airport: estimate");
-  byId("r-net").textContent = `${signed(db, 2)} dB ${currentMetric()}`;
+  if (usingAirportTable()) {
+    byId("r-net-label").textContent = airport === null
+      ? "The airport publishes figures for 0.5–5 km only"
+      : `Airport table, A320neo vs ${compareAircraft}`;
+    byId("r-net").textContent = airport === null ? "No figure" : `${signed(airport, 1)} dB SEL`;
+    if (airport === null) setChip("", "");
+    else setChip(...directionOf(airport, airport));
+    return;
+  }
 
+  const range = getEvidenceRange(probeNM);
+  byId("r-range").textContent = `${signed(range.low, 1)} to ${signed(range.high, 1)} dB`;
+  byId("r-net-label").textContent = isSameAircraft() ? "Net ground difference, same aircraft" : `Net ground difference, A320neo vs ${compareAircraft}`;
+  byId("r-net").textContent = `${signed(ac.netDB, 1)} dB ${metricMode}`;
+  if (ac.netDB < range.low || ac.netDB > range.high) setChip("Outside evidence range", "");
+  else setChip(...directionOf(range.low, range.high));
+}
+
+// The direction is only stated when the whole range agrees on it
+function directionOf(low, high) {
+  if (low > 0.2) return ["▲ Louder", " is-louder"];
+  if (high < -0.2) return ["▼ Quieter", " is-quieter"];
+  if (low >= -0.2 && high <= 0.2) return ["≈ No change", ""];
+  return ["Direction uncertain", ""];
+}
+
+function setChip(label, modifier) {
   const chip = byId("r-chip");
-  const louder = db > 0.2, quieter = db < -0.2;
-  chip.textContent = louder ? "▲ Louder" : (quieter ? "▼ Quieter" : "≈ No change");
-  chip.className = `chip${louder ? " is-louder" : ""}${quieter ? " is-quieter" : ""}`;
+  chip.textContent = label;
+  chip.hidden = label === "";
+  chip.className = `chip${modifier}`;
 }

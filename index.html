@@ -6,8 +6,7 @@
     <title>London City Approach Noise Model</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" type="text/css" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/p5@2.3.4/lib/p5.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js"></script>
+    <script src="p5.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -33,6 +32,17 @@
         </section>
 
         <section>
+          <h2>Compare the A320neo with</h2>
+          <div class="segmented segmented-full segmented-tight" role="group" aria-label="Aircraft to compare with the A320neo">
+            <button type="button" data-compare="E190">E190</button>
+            <button type="button" data-compare="E190-E2">E190-E2</button>
+            <button type="button" data-compare="E195-E2">E195-E2</button>
+            <button type="button" data-compare="A220">A220</button>
+          </div>
+          <p class="hint" id="compare-hint"></p>
+        </section>
+
+        <section>
           <h2>Adjustments</h2>
           <p class="note" id="slider-note" hidden>Already included in the airport's figure. Choose another scenario to adjust these.</p>
 
@@ -43,14 +53,12 @@
             </div>
             <input type="range" id="source-slider" step="0.1">
             <div class="evidence" id="source-evidence">
-              <div class="band-track"><span class="band band-slate" id="band-e190"></span></div>
-              <div class="band-track"><span class="band band-aqua" id="band-e2"></span></div>
+              <div class="band-track"><span class="band band-slate" id="band-source"></span></div>
               <ul class="band-key">
-                <li><i class="band-slate"></i>E190 −2 to +1.1</li>
-                <li><i class="band-aqua"></i>E2 +0.6 to +1.5</li>
+                <li><i class="band-slate"></i><span id="source-evidence-text"></span></li>
               </ul>
             </div>
-            <p class="hint">Aircraft base vs baseline</p>
+            <p class="hint">A320neo minus the compared aircraft</p>
           </div>
 
           <div class="field">
@@ -65,7 +73,7 @@
                 <li><i class="band-slate"></i>Evidence: 0 to 2.5 dB</li>
               </ul>
             </div>
-            <p class="hint">Shallow slope drag and spool</p>
+            <p class="hint">Extra thrust on the shallower descent. It reverses, by up to 2 dB, where the 5.5° aircraft is level and the 4.49° aircraft is descending.</p>
           </div>
         </section>
 
@@ -92,6 +100,8 @@
           <div><dt>Altitude change</dt><dd id="r-drop"></dd></div>
           <div class="model-only"><dt>Altitude + air</dt><dd id="r-geom"></dd></div>
           <div class="model-only"><dt>Source + thrust</dt><dd id="r-source"></dd></div>
+          <div class="model-only"><dt>Evidence range</dt><dd id="r-range"></dd></div>
+          <div class="model-only"><dt id="r-airport-label"></dt><dd id="r-airport"></dd></div>
           <div class="readout-net">
             <dt id="r-net-label"></dt>
             <dd><span id="r-net"></span> <span class="chip" id="r-chip"></span></dd>
@@ -102,6 +112,7 @@
       </main>
     </div>
 
+    <script src="model.js"></script>
     <script src="sketch.js"></script>
   </body>
 </html>
