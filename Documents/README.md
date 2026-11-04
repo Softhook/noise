@@ -6,17 +6,14 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 
 | File | What was taken from it | Where |
 |---|---|---|
-| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival tables: A320neo at 4.49° vs E190, E190-E2, E195-E2 and A220 at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the "Airport tables" scenario and the green curve on every other scenario. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
-| | Forecast flights by aircraft type, shown under the aircraft selector | Figure 3 |
-| | Level flight against descending, used to limit the thrust reversal between the descent points | Figure 22 |
+| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival table: A320neo at 4.49° vs other types at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the "Airport claim" preset. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
 | `02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf` | E190 and A220-100 arrivals modelled with AEDT 737-500 data (+1.5 and −1.5 dB) | Table 4, p.10 |
 | | A320neo noise based on AEDT data | p.12 |
 | | "Quieter per arrival at most locations"; "slightly louder" than other new-generation types | p.19 |
 | | 6 dB per doubling of distance; about 20% lower gives under 2 dB | p.41 |
 | `03_LCY_Consultation_FAQ_Week8.pdf` | Arrival differences described as not likely to be perceptible, with altitude accounted for | Section 2.5.5, p.3 |
 | `04_LCY_Consultation_Summary_Document.pdf` | The airport's qualitative noise summary | Noise summary section |
-| `08_AEF_Noise_Lessons_for_London_City_Airport.pdf` | Certification comparison; measured arrivals at Reagan National (E190, LAmax, 1.8–2.2 dB) | Table 4, p.6; Table 5, p.8 |
-| | Measured A220 arrivals at Reagan National: 59.5 vs A320neo 62.0 dB LAmax, 19 flights each in one month | Table 6, p.9 |
+| `08_AEF_Noise_Lessons_for_London_City_Airport.pdf` | Certification comparison; measured arrivals at Reagan National (LAmax, 1.8–2.2 dB) | Table 4, p.6; Table 5, p.8 |
 | | Reproduction of the airport's Stage 2 arrival tables, which match Stage 3 | Table 7, p.10 |
 | `09_EASA_TCDSN_A.064.3_A320_Issue42.pdf` | A320neo certified approach levels | A320-251N from p.175; A320-271N from p.226 |
 | `10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf` | E190 certified approach levels; E190-E2 (ERJ 190-300) and E195-E2 (ERJ 190-400) | ERJ 190-100 STD from p.78; ERJ 190-300 from p.190 |
@@ -50,14 +47,14 @@ These were extracted by script from the PDF text and are ranges across all liste
 
 | Value | Used in | Status |
 |---|---|---|
-| −0.6 dB source | Illustrative scenario | Within the EASA certificate range, but the pair of aircraft was not traced |
-| +1.2 dB thrust/config | Illustrative scenario | No document here gives this figure; see "Evidence on the thrust effect" |
+| +1.2 dB thrust/config | Preset 3 | No document here gives this figure; see "Evidence on the thrust effect" |
+| +1.0 dB thrust/config | Preset 4 | No document here gives this figure; see "Evidence on the thrust effect" |
 | 0.6 dB per 1,000 ft atmospheric absorption | All model curves | No document here gives this figure |
-| 10 log for SEL | All model curves in SEL | A rule of thumb with no document behind it. The airport's A320neo levels in Figures 17–18 fall about 14.5 log with height, once the 0.6 dB air term is removed, though that trend may also include thrust and configuration changes. |
+| 91.8 EPNdB A320neo | Preset 4 | Marked "est." in the model; below every A320neo level on the EASA sheet |
 
 ## Altitude waypoints
 
-The RWY 27 altitudes in `model.js` come from `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf`, Figure 9, p.23. That figure labels the proposed 1 nm altitude as 574 ft; the model uses 547 ft, which matches the 4.49° slope and the 1 nm label in Figure 8, p.22. The 5.03 nm and 6.14 nm descent points and the 55 ft and 70 ft threshold heights were not found in the document text, but are consistent with the slopes.
+The RWY 27 altitudes in `sketch.js` come from `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf`, Figure 9, p.23. That figure labels the proposed 1 nm altitude as 574 ft; the model uses 547 ft, which matches the 4.49° slope and the 1 nm label in Figure 8, p.22. The 5.03 nm and 6.14 nm descent points and the 55 ft and 70 ft threshold heights were not found in the document text, but are consistent with the slopes.
 
 The RWY 09 altitudes come from Figure 8, p.22, where the final descent starts from 2,000 ft. That figure labels the 4.49° altitude at the current descent point as 1,692 ft; the model uses 1,656 ft, which matches the slope. The airport's own text also puts the gap at that point at "slightly more than 300ft". The 3.32 nm and 4.05 nm descent points are calculated from the slopes and match the airport's stated gap of about 0.7 nm.
 
@@ -73,8 +70,6 @@ RWY 09 place names, all from `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf`,
 | 3 nm | Limehouse | Map label in Figure 8, just north of the marker |
 | 3.32 nm (current descent point) | Rotherhithe Tunnel | Section 5.3.5 |
 | 4.05 nm (proposed descent point) | Wapping | Section 5.3.5 |
-
-RWY 27 labels are from Figure 9, p.23. The figure labels Woolwich, Thamesmead, Abbey Wood, Belvedere, Rainham Marshes and Purfleet near these points. Erith is not labelled there, and section 5.3.9 places the proposed descent point over the A13/A1306 junction, so these names are approximate.
 
 ## Proposed approach angle by stage
 
@@ -92,15 +87,9 @@ The model uses 4.49° on both runways. Stage 2 also gives about 340 ft lower tha
 |---|---:|---|
 | Source, vs E190 | −2.0 to +1.1 dB | Low end: about −2 dB LAmax measured on arrival at Reagan National (file 08, Table 5, p.8). High end: least favourable certificate pairing, A320neo 92.9 vs E190-100 91.8 EPNdB (files 09, 10). |
 | Source, vs E190-E2 | +0.6 to +1.5 dB | Certificates: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB (files 09, 10). |
-| Source, vs E195-E2 | +0.3 to +1.2 dB | Certificates: A320neo 92.0–92.9 vs E195-E2 91.7 EPNdB (files 09, 10). |
-| Source, vs A220 | +2.5 dB | One measured value: 62.0 vs 59.5 dB LAmax on arrival at Reagan National (file 08, Table 6, p.9). No A220 certificate is among these documents. |
 | Thrust | 0 to 2.5 dB | See "Evidence on the thrust effect" below. |
 
-The source bands combine different metrics and conditions, so they show a plausible range and not a statistical confidence interval. The shaded range on the noise chart adds the source band for the selected aircraft and the thrust band to the altitude and air term. Geometry uses the thrust band alone, as it assumes the same aircraft.
-
-## Scenario fitted to the E190-E2 column
-
-The "Fit to E190-E2" scenario sets the source difference to the average of the airport's A320neo minus E190-E2 figure, less the altitude and air term in SEL. This gives +0.7 dB on RWY 27 and +0.6 dB on RWY 09, and fits every published point within 0.6 dB. It restates the airport's AEDT model, so it isn't independent evidence, and thrust is set to 0 because the fit already contains it.
+The source bands combine different metrics and conditions, so they show a plausible range and not a statistical confidence interval.
 
 ## Evidence on the thrust effect
 
@@ -108,20 +97,14 @@ None of these documents gives a thrust penalty for 5.5° to 4.49°. The London C
 
 | File | What it gives | What it implies for 5.5° to 4.49° |
 |---|---|---|
-| `12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf` | AEDT example for the E190: 93.3 EPNdB at 3°, 87.9 EPNdB at 5.5°, a 5.4 EPNdB difference, at the 2 km certification point. The scheme says this method correlates well with turbofan measurements (p.11; example p.33; certification point p.6). | Height alone at 6 dB per doubling gives about 4.75 dB (121 m vs about 209 m, using the same threshold height for both), leaving about 0.65 dB over 2.5°. This can't be read as a thrust effect: it is unclear whether AEDT changed thrust between the two runs, and AEDT's noise curves needn't follow 6 dB per doubling. |
+| `12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf` | AEDT example for the E190: 93.3 EPNdB at 3°, 87.9 EPNdB at 5.5°, a 5.4 EPNdB difference, at the 2 km certification point. The scheme says this method correlates well with turbofan measurements (p.11; example p.33; certification point p.6). | Height alone at 6 dB per doubling gives 5.3 dB (121 m vs 221 m), leaving about 0.1 dB over 2.5°. It is unclear whether AEDT changed thrust between the two runs. |
 | `13_Heathrow_3.2deg_SSA_Trial_Report_2016.pdf` | Measured 3.2° vs 3.0°, many A320-family flights: average about −0.5 dBA SEL, against about −0.7 dB expected from distance and air absorption alone (pp.55–56). | No clear extra thrust benefit, but the change is only 0.2° and the event-to-event variability is 1.0–1.7 dB. |
 | `14_Heathrow_3.2deg_SSA_Trial_Report_2018.pdf` | Second trial: average also about −0.5 dBA SEL (p.5). | As above. |
 | `15_NASA_Effect_of_Thrust_and_Altitude_in_Steep_Approaches.pdf` | Four-engine turbojet, 1960s: about 7.5 dB from thrust between 3° and 6°; 19.4 dB per 100,000 N (p.6; aircraft p.4). | About 2.0–2.5 dB. Likely an upper bound, as turbojets are dominated by engine noise. |
 
 Calculation: the extra thrust needed is sin 5.5° − sin 4.49° = 0.0176 of aircraft weight, about 10 kN in total at 60 tonnes. This ignores any change in speed, flap or spoiler setting.
 
-## Thrust between the two descent points
-
-Between the current and proposed descent points, the 5.5° aircraft is level and the 4.49° aircraft is descending, so the 5.5° aircraft uses more thrust and the sign of the effect reverses. Level flight against a 4.49° descent is sin 4.49° / (sin 5.5° − sin 4.49°), or about 4.5, times the difference between the two descents. The model limits the result to 2 dB, the level against descending difference for the E190 at 4,000 ft in `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf`, Figure 22 (73 vs 71 dB SEL). That figure is indicative and at a different altitude, so this term is an estimate. Each change is spread over 0.3 nm, an assumption with no source, because noise on the ground doesn't change at a single point.
-
-## Direct source not obtained
-
-The direct source for the thrust effect would be A320neo and E190 noise-power-distance data from the ANP or AEDT databases, which was not obtained.
+The direct source would be A320neo and E190 noise-power-distance data from the ANP or AEDT databases, which was not obtained.
 
 ## Assumptions behind the airport's arrival prediction
 
@@ -141,6 +124,10 @@ From `02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf` unless stated.
 | Differences under 3 dB are treated as generally not noticeable | Consultation Document, p.30 |
 
 A text search of files 01–04 found no mention of flap, landing gear, spoiler, engine variant, temperature, humidity or atmospheric conditions.
+
+## Not saved
+
+The UK CAA noise sheet cited in Preset 4 was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
 
 ## Where each file came from
 

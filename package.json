@@ -1,7 +1,0 @@
-{
-  "name": "lcy-approach-noise-model",
-  "private": true,
-  "scripts": {
-    "test": "node --test"
-  }
-}
