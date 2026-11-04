@@ -939,15 +939,6 @@ function drawNoiseGraph(area) {
     text(`${db > 0 ? "+" : (db < 0 ? "−" : "")}${Math.abs(db)} dB`, L - 8, y);
   }
 
-  // Which side of zero means what
-  fill(COLORS.inkMuted);
-  textSize(11);
-  textAlign(activeRunway === "27" ? RIGHT : LEFT, TOP);
-  const sideX = activeRunway === "27" ? R - 8 : L + 8;
-  text("↑ A320neo louder", sideX, noise.top + 4);
-  textAlign(activeRunway === "27" ? RIGHT : LEFT, BOTTOM);
-  text("↓ A320neo quieter", sideX, noise.bottom - 4);
-
   // +3 dB reference
   const y3 = dbToY(3, area);
   stroke(COLORS.reference);
@@ -1134,11 +1125,6 @@ function drawNoThrustZone(area) {
   stroke(COLORS.baseline);
   line(edgeX, noise.top, edgeX, noise.bottom);
   noStroke();
-
-  fill(COLORS.inkSecondary);
-  textSize(11);
-  textAlign(CENTER, TOP);
-  haloText(area.compact ? "No thrust estimate" : "No thrust estimate: dotted line leaves thrust out", (left + right) / 2, noise.top + 20);
 }
 
 // The airport's figure at nm (predicted: true), or predicted: false outside its 0.5–5 km table; null for model scenarios
