@@ -343,7 +343,7 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
 
 .readout-net {
   margin-left: auto;
-  min-width: 220px;
+  min-width: 320px; /* Room for the longest label, so the strip doesn't re-wrap as the pointer moves */
   text-align: right;
 }
 
@@ -405,6 +405,7 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   }
 
   .readout-net {
+    min-width: 0;
     width: 100%;
     margin-left: 0;
     text-align: left;

@@ -1,6 +1,7 @@
 /**
- * LCY Runway 27 Approach Slope & Acoustic Differential Model
- * Compares Current 5.5° Steep Approach vs Proposed 4.49° Shallow Approach (0 to 6.5 nm)
+ * London City approach noise model
+ * Compares today's most common aircraft, the E190 on the 5.5° approach, with the A320neo,
+ * new to the airport, on the proposed 4.49° approach (0 to 6.5 nm from the threshold).
  * The controls are in index.html; this file holds the data, the model and the charts.
  */
 // LCY Stage 3 Consultation Document: RWY 27 descends from 3,000 ft (Fig. 9), RWY 09 from 2,000 ft (Fig. 8).
@@ -25,12 +26,16 @@ const WAYPOINTS_BY_RUNWAY = {
   ]
 };
 
+const MODEL_NOTE = "Distance: 6 dB per doubling (LCY Annex C p.41). SEL 10 log: rule of thumb, no source. Air: 0.6 dB/1,000 ft, no source.";
+
 const SOURCE_SLIDER = { min: -4.0, max: 3.0 };
 const THRUST_SLIDER = { min: 0.0, max: 4.0 };
 // Evidence ranges shown under the sliders; sources are listed in Documents/README.md
 const SOURCE_RANGE_E190 = [-2.0, 1.1]; // Measured at Reagan National (about -2) to least favourable certificate pairing
 const SOURCE_RANGE_E2 = [0.6, 1.5];    // Certificates: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB
 const THRUST_RANGE = [0.0, 2.5];       // About 0 (LCY scheme, Heathrow trials) to about 2.5 (NASA turbojet study)
+const THRUST_FADE_NM = 0.3;            // Noise doesn't change at a single point when thrust changes; no source
+const NOTICEABLE_DB = 3;               // LCY Consultation 5.4.11: "noticeable differences of 3dB or more"
 
 // LCY Stage 3 Consultation Document (Issue 1.1, Apr 2026), arrivals: Fig. 17 (RWY 27) and Fig. 18 (RWY 09).
 // [km from threshold, E190 at 5.5° minus A320neo at 4.49°, dB(A) SEL]. Positive means the E190 is louder.
@@ -49,18 +54,18 @@ const KM_PER_NM = 1.852;
 
 const PRESETS = [
   {
-    name: "Geometry",
-    desc: "Isolates the 20log10(d1/d2) proximity & atmospheric effect of dropping from 5.5° to 4.49°.",
+    name: "Height only",
+    desc: "Only the lower height and the air: 20 log (LAmax) or 10 log (SEL), plus 0.6 dB per 1,000 ft. Treats the A320neo and E190 as equally loud at the same height.",
     sourceDelta: 0.0,
     thrustDelta: 0.0,
     sources: () => [
-      `Same aircraft, thrust, speed and flaps on both slopes. Altitudes: LCY Consultation ${altitudeFigure()} (${activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft"}).`,
-      "Distance: 6 dB per doubling (Annex C p.41); SEL 10 log, standard rule. Air: 0.6 dB/1,000 ft, no source. Listener directly below path, flat ground."
+      `Same thrust, speed and flaps on both approaches. Altitudes: LCY Consultation ${altitudeFigure()} (${activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft"}).`,
+      `${MODEL_NOTE} ${listenerNote()}`
     ]
   },
   {
-    name: "Airport claim",
-    desc: "LCY consultation Figs. 17–18: A320neo at 4.49° vs E190 at 5.5° (SEL, net). Dashed: no airport figures, estimate only.",
+    name: "Airport figures",
+    desc: "LCY consultation Figs. 17–18: A320neo at 4.49° vs E190 at 5.5° (SEL, net, modelled). Dashed: no airport figures, estimate only.",
     sourceDelta: 0.0, // Not used: the airport publishes one net figure, which already includes source and thrust
     thrustDelta: 0.0,
     usesAirportTable: true,
@@ -70,20 +75,25 @@ const PRESETS = [
     ]
   },
   {
-    name: "EASA empirical",
-    desc: "EASA TCDSN approach delta (-0.6 dB for heavier 66t airframe) + 1.2 dB thrust/config penalty.",
+    name: "EASA + thrust",
+    desc: "Approach certificates (EASA TCDSN): −0.6 dB against the E190 for a 66 t A320neo, plus an assumed +1.2 dB thrust penalty.",
     sourceDelta: -0.6,
     thrustDelta: 1.2,
     sources: () => [
-      `Altitudes: LCY Consultation ${altitudeFigure()}. Distance: 6 dB per doubling (LCY Annex C p.41); SEL 10 log, standard rule. Air: 0.6 dB/1,000 ft, no source.`,
+      `Altitudes: LCY Consultation ${altitudeFigure()}. ${MODEL_NOTE} ${listenerNote()}`,
       "Source −0.6 dB: in EASA range (−0.8 to +1.1), pair not traced. Thrust +1.2 dB: assumed; evidence spans ~0 (LCY ANCS, Heathrow) to 2.5 dB (NASA 1968)."
     ]
   },
   {
     name: "vs E190-E2",
-    desc: "A320neo 91.8 (est.) vs E190-E2 91.4 EPNdB approach (UK CAA TCDSN): +0.4 dB.",
+    baseline: "E190-E2",
+    desc: "A different baseline: A320neo 91.8 (est.) vs E190-E2 91.4 EPNdB approach: +0.4 dB, plus an assumed +1.0 dB thrust penalty.",
     sourceDelta: 0.4,
-    thrustDelta: 1.0
+    thrustDelta: 1.0,
+    sources: () => [
+      `Altitudes: LCY Consultation ${altitudeFigure()}. ${MODEL_NOTE} ${listenerNote()}`,
+      "91.8 EPNdB is an estimate with no source, and is below every A320neo level on the EASA sheet (92.0–92.9). Thrust +1.0 dB: assumed."
+    ]
   }
 ];
 
@@ -109,7 +119,8 @@ const COLORS = {
   component: "#71747b"
 };
 
-let activePreset = 2; // Default to EASA Empirical
+let activePreset = 1;    // The airport's own comparison of the E190 and the A320neo
+let baselineAircraft = "E190"; // The aircraft on the 5.5° approach
 let sourceSlider, thrustSlider;
 let metricMode = "LAmax"; // "LAmax" (20log) or "SEL" (10log)
 let probeNM = 2.0;        // Default highlight at 2.0 nm
@@ -124,6 +135,11 @@ function distanceToX(nm, left, right) {
 
 function waypoints() {
   return WAYPOINTS_BY_RUNWAY[activeRunway];
+}
+
+function listenerNote() {
+  const turn = activeRunway === "09" ? " Beyond about 4 nm RWY 09 arrivals are turning, so the straight line is a simplification." : "";
+  return `Listener directly below the path, flat ground. Place names are approximate.${turn}`;
 }
 
 function altitudeFigure() {
@@ -194,10 +210,11 @@ function getAcoustics(nm) {
   let deltaFt = alts.curr - alts.prop;
   let atmDB = (deltaFt / 1000.0) * 0.6;
 
-  // Operational thrust penalty applies when descending on the 4.49° glide slope
-  const propTopOfDescent = waypoints()[waypoints().length - 1].nm;
+  // Thrust penalty applies while both aircraft descend, fading out around the 5.5° top of descent
+  const currTopOfDescent = waypoints()[waypoints().length - 2].nm;
+  const descending = constrain((currTopOfDescent + THRUST_FADE_NM / 2 - nm) / THRUST_FADE_NM, 0, 1);
   let sDelta = Number(sourceSlider.value);
-  let tDelta = (nm < propTopOfDescent) ? Number(thrustSlider.value) : 0.0;
+  let tDelta = Number(thrustSlider.value) * descending;
 
   let netDB = geomDB + atmDB + sDelta + tDelta;
   return {
@@ -298,6 +315,7 @@ function placeBand(element, range, slider) {
 
 function applyPreset(idx) {
   activePreset = idx;
+  baselineAircraft = PRESETS[idx].baseline || "E190";
   sourceSlider.value = PRESETS[idx].sourceDelta;
   thrustSlider.value = PRESETS[idx].thrustDelta;
   refresh();
@@ -341,9 +359,10 @@ function syncControls() {
   byId("source-value").textContent = airport ? "In LCY figure" : `${signed(Number(sourceSlider.value), 1)} dB`;
   byId("thrust-value").textContent = airport ? "In LCY figure" : `${signed(Number(thrustSlider.value), 1)} dB`;
 
-  const sources = preset && preset.sources ? preset.sources() : null;
-  byId("sources-section").hidden = !sources;
-  byId("sources").replaceChildren(...(sources || []).map(line => {
+  byId("r-curr-label").textContent = `${baselineAircraft} altitude (5.5°)`;
+  byId("source-label").textContent = `Aircraft Δ: A320neo minus ${baselineAircraft}`;
+
+  byId("sources").replaceChildren(...(preset || PRESETS[0]).sources().map(line => {
     const paragraph = document.createElement("p");
     paragraph.textContent = line;
     return paragraph;
@@ -534,8 +553,8 @@ function drawFlightProfile(area) {
     ? "Flight profile: RWY 27, approach from the east"
     : "Flight profile: RWY 09, approach from the west", area.profileHead);
   drawLegend([
-    { label: `Current 5.5° (${levelFt} ft top of descent at ${currTOD.nm} nm)`, color: COLORS.current },
-    { label: `Proposed 4.49° (${levelFt} ft top of descent at ${propTOD.nm} nm)`, color: COLORS.proposed }
+    { label: `Today: ${baselineAircraft} at 5.5° (${area.compact ? "descent from" : `${levelFt} ft top of descent at`} ${currTOD.nm} nm)`, color: COLORS.current },
+    { label: `New: A320neo at 4.49° (${area.compact ? "descent from" : `${levelFt} ft top of descent at`} ${propTOD.nm} nm)`, color: COLORS.proposed }
   ], area, area.profileHead + 32);
 
   // Altitude grid
@@ -619,9 +638,10 @@ function drawFlightProfile(area) {
     fill(COLORS.ink);
     textSize(12);
     textStyle(BOLD);
-    textAlign(CENTER, CENTER);
-    text("5.5°", x - lean * 20, altitudeToY(alts.curr, area) - 12);
-    text("4.49°", x + lean * 22, altitudeToY(alts.prop, area) + 12);
+    textAlign(lean > 0 ? RIGHT : LEFT, BOTTOM);
+    text(`${baselineAircraft} 5.5°`, x - lean * 6, altitudeToY(alts.curr, area) - 8);
+    textAlign(lean > 0 ? LEFT : RIGHT, TOP);
+    text("A320neo 4.49°", x + lean * 6, altitudeToY(alts.prop, area) + 8);
     textStyle(NORMAL);
   }
 
@@ -658,16 +678,18 @@ function drawNoiseGraph(area) {
   const { L, R, noise } = area;
   const airport = usingAirportTable();
 
-  chartTitle(`Ground noise difference (Δ ${currentMetric()})`, area.noiseHead);
+  chartTitle(`Noise on the ground: A320neo minus ${baselineAircraft} (Δ ${currentMetric()})`, area.noiseHead);
   drawLegend(airport
     ? [
       { label: "Airport prediction (0.5–5 km)", color: COLORS.net },
-      { label: "Not predicted by the airport: estimate from altitude change only", color: COLORS.net, dashed: true }
+      { label: area.compact ? "Outside its table: height change only" : "Outside the airport's table: estimate from height change only", color: COLORS.net, dashed: true }
     ]
-    : [
-      { label: "Total (altitude + atmosphere + source + thrust)", color: COLORS.net },
-      { label: "Altitude + atmosphere only", color: COLORS.component, dashed: true }
-    ], area, area.noiseHead + 32);
+    : (hasAdjustments()
+      ? [
+        { label: "Total (height + air + aircraft + thrust)", color: COLORS.net },
+        { label: "Height + air only", color: COLORS.component, dashed: true }
+      ]
+      : [{ label: "Height + air", color: COLORS.net }]), area, area.noiseHead + 32);
 
   // dB grid; every 3 dB when the plot is too short for every 1 dB
   const tickStep = (noise.bottom - noise.top) / (MAX_DB - MIN_DB) < 18 ? 3 : 1;
@@ -689,9 +711,9 @@ function drawNoiseGraph(area) {
   textSize(11);
   textAlign(activeRunway === "27" ? RIGHT : LEFT, TOP);
   const sideX = activeRunway === "27" ? R - 8 : L + 8;
-  text("↑ Louder on 4.49°", sideX, noise.top + 4);
+  text("↑ A320neo louder", sideX, noise.top + 4);
   textAlign(activeRunway === "27" ? RIGHT : LEFT, BOTTOM);
-  text("↓ Quieter on 4.49°", sideX, noise.bottom - 4);
+  text("↓ A320neo quieter", sideX, noise.bottom - 4);
 
   // +3 dB reference
   const y3 = dbToY(3, area);
@@ -709,7 +731,7 @@ function drawNoiseGraph(area) {
 
   fill(COLORS.inkSecondary);
   textSize(11);
-  const refLabel = area.compact ? "+3 dB: double acoustic energy" : "+3 dB: double acoustic energy, clearly perceptible threshold";
+  const refLabel = area.compact ? "+3 dB: double acoustic energy" : "+3 dB: double acoustic energy, the airport's \"noticeable\" level";
   textAlign(activeRunway === "27" ? RIGHT : LEFT, BOTTOM);
   haloText(refLabel, activeRunway === "27" ? R - 8 : L + 8, y3 - 3);
 
@@ -729,6 +751,10 @@ function drawNoiseGraph(area) {
   stroke(COLORS.grid);
   line(L, noise.bottom, R, noise.bottom);
   noStroke();
+}
+
+function hasAdjustments() {
+  return Number(sourceSlider.value) !== 0 || Number(thrustSlider.value) !== 0;
 }
 
 function drawAirportCurve(area) {
@@ -777,18 +803,20 @@ function drawModelCurves(area) {
   vertex(distanceToX(6.5, L, R), dbToY(0, area));
   endShape(CLOSE);
 
-  // Dashed: altitude and atmosphere alone
+  // Dashed: altitude and atmosphere alone, when that differs from the total
   noFill();
-  stroke(COLORS.component);
-  strokeWeight(2);
-  drawingContext.setLineDash([5, 4]);
-  beginShape();
-  for (let nm = 0.2; nm <= 6.5; nm += 0.05) {
-    const ac = getAcoustics(nm);
-    vertex(distanceToX(nm, L, R), dbToY(ac.geomDB + ac.atmDB, area));
+  if (hasAdjustments()) {
+    stroke(COLORS.component);
+    strokeWeight(2);
+    drawingContext.setLineDash([5, 4]);
+    beginShape();
+    for (let nm = 0.2; nm <= 6.5; nm += 0.05) {
+      const ac = getAcoustics(nm);
+      vertex(distanceToX(nm, L, R), dbToY(ac.geomDB + ac.atmDB, area));
+    }
+    endShape();
+    drawingContext.setLineDash([]);
   }
-  endShape();
-  drawingContext.setLineDash([]);
 
   // Solid: the total
   stroke(COLORS.net);
@@ -842,20 +870,23 @@ function updateReadout() {
   const airport = probeAirportValues(probeNM);
   const db = airport ? airport.db : ac.netDB;
 
-  byId("r-distance").textContent = `${probeNM.toFixed(2)} nm`;
+  byId("r-distance").textContent = `${probeNM.toFixed(2)} nm · ${(probeNM * KM_PER_NM).toFixed(2)} km`;
   byId("r-curr").textContent = feet(ac.currAlt);
   byId("r-prop").textContent = feet(ac.propAlt);
   byId("r-drop").textContent = `${signed(-Math.round(ac.deltaFt), 0)} ft`;
-  byId("r-geom").textContent = `${signed(ac.geomDB + ac.atmDB, 2)} dB`;
-  byId("r-source").textContent = `${signed(ac.sourceDB + ac.thrustDB, 2)} dB`;
+  byId("r-geom").textContent = `${signed(ac.geomDB + ac.atmDB, 1)} dB`;
+  byId("r-source").textContent = `${signed(ac.sourceDB + ac.thrustDB, 1)} dB`;
 
+  const pair = `A320neo minus ${baselineAircraft}`;
   byId("r-net-label").textContent = !airport
-    ? "Net ground difference"
-    : (airport.predicted ? "Airport prediction, A320neo vs E190" : "Not predicted by the airport: estimate");
-  byId("r-net").textContent = `${signed(db, 2)} dB ${currentMetric()}`;
+    ? pair
+    : (airport.predicted ? `Airport prediction, ${pair}` : "Not predicted by the airport: estimate");
+  byId("r-net").textContent = `${signed(db, 1)} dB ${currentMetric()}`;
 
+  // Red and green are kept for differences the airport itself would call noticeable
   const chip = byId("r-chip");
   const louder = db > 0.2, quieter = db < -0.2;
+  const noticeable = Math.abs(db) >= NOTICEABLE_DB;
   chip.textContent = louder ? "▲ Louder" : (quieter ? "▼ Quieter" : "≈ No change");
-  chip.className = `chip${louder ? " is-louder" : ""}${quieter ? " is-quieter" : ""}`;
+  chip.className = `chip${noticeable && louder ? " is-louder" : ""}${noticeable && quieter ? " is-quieter" : ""}`;
 }

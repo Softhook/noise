@@ -6,7 +6,7 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 
 | File | What was taken from it | Where |
 |---|---|---|
-| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival table: A320neo at 4.49° vs other types at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the "Airport claim" preset. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
+| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival table: A320neo at 4.49° vs other types at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the "Airport figures" scenario. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
 | `02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf` | E190 and A220-100 arrivals modelled with AEDT 737-500 data (+1.5 and −1.5 dB) | Table 4, p.10 |
 | | A320neo noise based on AEDT data | p.12 |
 | | "Quieter per arrival at most locations"; "slightly louder" than other new-generation types | p.19 |
@@ -47,10 +47,12 @@ These were extracted by script from the PDF text and are ranges across all liste
 
 | Value | Used in | Status |
 |---|---|---|
-| +1.2 dB thrust/config | Preset 3 | No document here gives this figure; see "Evidence on the thrust effect" |
-| +1.0 dB thrust/config | Preset 4 | No document here gives this figure; see "Evidence on the thrust effect" |
+| +1.2 dB thrust/config | "EASA + thrust" scenario | No document here gives this figure; see "Evidence on the thrust effect" |
+| +1.0 dB thrust/config | "vs E190-E2" scenario | No document here gives this figure; see "Evidence on the thrust effect" |
 | 0.6 dB per 1,000 ft atmospheric absorption | All model curves | No document here gives this figure |
-| 91.8 EPNdB A320neo | Preset 4 | Marked "est." in the model; below every A320neo level on the EASA sheet |
+| 10 log for SEL | All model curves in SEL | A rule of thumb with no document behind it |
+| Thrust term fades to zero over 0.3 nm around the 5.5° top of descent | Thrust slider | Spread over a distance because noise doesn't change at a single point. No thrust difference is modelled beyond that point, although the E190 is level there and the A320neo still descending. |
+| 91.8 EPNdB A320neo | "vs E190-E2" scenario | Marked "est." in the model; below every A320neo level on the EASA sheet |
 
 ## Altitude waypoints
 
@@ -127,7 +129,7 @@ A text search of files 01–04 found no mention of flap, landing gear, spoiler, 
 
 ## Not saved
 
-The UK CAA noise sheet cited in Preset 4 was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
+The UK CAA noise sheet cited for the "vs E190-E2" scenario was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
 
 ## Where each file came from
 

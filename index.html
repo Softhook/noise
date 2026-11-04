@@ -13,7 +13,7 @@
     <header class="topbar">
       <div class="topbar-title">
         <h1>London City approach noise model</h1>
-        <p>Current 5.5° approach compared with the proposed 4.49° approach</p>
+        <p>Today's most common aircraft, the E190 at 5.5°, compared with the A320neo, new to the airport, at the proposed 4.49°</p>
       </div>
       <div class="topbar-actions">
         <div class="segmented" role="group" aria-label="Runway">
@@ -38,7 +38,7 @@
 
           <div class="field">
             <div class="field-head">
-              <label for="source-slider">Aircraft source Δ</label>
+              <label for="source-slider" id="source-label"></label>
               <output id="source-value"></output>
             </div>
             <input type="range" id="source-slider" step="0.1">
@@ -46,16 +46,16 @@
               <div class="band-track"><span class="band band-slate" id="band-e190"></span></div>
               <div class="band-track"><span class="band band-aqua" id="band-e2"></span></div>
               <ul class="band-key">
-                <li><i class="band-slate"></i>E190 −2 to +1.1</li>
-                <li><i class="band-aqua"></i>E2 +0.6 to +1.5</li>
+                <li><i class="band-slate"></i>vs E190 −2 to +1.1</li>
+                <li><i class="band-aqua"></i>vs E190-E2 +0.6 to +1.5</li>
               </ul>
             </div>
-            <p class="hint">Aircraft base vs baseline</p>
+            <p class="hint">How much louder the A320neo is at the same height and thrust</p>
           </div>
 
           <div class="field">
             <div class="field-head">
-              <label for="thrust-slider">Thrust Δ on the 4.49° slope</label>
+              <label for="thrust-slider">Thrust Δ on the 4.49° approach</label>
               <output id="thrust-value"></output>
             </div>
             <input type="range" id="thrust-slider" step="0.1">
@@ -65,7 +65,7 @@
                 <li><i class="band-slate"></i>Evidence: 0 to 2.5 dB</li>
               </ul>
             </div>
-            <p class="hint">Shallow slope drag and spool</p>
+            <p class="hint">Extra thrust on the shallower descent, while both aircraft are descending</p>
           </div>
         </section>
 
@@ -87,11 +87,11 @@
       <main class="workspace">
         <dl class="readout" aria-live="off">
           <div><dt>From threshold</dt><dd id="r-distance"></dd></div>
-          <div><dt>5.5° altitude</dt><dd id="r-curr"></dd></div>
-          <div><dt>4.49° altitude</dt><dd id="r-prop"></dd></div>
-          <div><dt>Altitude change</dt><dd id="r-drop"></dd></div>
-          <div class="model-only"><dt>Altitude + air</dt><dd id="r-geom"></dd></div>
-          <div class="model-only"><dt>Source + thrust</dt><dd id="r-source"></dd></div>
+          <div><dt id="r-curr-label"></dt><dd id="r-curr"></dd></div>
+          <div><dt>A320neo altitude (4.49°)</dt><dd id="r-prop"></dd></div>
+          <div><dt>Height difference</dt><dd id="r-drop"></dd></div>
+          <div class="model-only"><dt>Height + air</dt><dd id="r-geom"></dd></div>
+          <div class="model-only"><dt>Aircraft + thrust</dt><dd id="r-source"></dd></div>
           <div class="readout-net">
             <dt id="r-net-label"></dt>
             <dd><span id="r-net"></span> <span class="chip" id="r-chip"></span></dd>
