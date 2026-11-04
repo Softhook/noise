@@ -29,7 +29,9 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | `19_EU_Directive_2015-996_Doc29_Noise_Method.pdf` | Doc 29 method as adopted in 2015: 24-band AIR-1845 atmospheric attenuation rates (`50 Hz–10 kHz`) and spectral air-absorption equation | Appendix D, equation D-1 and Table D-1, p.118 |
 | | Lossless infinite-path exposure scaling (`10 log` for SEL vs `20 log` for peak) and finite-segment exposure method | Appendix E, equation E-8 and section E3, pp.122–123 |
 | | 2015 ANP aircraft profiles, approach NPD curves and reference spectra: `737500` (`CFM563`), `A320-211`/`232` (`CFM565`/`V2527A`), `EMB190` (`CF3410E`), and Spectral Class `205` (*"Approach, 2-Engine High-Bypass"*) | Appendix I: pp.146, 153, 166, 189–190, 198–199, 221, 747, 752–754, 793–794; Table I-10, p.800 |
+| | Lateral attenuation, Λ(β,ℓ), for a listener beside the path ("Thamesmead garden" scenario, not applied) | Equations 2.7.40–2.7.44, p.80 |
 | `20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf` | Lateral-attenuation duration coefficients: contouring programs assumed 10 (`10 log` SEL); measured 8.4 for a Boeing 747 (`11.6 log` before air) and 5.5 for a T-38 | pp.3–6; Table 1, p.8 |
+| `21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf` | Arrivals measured by aircraft type at London City's NMT6, 2 September to 8 October 2024 ("Monitor 6" scenarios), and at the Thamesmead survey site ("Thamesmead garden" scenario). The report also has departures, which the model doesn't use. | Table 3, p.8; NMT6 overflown by RWY 27 arrivals, p.9; Table 1, p.6; site position, pp.4–5 |
 
 ## Certified approach levels extracted from the EASA sheets
 
@@ -76,7 +78,41 @@ These were extracted by script from the PDF text across all listed records (`fil
 | Where the thrust difference applies | Up to `3.7 nm`, or the `5.5°` top of descent if nearer (`3.32 nm` on RWY 09); hatched beyond | **Model choice (`file 19` pp.189, 198, 221; `file 02` p.8):** The estimate compares aircraft in landing configuration. In Doc 29 default profiles the `A320-211` is on landing flap from about `1,820 ft`, which is `3.7 nm` on `4.49°`, and the `EMB190` from `1,500 ft`, which is `2.5 nm` on `5.5°`. From `2.5` to `3.7 nm` the E190 may still be at idle while the A320neo isn't, so the difference could be larger than the default. Beyond that point no estimate is made: the area is hatched, a thin dotted line leaves thrust out, and it isn't treated as zero. These are 3° defaults, the `737500` profile has no idle steps, and Annex C says London City's profiles are custom, so the limit is a reasonable reading rather than a sourced value. |
 | Certificate baseline ("EASA" scenarios) | A320neo 66.3 t midpoint (92.35 EPNdB) | **Model choice (`files 09, 10, 18`):** Uses the A320neo's lowest listed landing mass (66.3 t: PW1100G 92.0–92.3, LEAP-1A 92.5–92.7, midpoint 92.35 EPNdB) minus each Chapter 4+ certificate: E190 `−0.15`, E190-E2 `+0.95`, E195-E2 `+0.65`, A220-100 `+0.45 dB`. Using an `EPNdB` difference as a `dB(A)` difference is an assumption: `EPNdB` adds tone corrections and a different frequency weighting, and includes duration (`10 log(V_A320 / V_base)` alone is `~0.1–0.3 dB`). The difference is also held constant with distance, while in `file 19` the A320ceo minus E190 gap falls about `1.2–2.5 dB` from 200 to 4,000 ft. |
 | Measured baseline ("Measured" scenarios) | E190 `−2.0`, A220 `+2.5 dB` | **Measured, at another airport (`file 08`):** Arrivals at Reagan National, LAmax, on typical approach angles. Weights, engine variants and flight settings aren't reported. The monitors are 3.1–7.1 km from the airport, but the figure is applied unchanged from 0.5 km. The A220 figure is a small sample, 19 arrivals each in one month. Uses the same thrust estimate as the EASA scenarios, although some of these measurements may be from before landing configuration. |
+| Monitor 6 baseline ("Monitor 6" scenarios) | E190 minus type: A220 `+0.5` LAmax, `+0.1` SEL; E190-E2 `+2.1` LAmax, `+2.2` SEL | **Measured at London City (`file 21`, Table 3), added to an A320neo minus E190 figure:** No source measures the A320neo at London City, so that part comes from elsewhere. The sliders and chart line use the certificates (`−0.15 dB`), to match the default E190 scenario, and the description also gives the result from Reagan National (`−2.0 dB`). Both aircraft were measured on the 5.5° approach, so only the E190's thrust estimate (`+0.9 dB`) is used, not one for the other type. The evidence range is the E190's, shifted by the gap. The gap comes from one place, about 3 km from the threshold, and is applied unchanged at every distance. The E190 and E195-E2 scenarios don't use monitor 6: the E195-E2 wasn't measured. |
 | Evidence range (shaded) | Height + air, plus band extremes | **Model choice:** Adds the low ends and the high ends of the two bands below, at full width at every distance, because a missing thrust estimate isn't a known zero. Where the E190 is level and the A320neo still descending, the low end uses `−2 dB` (`73 vs 71 dB SEL` at 4,000 ft, `file 01` Figure 22, p.32). It is an outer limit that combines unrelated sources, not a confidence interval. The chip describes the selected value, and a note beside it says whether the range crosses no change or 3 dB. |
+
+## Arrivals measured at London City
+
+From `file 21`, by Bickerdike Allen Partners, who also wrote `file 02`. RWY 27 arrivals overfly NMT6 (p.9), and these are real arrivals on the 5.5° approach, so they include actual thrust, configuration and weights. There are no A320neo figures, because it can't yet fly there. The report gives no spread for these averages.
+
+| NMT6 arrivals (Table 3, p.8) | Flights | LAmax | SEL | Difference from E190, LAmax | Difference from E190, SEL | Certificates (EPNdB, 3°) | Airport's table at 3 km (SEL) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Embraer E190 | 955 | 74.8 | 83.8 | | | | |
+| Airbus A220-100 | 53 | 74.3 | 83.7 | −0.5 | −0.1 | −0.6 | −3.0 |
+| Embraer E190-E2 | 15 | 72.7 | 81.6 | −2.1 | −2.2 | −1.1 | −2.5 |
+
+The differences are calculated here. The certificates match the A220's LAmax difference and understate the E190-E2's by about 1 dB, on only 15 flights. The airport's A220 difference is 2.9 dB larger than NMT6 shows in SEL, though its fit is across NMTs 1–6 (`file 02` pp.9–10), so one monitor doesn't test all of it. NMT6 is about 3 km from the RWY 27 threshold, read from the map in `file 02` Figure 1.
+
+## Thamesmead garden
+
+The Thamesmead survey site in `file 21`, around 4 km from the RWY 27 threshold and around 500 m north of the arrival path (pp.4–5). It was a temporary monitor, not one of the airport's NMTs. RWY 09 arrivals don't fly near it, so the scenario is RWY 27 only. Because it isn't under the path, its gaps between aircraft aren't used to test the Monitor 6 scenarios.
+
+| Arrivals at the site (Table 1, p.6) | Flights | LAmax | SEL |
+|---|---:|---:|---:|
+| Embraer E190 | 1,009 | 63.0 | 72.9 |
+| Airbus A220-100 | 48 | 62.1 | 71.1 |
+| Embraer E190-E2 | 12 | 61.3 | 70.5 |
+| **A320neo, estimated here** | | **64.5** (61.1 to 67.2) | **74.1** (70.7 to 76.8) |
+| A320neo, estimated from Reagan National's −2.0 dB | | 62.7 | 72.3 |
+
+**Method (model choice):** The A320neo level is the E190's measured level plus the "EASA: E190" difference (`−0.15 dB` aircraft, `+0.9 dB` thrust), with height and air worked out over the straight-line distance to a listener 500 m to the side. At 4 km that makes height + air `+0.8 dB` LAmax and `+0.5 dB` SEL, against `+2.1` and `+1.3 dB` directly below the path. The bracketed range is the usual evidence range. These are per-flight averages, not the loudest flights, and no A320neo has been measured there.
+
+**Limits:**
+
+- The aircraft and thrust differences aren't specific to a listener beside the path.
+- The 500 m is the report's rounded figure. At 300 or 700 m the height part alone is `0.95` or `0.34 dB` LAmax, against `0.55 dB` at 500 m.
+- Doc 29 lateral attenuation isn't included. It would lower the difference by about `0.1 dB`, because the lower A320neo is seen at a shallower angle, `33°` against `38°` (`file 19`, equations 2.7.40–2.7.43, p.80).
+- Departures on RWY 09 fly over the site and are louder (E190 `74.8` LAmax, `84.5` SEL, Table 2, p.6), but the model doesn't estimate them.
 
 ## Where the evidence disagrees
 
@@ -89,7 +125,7 @@ These were extracted by script from the PDF text across all listed records (`fil
 
 The airport's E190 curve uses 737-500 data but is fitted at London City's noise monitors, while its A320neo curve is unadjusted AEDT data (`file 02`, pp.9–12). The measured difference with no thrust term is closest to it. That closeness doesn't settle which is right, since the measured figure is LAmax from another airport.
 
-The E190–A220 gap also differs by source: about `4.7 dB` measured (`65.0` vs `62.8`, and `62.0` vs `59.5 dB`, all at NMT 6), `3.0 dB` in the airport's tables and `0.6 dB` on certificates. The model doesn't treat any of these as correct by default.
+The E190–A220 gap also differs by source: about `4.7 dB` measured at Reagan National (`65.0` vs `62.8`, and `62.0` vs `59.5 dB`, all at its NMT 6), `0.5 dB` LAmax and `0.1 dB` SEL measured at London City's NMT6 (`file 21`), `3.0 dB` in the airport's tables and `0.6 dB` on certificates. The model doesn't treat any of these as correct by default.
 
 ## SEL and LAmax against distance
 
@@ -150,6 +186,7 @@ RWY 09 place names (`file 01`, Figure 8 p.22; note arrivals join from a turn nea
 | Source, vs E190-E2 | +0.6 to +1.3 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs E190-E2 91.4 EPNdB (`files 09, 10`). |
 | Source, vs E195-E2 | +0.3 to +1.0 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs E195-E2 91.7 EPNdB (`files 09, 10`). |
 | Source, vs A220 | +0.1 to +2.5 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs A220-100 91.9 EPNdB gives +0.1 to +0.8 (`files 09, 18`). High end: 62.0 vs 59.5 dB LAmax at Reagan National in Jan 2022, 19 flights each, which `file 08` calls a snapshot (Table 6, p.9). It comes from the same monitor as the E190's −2.2 dB, where the A320neo reads similarly in both periods (62.0 and 62.8 dB). |
+| Source, Monitor 6 scenarios | E190 band plus the measured gap | vs A220: −1.7 to +1.4 LAmax, −2.1 to +1.0 SEL. vs E190-E2: −0.1 to +3.0 LAmax, 0.0 to +3.1 SEL (`file 21`, Table 3). These scenarios use the E190's thrust band. Across all scenarios, the aircraft slider spans −4.0 dB to +3.5 dB. |
 | Thrust, vs E190 | −0.45 to +2.5 dB | Low end: spoiler drag cancels all E190 relief, leaving the A320's mid relief of about 0.45 dB. Middle: `+0.7 to +1.2 dB` from `file 19` NPD slopes (`+0.9 dB` default). High end: `file 12`'s AEDT example implies `1.7–3.0 dB` of E190 relief, which gives `+1.25 to +2.55 dB` net. |
 | Thrust, vs E190-E2 and E195-E2 | −0.45 to +1.4 and +1.6 dB | Low end as above. High end: the slope of the airport's proxy engine for this family, the EMB190's `CF34-10E`, scaled by each type's mass. Defaults `+0.1` and `+0.2 dB` assume an A320-like slope. |
 | Thrust, vs A220 | −0.45 to +2.7 dB | Low end as above. High end: the slope of the airport's proxy, the 737-500's `CFM56-3` (`1.07–1.17 dB` per 1,000 lbf at 1,000 ft, `file 19` Appendix I), over `2,621 lbf/engine`, minus the A320's relief. This isn't the A220's engine, so it is an outer limit under the same rule as the E2 family. The `+0.2 dB` default assumes an A320-like slope. Across all scenarios, the slider spans −1.5 dB to +3.0 dB. |
@@ -207,3 +244,4 @@ ECAC Doc 29 4th edition itself was not downloaded from ECAC; `file 19` (Commissi
 - **18:** EASA: https://www.easa.europa.eu/en/downloads/20962/en
 - **19:** legislation.gov.uk copy of Commission Directive (EU) 2015/996: https://www.legislation.gov.uk/eudr/2015/996/pdfs/eudr_20150996_adopted_en.pdf
 - **20:** NASA Technical Reports Server: https://ntrs.nasa.gov/api/citations/19820003987/downloads/19820003987.pdf
+- **21:** London City Airport: https://assets.ctfassets.net/lmkdg513arga/1dAp1OIK1za3G7I6ogmvX5/cd18f1a9a3b47a9ae987239abdb153e2/London_City_Airport__Aircraft_Noise_Survey_-_Thamesmead.pdf
