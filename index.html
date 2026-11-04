@@ -1,18 +1,107 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>London City Approach Noise Model</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" type="text/css" href="style.css">
     <script src="https://cdn.jsdelivr.net/npm/p5@2.3.4/lib/p5.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js"></script>
-    
-    
-    
-    <link rel="stylesheet" type="text/css" href="style.css">
-    <meta charset="utf-8" />
-
   </head>
   <body>
-    <main>
-    </main>
+    <header class="topbar">
+      <div class="topbar-title">
+        <h1>London City approach noise model</h1>
+        <p>Current 5.5° approach compared with the proposed 4.49° approach</p>
+      </div>
+      <div class="topbar-actions">
+        <div class="segmented" role="group" aria-label="Runway">
+          <button type="button" data-runway="27">Westerly · RWY 27</button>
+          <button type="button" data-runway="09">Easterly · RWY 09</button>
+        </div>
+        <button type="button" class="ghost" id="fullscreen-btn">Full screen</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="controls" aria-label="Model settings">
+        <section>
+          <h2>Scenario</h2>
+          <div class="scenario-grid" id="scenarios" role="group" aria-label="Scenario"></div>
+          <p class="description" id="scenario-desc"></p>
+        </section>
+
+        <section>
+          <h2>Adjustments</h2>
+          <p class="note" id="slider-note" hidden>Already included in the airport's figure. Choose another scenario to adjust these.</p>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="source-slider">Aircraft source Δ</label>
+              <output id="source-value"></output>
+            </div>
+            <input type="range" id="source-slider" step="0.1">
+            <div class="evidence" id="source-evidence">
+              <div class="band-track"><span class="band band-slate" id="band-e190"></span></div>
+              <div class="band-track"><span class="band band-aqua" id="band-e2"></span></div>
+              <ul class="band-key">
+                <li><i class="band-slate"></i>E190 −2 to +1.1</li>
+                <li><i class="band-aqua"></i>E2 +0.6 to +1.5</li>
+              </ul>
+            </div>
+            <p class="hint">Aircraft base vs baseline</p>
+          </div>
+
+          <div class="field">
+            <div class="field-head">
+              <label for="thrust-slider">Thrust Δ on the 4.49° slope</label>
+              <output id="thrust-value"></output>
+            </div>
+            <input type="range" id="thrust-slider" step="0.1">
+            <div class="evidence" id="thrust-evidence">
+              <div class="band-track"><span class="band band-slate" id="band-thrust"></span></div>
+              <ul class="band-key">
+                <li><i class="band-slate"></i>Evidence: 0 to 2.5 dB</li>
+              </ul>
+            </div>
+            <p class="hint">Shallow slope drag and spool</p>
+          </div>
+        </section>
+
+        <section>
+          <h2>Noise metric</h2>
+          <div class="segmented segmented-full" role="group" aria-label="Noise metric">
+            <button type="button" data-metric="LAmax">Peak LAmax</button>
+            <button type="button" data-metric="SEL">Exposure SEL</button>
+          </div>
+          <p class="hint" id="metric-hint"></p>
+        </section>
+
+        <section id="sources-section">
+          <h2>Where these figures come from</h2>
+          <div class="sources" id="sources"></div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <dl class="readout" aria-live="off">
+          <div><dt>From threshold</dt><dd id="r-distance"></dd></div>
+          <div><dt>5.5° altitude</dt><dd id="r-curr"></dd></div>
+          <div><dt>4.49° altitude</dt><dd id="r-prop"></dd></div>
+          <div><dt>Altitude change</dt><dd id="r-drop"></dd></div>
+          <div class="model-only"><dt>Altitude + air</dt><dd id="r-geom"></dd></div>
+          <div class="model-only"><dt>Source + thrust</dt><dd id="r-source"></dd></div>
+          <div class="readout-net">
+            <dt id="r-net-label"></dt>
+            <dd><span id="r-net"></span> <span class="chip" id="r-chip"></span></dd>
+          </div>
+        </dl>
+        <div class="chart" id="chart"></div>
+        <p class="chart-hint">Move across the charts to read any distance. Arrow keys also work when the chart is focused.</p>
+      </main>
+    </div>
+
     <script src="sketch.js"></script>
   </body>
 </html>
