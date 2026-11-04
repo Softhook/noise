@@ -376,6 +376,15 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   vertical-align: 2px;
 }
 
+.range-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: right;
+}
+
 .chip[hidden] { display: none; }
 .chip.is-louder { background: var(--louder-bg); color: var(--louder); }
 .chip.is-quieter { background: var(--quieter-bg); color: var(--quieter); }
