@@ -9,7 +9,6 @@
   --line-strong: #c9c9c3;
   --accent: #2a78d6;
   --band-slate: #71747b;
-  --band-aqua: #1baf7a;
   --louder: #b42318;
   --louder-bg: #fdecea;
   --quieter: #006300;
@@ -203,6 +202,9 @@ button:disabled { cursor: not-allowed; }
 .field.is-disabled output,
 .field.is-disabled .hint { color: var(--ink-muted); }
 
+.reset-sliders { margin-bottom: 12px; }
+.reset-sliders[hidden] { display: none; }
+
 .note {
   margin-bottom: 12px;
   padding: 8px 10px;
@@ -275,7 +277,6 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
 }
 
 .band-slate { background: var(--band-slate); }
-.band-aqua { background: var(--band-aqua); }
 
 .band-key {
   display: flex;

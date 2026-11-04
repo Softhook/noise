@@ -31,70 +31,77 @@ const MODEL_NOTE = "Distance: 6 dB per doubling (LCY Annex C p.41). SEL 10 log: 
 const SOURCE_SLIDER = { min: -4.0, max: 3.0 };
 const THRUST_SLIDER = { min: 0.0, max: 4.0 };
 // Evidence ranges shown under the sliders; sources are listed in Documents/README.md
-const SOURCE_RANGE_E190 = [-2.0, 1.1]; // Measured at Reagan National (about -2) to least favourable certificate pairing
-const SOURCE_RANGE_E2 = [0.6, 1.5];    // Certificates: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB
-const THRUST_RANGE = [0.0, 2.5];       // About 0 (LCY scheme, Heathrow trials) to about 2.5 (NASA turbojet study)
+// A320neo minus each type: certificates, and arrivals measured at Reagan National where available
+const SOURCE_RANGES = {
+  "E190":    { range: [-2.0, 0.3], text: "vs E190: −2 measured to +0.3 certificates" },
+  "E190-E2": { range: [0.6, 1.3],  text: "vs E190-E2: +0.6 to +1.3 certificates" },
+  "E195-E2": { range: [0.3, 1.0],  text: "vs E195-E2: +0.3 to +1.0 certificates" },
+  "A220":    { range: [0.1, 2.5],  text: "vs A220: +0.1 to +0.8 certificates, +2.5 measured" }
+};
+const THRUST_RANGE = [0.0, 2.5];       // 0 is a lower limit, not a finding; about 2.5 is an upper limit (NASA turbojet study)
 const THRUST_FADE_NM = 0.3;            // Noise doesn't change at a single point when thrust changes; no source
 const NOTICEABLE_DB = 3;               // LCY Consultation 5.4.11: "noticeable differences of 3dB or more"
 
 // LCY Stage 3 Consultation Document (Issue 1.1, Apr 2026), arrivals: Fig. 17 (RWY 27) and Fig. 18 (RWY 09).
-// [km from threshold, E190 at 5.5° minus A320neo at 4.49°, dB(A) SEL]. Positive means the E190 is louder.
+// Each type at 5.5° minus the A320neo at 4.49°, dB(A) SEL, at the distances in ARRIVAL_KM. Positive means the other type is louder.
 // These are net figures: the lower A320neo altitude is already included. The tables stop at 5 km.
-const LCY_E190_ARRIVALS = {
-  "27": [
-    [0.5, 2.2], [1.0, 1.7], [1.5, 1.5], [2.0, 1.3], [2.5, 1.2],
-    [3.0, 1.2], [3.5, 0.7], [4.0, 0.3], [4.5, -0.2], [5.0, -1.0]
-  ],
-  "09": [
-    [0.5, 2.2], [1.0, 1.7], [1.5, 1.5], [2.0, 1.3], [2.5, 1.3],
-    [3.0, 1.2], [3.5, 0.7], [4.0, 0.3], [4.5, -0.2], [5.0, -0.9]
-  ]
+const ARRIVAL_KM = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0];
+const LCY_ARRIVALS = {
+  "27": {
+    "E190":    [2.2, 1.7, 1.5, 1.3, 1.2, 1.2, 0.7, 0.3, -0.2, -1.0],
+    "E190-E2": [-1.5, -1.5, -1.5, -1.4, -1.4, -1.3, -1.2, -1.3, -1.3, -1.9],
+    "E195-E2": [-0.8, -1.4, -1.3, -1.1, -1.0, -0.8, -0.9, -0.9, -0.9, -0.9],
+    "A220":    [-0.8, -1.3, -1.5, -1.7, -1.8, -1.8, -2.3, -2.7, -3.2, -4.0]
+  },
+  "09": {
+    "E190":    [2.2, 1.7, 1.5, 1.3, 1.3, 1.2, 0.7, 0.3, -0.2, -0.9],
+    "E190-E2": [-1.5, -1.5, -1.5, -1.4, -1.3, -1.2, -1.3, -1.3, -1.3, -1.8],
+    "E195-E2": [-0.8, -1.4, -1.3, -1.1, -0.9, -0.8, -0.9, -0.9, -0.9, -0.9],
+    "A220":    [-0.8, -1.3, -1.5, -1.7, -1.7, -1.8, -2.3, -2.7, -3.2, -3.9]
+  }
 };
 const KM_PER_NM = 1.852;
 
-const PRESETS = [
-  {
-    name: "Height only",
-    desc: "Only the lower height and the air: 20 log (LAmax) or 10 log (SEL), plus 0.6 dB per 1,000 ft. Treats the A320neo and E190 as equally loud at the same height.",
-    sourceDelta: 0.0,
-    thrustDelta: 0.0,
-    sources: () => [
-      `Same thrust, speed and flaps on both approaches. Altitudes: LCY Consultation ${altitudeFigure()} (${activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft"}).`,
-      `${MODEL_NOTE} ${listenerNote()}`
-    ]
-  },
-  {
-    name: "Airport figures",
-    desc: "LCY consultation Figs. 17–18: A320neo at 4.49° vs E190 at 5.5° (SEL, net, modelled). Dashed: no airport figures, estimate only.",
-    sourceDelta: 0.0, // Not used: the airport publishes one net figure, which already includes source and thrust
-    thrustDelta: 0.0,
+// The airport's own comparison of the A320neo with one other type
+function airportPreset(aircraft, basis) {
+  return {
+    name: `Airport: ${aircraft}`,
+    baseline: aircraft,
     usesAirportTable: true,
+    desc: () => `LCY consultation Figs. 17–18: A320neo at 4.49° vs ${aircraft} at 5.5° (SEL, net, modelled). Dashed: no airport figures, estimate only.`,
     sources: () => [
-      "AEDT 3g model, not measured. E190: 737-500 data +1.5 dB (LCY Annex C p.10). A320neo: unadjusted AEDT data on LCY profile at 4.49° (pp.8, 12).",
+      `AEDT 3g model, not measured. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (pp.8, 12).`,
       "Thrust: estimated within flight profiles, no value published (p.7). Flap, gear, engine variant, weight, weather: none stated. Data: Consultation pp.30–31."
     ]
-  },
-  {
-    name: "EASA + thrust",
-    desc: "Approach certificates (EASA TCDSN): −0.6 dB against the E190 for a 66 t A320neo, plus an assumed +1.2 dB thrust penalty.",
-    sourceDelta: -0.6,
-    thrustDelta: 1.2,
+  };
+}
+
+// Approach certificates against one other type, by the same method for every type: the A320neo at its lowest
+// listed landing mass, 66.3 t (92.0–92.7 across both engines, midpoint 92.35 EPNdB), minus the other type's
+// certified level, plus the same assumed thrust penalty. Records are in Documents/README.md.
+const EASA_THRUST_DB = 1.2; // Assumed: about the middle of the 0 to 2.5 dB evidence range
+function easaPreset(aircraft, certificate, landingMass, sourceDelta, note = "") {
+  return {
+    name: `EASA: ${aircraft}`,
+    baseline: aircraft,
+    desc: () => `Approach certificates (EASA): A320neo at 66.3 t 92.0–92.7 (midpoint 92.35) vs ${certificate} EPNdB gives ${signed(sourceDelta, 2)} dB, plus an assumed ${signed(EASA_THRUST_DB, 1)} dB thrust penalty. Landing masses differ: A320neo 66.3 t, ${aircraft} ${landingMass}.${slidersChanged() ? ` Sliders changed: aircraft ${signed(Number(sourceSlider.value), 2)} dB, thrust ${signed(Number(thrustSlider.value), 1)} dB.` : ""}`,
+    sourceDelta,
     sources: () => [
-      `Altitudes: LCY Consultation ${altitudeFigure()}. ${MODEL_NOTE} ${listenerNote()}`,
-      "Source −0.6 dB: in EASA range (−0.8 to +1.1), pair not traced. Thrust +1.2 dB: assumed; evidence spans ~0 (LCY ANCS, Heathrow) to 2.5 dB (NASA 1968)."
+      modelSource(),
+      `Certificates are in EPNdB, at standard test conditions and certified landing masses, not London City's approach or typical weights, so part of the difference may reflect the heavier A320neo. Thrust ${signed(EASA_THRUST_DB, 1)} dB: assumed. A shallower descent needs more thrust, so 0 is a lower limit, not a finding. The Heathrow trials can't separate thrust from scatter (scaled, very roughly 0–2 dB); NASA 1968, a turbojet, gives about 2–2.5 dB as an upper limit. ${note}`.trim()
     ]
-  },
-  {
-    name: "vs E190-E2",
-    baseline: "E190-E2",
-    desc: "A different baseline: A320neo 91.8 (est.) vs E190-E2 91.4 EPNdB approach: +0.4 dB, plus an assumed +1.0 dB thrust penalty.",
-    sourceDelta: 0.4,
-    thrustDelta: 1.0,
-    sources: () => [
-      `Altitudes: LCY Consultation ${altitudeFigure()}. ${MODEL_NOTE} ${listenerNote()}`,
-      "91.8 EPNdB is an estimate with no source, and is below every A320neo level on the EASA sheet (92.0–92.9). Thrust +1.0 dB: assumed."
-    ]
-  }
+  };
+}
+
+const PRESETS = [
+  airportPreset("E190", "E190: 737-500 data +1.5 dB (LCY Annex C p.10)."),
+  easaPreset("E190", "E190 92.5", "43 t", -0.15, "E190 92.5: the most common record and the airport's own example (noise scheme p.33). Its 91.8 records need a Flap 06 inhibitor, so they aren't used. Measured on arrival at Reagan National: about −2 dB LAmax (AEF report, Table 5, p.8)."),
+  airportPreset("E190-E2", "E190-E2: EMB190 data −0.9 dB (LCY Annex C p.10)."),
+  easaPreset("E190-E2", "E190-E2 91.4", "49.05 t", 0.95),
+  airportPreset("E195-E2", "E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). The largest type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
+  easaPreset("E195-E2", "E195-E2 91.7", "54.0 t", 0.65, "The largest type in the airport's 2038 forecast without the change (Consultation Fig. 3)."),
+  airportPreset("A220", "A220-100: 737-500 data −1.5 dB (LCY Annex C p.10). Its table differs from the E190's by exactly 3.0 dB because both use that data."),
+  easaPreset("A220", "A220-100 91.9", "54.7 t", 0.45, "Measured on arrival at Reagan National: +2.5 dB LAmax, 19 arrivals each (AEF report, Table 6, p.9).")
 ];
 
 const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -119,10 +126,11 @@ const COLORS = {
   component: "#71747b"
 };
 
-let activePreset = 1;    // The airport's own comparison of the E190 and the A320neo
+let activePreset = 1;    // EASA: E190, today's most common aircraft, in LAmax
 let baselineAircraft = "E190"; // The aircraft on the 5.5° approach
 let sourceSlider, thrustSlider;
-let metricMode = "LAmax"; // "LAmax" (20log) or "SEL" (10log)
+const adjustedSource = {}; // Aircraft Δ the viewer has set, by aircraft. Thrust is one setting across all scenarios.
+let metricMode = "LAmax"; // "LAmax" (20 log), the metric this model is mainly for, or "SEL" (10 log). The airport's tables are SEL only.
 let probeNM = 2.0;        // Default highlight at 2.0 nm
 let activeRunway = "27";
 
@@ -142,18 +150,36 @@ function listenerNote() {
   return `Listener directly below the path, flat ground. Place names are approximate.${turn}`;
 }
 
+function modelSource() {
+  const correction = activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft";
+  return `Altitudes: LCY Consultation ${altitudeFigure()} (${correction}). ${MODEL_NOTE} ${listenerNote()}`;
+}
+
+// The sliders at 0 show height and air alone
+function customSources() {
+  return [
+    modelSource(),
+    "With both sliders at 0, this is height and air alone. If other types flew 4.49°, the airport estimates under 2 dB from height (LCY Annex C p.41); the Stage 4 draft rule limits it to authorised A320neo operators."
+  ];
+}
+
 function altitudeFigure() {
   return activeRunway === "27" ? "Fig. 9, p.23" : "Fig. 8, p.22";
 }
 
 function usingAirportTable() {
-  return activePreset >= 0 && PRESETS[activePreset].usesAirportTable === true;
+  return PRESETS[activePreset].usesAirportTable === true;
 }
 
-// The airport's predicted A320neo minus E190 difference at nm, or null outside its 0.5–5 km table
+// [km, other type minus A320neo] for the type being compared
+function airportTable() {
+  return ARRIVAL_KM.map((km, i) => [km, LCY_ARRIVALS[activeRunway][baselineAircraft][i]]);
+}
+
+// The airport's predicted A320neo minus other type difference at nm, or null outside its 0.5–5 km table
 function airportPrediction(nm) {
-  const km = nm * KM_PER_NM;
-  const table = LCY_E190_ARRIVALS[activeRunway];
+  const km = Math.round(nm * KM_PER_NM * 100) / 100; // So 2.7 nm counts as the table's 5.0 km
+  const table = airportTable();
   for (let i = 0; i < table.length - 1; i++) {
     if (km >= table[i][0] && km <= table[i + 1][0]) {
       const t = (km - table[i][0]) / (table[i + 1][0] - table[i][0]);
@@ -171,7 +197,7 @@ function selGeometryDB(nm) {
 
 // Not an airport figure: outside its table, continue from the nearest published value using altitude change only
 function airportExtrapolation(nm) {
-  const table = LCY_E190_ARRIVALS[activeRunway];
+  const table = airportTable();
   const last = table[table.length - 1];
   const edge = nm * KM_PER_NM < (table[0][0] + last[0]) / 2 ? table[0] : last; // Nearest end of the table
   return -edge[1] + selGeometryDB(nm) - selGeometryDB(edge[0] / KM_PER_NM);
@@ -179,7 +205,7 @@ function airportExtrapolation(nm) {
 
 // Interpolate altitudes at any distance x (in nm)
 function getAltitudes(nm) {
-  nm = constrain(nm, 0.1, 6.5);
+  nm = constrain(nm, 0, 6.5);
   const points = waypoints();
 
   for (let i = 0; i < points.length - 1; i++) {
@@ -253,13 +279,20 @@ function setup() {
 
   for (const slider of [sourceSlider, thrustSlider]) {
     slider.addEventListener("input", () => {
-      activePreset = -1;
+      if (slider === sourceSlider) adjustedSource[baselineAircraft] = Number(slider.value);
       refresh();
     });
   }
 
-  placeBand(byId("band-e190"), SOURCE_RANGE_E190, SOURCE_SLIDER);
-  placeBand(byId("band-e2"), SOURCE_RANGE_E2, SOURCE_SLIDER);
+  thrustSlider.value = EASA_THRUST_DB;
+
+  byId("reset-sliders").addEventListener("click", () => {
+    delete adjustedSource[baselineAircraft];
+    sourceSlider.value = PRESETS[activePreset].sourceDelta;
+    thrustSlider.value = EASA_THRUST_DB;
+    refresh();
+  });
+
   placeBand(byId("band-thrust"), THRUST_RANGE, THRUST_SLIDER);
 
   PRESETS.forEach((preset, i) => {
@@ -316,9 +349,16 @@ function placeBand(element, range, slider) {
 function applyPreset(idx) {
   activePreset = idx;
   baselineAircraft = PRESETS[idx].baseline || "E190";
-  sourceSlider.value = PRESETS[idx].sourceDelta;
-  thrustSlider.value = PRESETS[idx].thrustDelta;
+  // The airport's single net figure ignores the sliders, so they keep their values for the next scenario
+  if (!PRESETS[idx].usesAirportTable) {
+    sourceSlider.value = adjustedSource[baselineAircraft] ?? PRESETS[idx].sourceDelta;
+  }
   refresh();
+}
+
+// Whether the sliders differ from the current EASA scenario's own values
+function slidersChanged() {
+  return Number(sourceSlider.value) !== PRESETS[activePreset].sourceDelta || Number(thrustSlider.value) !== EASA_THRUST_DB;
 }
 
 function refresh() {
@@ -332,7 +372,7 @@ function setPressed(button, pressed) {
 
 function syncControls() {
   const airport = usingAirportTable();
-  const preset = activePreset >= 0 ? PRESETS[activePreset] : null;
+  const preset = PRESETS[activePreset];
 
   [...byId("scenarios").children].forEach((button, i) => setPressed(button, i === activePreset));
   document.querySelectorAll("[data-runway]").forEach(button => {
@@ -343,7 +383,8 @@ function syncControls() {
     button.disabled = airport;
   });
 
-  byId("scenario-desc").textContent = preset ? preset.desc : "Custom values set with the sliders below.";
+  byId("scenario-desc").textContent = preset.desc();
+  byId("reset-sliders").hidden = airport || !slidersChanged();
   byId("metric-hint").textContent = airport
     ? "The airport publishes SEL only."
     : (metricMode === "LAmax" ? "Loudest moment of the flyover (20 log)." : "Total sound energy of the flyover (10 log).");
@@ -356,13 +397,18 @@ function syncControls() {
     slider.disabled = airport;
     slider.closest(".field").classList.toggle("is-disabled", airport);
   }
-  byId("source-value").textContent = airport ? "In LCY figure" : `${signed(Number(sourceSlider.value), 1)} dB`;
+  byId("source-value").textContent = airport ? "In LCY figure" : `${signed(Number(sourceSlider.value), 2)} dB`;
   byId("thrust-value").textContent = airport ? "In LCY figure" : `${signed(Number(thrustSlider.value), 1)} dB`;
 
+  byId("subtitle").textContent = baselineAircraft === "E190"
+    ? "Today's most common aircraft, the E190 at 5.5°, compared with the A320neo, new to the airport, at the proposed 4.49°"
+    : `The ${baselineAircraft} at 5.5° compared with the A320neo, new to the airport, at the proposed 4.49°`;
+  placeBand(byId("band-source"), SOURCE_RANGES[baselineAircraft].range, SOURCE_SLIDER);
+  byId("source-evidence-text").textContent = SOURCE_RANGES[baselineAircraft].text;
   byId("r-curr-label").textContent = `${baselineAircraft} altitude (5.5°)`;
   byId("source-label").textContent = `Aircraft Δ: A320neo minus ${baselineAircraft}`;
 
-  byId("sources").replaceChildren(...(preset || PRESETS[0]).sources().map(line => {
+  byId("sources").replaceChildren(...(airport || hasAdjustments() ? preset.sources() : customSources()).map(line => {
     const paragraph = document.createElement("p");
     paragraph.textContent = line;
     return paragraph;
@@ -553,7 +599,7 @@ function drawFlightProfile(area) {
     ? "Flight profile: RWY 27, approach from the east"
     : "Flight profile: RWY 09, approach from the west", area.profileHead);
   drawLegend([
-    { label: `Today: ${baselineAircraft} at 5.5° (${area.compact ? "descent from" : `${levelFt} ft top of descent at`} ${currTOD.nm} nm)`, color: COLORS.current },
+    { label: `${baselineAircraft === "E190" ? "Today: " : ""}${baselineAircraft} at 5.5° (${area.compact ? "descent from" : `${levelFt} ft top of descent at`} ${currTOD.nm} nm)`, color: COLORS.current },
     { label: `New: A320neo at 4.49° (${area.compact ? "descent from" : `${levelFt} ft top of descent at`} ${propTOD.nm} nm)`, color: COLORS.proposed }
   ], area, area.profileHead + 32);
 
@@ -759,7 +805,7 @@ function hasAdjustments() {
 
 function drawAirportCurve(area) {
   const { L, R } = area;
-  const table = LCY_E190_ARRIVALS[activeRunway];
+  const table = airportTable();
   const firstNM = table[0][0] / KM_PER_NM;
   const lastNM = table[table.length - 1][0] / KM_PER_NM;
 
@@ -782,8 +828,8 @@ function drawAirportCurve(area) {
   // Solid: the airport's published figures
   strokeWeight(2.5);
   beginShape();
-  for (const [km, e190Louder] of table) {
-    vertex(distanceToX(km / KM_PER_NM, L, R), dbToY(-e190Louder, area));
+  for (const [km, otherLouder] of table) {
+    vertex(distanceToX(km / KM_PER_NM, L, R), dbToY(-otherLouder, area));
   }
   endShape();
   strokeWeight(1);

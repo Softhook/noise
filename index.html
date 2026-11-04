@@ -13,7 +13,7 @@
     <header class="topbar">
       <div class="topbar-title">
         <h1>London City approach noise model</h1>
-        <p>Today's most common aircraft, the E190 at 5.5°, compared with the A320neo, new to the airport, at the proposed 4.49°</p>
+        <p id="subtitle"></p>
       </div>
       <div class="topbar-actions">
         <div class="segmented" role="group" aria-label="Runway">
@@ -34,6 +34,7 @@
 
         <section>
           <h2>Adjustments</h2>
+          <button type="button" class="ghost reset-sliders" id="reset-sliders" hidden>Reset to scenario values</button>
           <p class="note" id="slider-note" hidden>Already included in the airport's figure. Choose another scenario to adjust these.</p>
 
           <div class="field">
@@ -41,13 +42,11 @@
               <label for="source-slider" id="source-label"></label>
               <output id="source-value"></output>
             </div>
-            <input type="range" id="source-slider" step="0.1">
+            <input type="range" id="source-slider" step="0.05">
             <div class="evidence" id="source-evidence">
-              <div class="band-track"><span class="band band-slate" id="band-e190"></span></div>
-              <div class="band-track"><span class="band band-aqua" id="band-e2"></span></div>
+              <div class="band-track"><span class="band band-slate" id="band-source"></span></div>
               <ul class="band-key">
-                <li><i class="band-slate"></i>vs E190 −2 to +1.1</li>
-                <li><i class="band-aqua"></i>vs E190-E2 +0.6 to +1.5</li>
+                <li><i class="band-slate"></i><span id="source-evidence-text"></span></li>
               </ul>
             </div>
             <p class="hint">How much louder the A320neo is at the same height and thrust</p>
@@ -62,7 +61,7 @@
             <div class="evidence" id="thrust-evidence">
               <div class="band-track"><span class="band band-slate" id="band-thrust"></span></div>
               <ul class="band-key">
-                <li><i class="band-slate"></i>Evidence: 0 to 2.5 dB</li>
+                <li><i class="band-slate"></i>0 (lower limit) to 2.5 dB (upper limit)</li>
               </ul>
             </div>
             <p class="hint">Extra thrust on the shallower descent, while both aircraft are descending</p>

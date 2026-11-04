@@ -6,7 +6,7 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 
 | File | What was taken from it | Where |
 |---|---|---|
-| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival table: A320neo at 4.49° vs other types at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the "Airport figures" scenario. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
+| `01_LCY_Stage3_Consultation_Document_Issue1.1.pdf` | The airport's arrival table: A320neo at 4.49° vs other types at 5.5°, dB(A) SEL, 0.5–5 km. This is the data behind the four "Airport" scenarios. | RWY 27 Figure 17, p.30; RWY 09 Figure 18 and the "not noticeable" statement, p.31 |
 | `02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf` | E190 and A220-100 arrivals modelled with AEDT 737-500 data (+1.5 and −1.5 dB) | Table 4, p.10 |
 | | A320neo noise based on AEDT data | p.12 |
 | | "Quieter per arrival at most locations"; "slightly louder" than other new-generation types | p.19 |
@@ -18,6 +18,7 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | `09_EASA_TCDSN_A.064.3_A320_Issue42.pdf` | A320neo certified approach levels | A320-251N from p.175; A320-271N from p.226 |
 | `10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf` | E190 certified approach levels; E190-E2 (ERJ 190-300) and E195-E2 (ERJ 190-400) | ERJ 190-100 STD from p.78; ERJ 190-300 from p.190 |
 | `11_EASA_TCDSN_A.064_Cover_Issue93.pdf` | Confirms A320 models are in Volume 3 | p.2 |
+| `18_EASA_TCDSN_IM.A.570_BD500_A220_Issue14.pdf` | A220-100 certified approach level | BD-500-1A10 records, pp.3–5 |
 
 ## Certified approach levels extracted from the EASA sheets
 
@@ -29,11 +30,16 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | A320neo, PW1100G (A320-271N/272N/273N) | 66,300 kg | 92.0–92.3 |
 | | 67,400 kg | 92.2–92.4 |
 | | 68,400 kg | 92.3–92.6 |
-| E190 (ERJ 190-100 STD, LR, SR, IGW) | 43,000–44,000 kg | 91.8–92.8 |
+| E190 (ERJ 190-100 STD, LR, SR): Block 2, improved chevron nozzle | 43,000 kg | 92.5 (used in the model) |
+| E190: Block 2, improved chevron nozzle and Flap 06 inhibitor | 43,000 kg | 91.8 (not used) |
+| E190: improved chevron nozzle, not listed as Block 2 | 43,000 kg | 92.4 |
+| E190: low-loss chevron nozzle | 43,000 kg | 92.7 |
+| E190 IGW: low-loss chevron nozzle | 43,000–44,000 kg | 92.8 |
 | E190-E2 (ERJ 190-300) | 49,050 kg | 91.4 |
 | E195-E2 (ERJ 190-400) | 54,000 kg | 91.7 |
+| A220-100 (BD-500-1A10; PW1519G, PW1521G, PW1524G) | 54,658 kg | 91.9 |
 
-These were extracted by script from the PDF text and are ranges across all listed records. Certification figures are in EPNdB and come from standard certification test conditions, not London City's approach angles.
+These were extracted by script from the PDF text and are ranges across all listed records. The airport's example E190 (flyover 81.9, sideline 91.7, approach 92.5 EPNdB; file 12, p.33) matches EASA records A19104, A19555, A19112 and A19556. The sources don't say which E190 modifications or which A320neo engine would be used at London City. Certification figures are in EPNdB and come from standard certification test conditions, not London City's approach angles.
 
 ## Searched, with no figure used
 
@@ -47,12 +53,11 @@ These were extracted by script from the PDF text and are ranges across all liste
 
 | Value | Used in | Status |
 |---|---|---|
-| +1.2 dB thrust/config | "EASA + thrust" scenario | No document here gives this figure; see "Evidence on the thrust effect" |
-| +1.0 dB thrust/config | "vs E190-E2" scenario | No document here gives this figure; see "Evidence on the thrust effect" |
+| +1.2 dB thrust/config | All four "EASA" scenarios | Assumed, about the middle of the 0 to 2.5 dB range; no document here gives this figure. See "Evidence on the thrust effect" |
 | 0.6 dB per 1,000 ft atmospheric absorption | All model curves | No document here gives this figure |
 | 10 log for SEL | All model curves in SEL | A rule of thumb with no document behind it |
 | Thrust term fades to zero over 0.3 nm around the 5.5° top of descent | Thrust slider | Spread over a distance because noise doesn't change at a single point. No thrust difference is modelled beyond that point, although the E190 is level there and the A320neo still descending. |
-| 91.8 EPNdB A320neo | "vs E190-E2" scenario | Marked "est." in the model; below every A320neo level on the EASA sheet |
+| Certificate comparison | All four "EASA" scenarios | The A320neo at its lowest listed landing mass, 66.3 t (92.0–92.7 across both engines, midpoint 92.35), minus the other type: E190 92.5 gives −0.15, E190-E2 +0.95, E195-E2 +0.65, A220 +0.45. Choosing 66.3 t assumes London City landings are nearer the lowest listed mass; no document gives typical weights. The midpoint is a simple choice for an unknown engine, not a sourced method. These replace an earlier midpoint method (92.45, with E190 92.3), which mixed landing masses and included the Flap 06 inhibitor records. |
 
 ## Altitude waypoints
 
@@ -87,9 +92,11 @@ The model uses 4.49° on both runways. Stage 2 also gives about 340 ft lower tha
 
 | Band | Range | Basis |
 |---|---:|---|
-| Source, vs E190 | −2.0 to +1.1 dB | Low end: about −2 dB LAmax measured on arrival at Reagan National (file 08, Table 5, p.8). High end: least favourable certificate pairing, A320neo 92.9 vs E190-100 91.8 EPNdB (files 09, 10). |
-| Source, vs E190-E2 | +0.6 to +1.5 dB | Certificates: A320neo 92.0–92.9 vs E190-E2 91.4 EPNdB (files 09, 10). |
-| Thrust | 0 to 2.5 dB | See "Evidence on the thrust effect" below. |
+| Source, vs E190 | −2.0 to +0.3 dB | Low end: about −2 dB LAmax measured on arrival at Reagan National (file 08, Table 5, p.8). High end: least favourable certificate pairing at 66.3 t, A320neo 92.7 vs E190 92.4 EPNdB, leaving out the Flap 06 inhibitor records (files 09, 10). |
+| Source, vs E190-E2 | +0.6 to +1.3 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs E190-E2 91.4 EPNdB (files 09, 10). |
+| Source, vs E195-E2 | +0.3 to +1.0 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs E195-E2 91.7 EPNdB (files 09, 10). |
+| Source, vs A220 | +0.1 to +2.5 dB | Certificates: A320neo at 66.3 t, 92.0–92.7, vs A220-100 91.9 EPNdB gives +0.1 to +0.8 (files 09, 18). High end: 62.0 vs 59.5 dB LAmax on arrival at Reagan National, 19 flights each (file 08, Table 6, p.9). |
+| Thrust | 0 to 2.5 dB | 0 is a lower limit, not a finding, because a shallower descent needs more thrust unless drag or speed also changes. About 2.5 is an upper limit from a turbojet study. See "Evidence on the thrust effect" below. |
 
 The source bands combine different metrics and conditions, so they show a plausible range and not a statistical confidence interval.
 
@@ -99,9 +106,9 @@ None of these documents gives a thrust penalty for 5.5° to 4.49°. The London C
 
 | File | What it gives | What it implies for 5.5° to 4.49° |
 |---|---|---|
-| `12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf` | AEDT example for the E190: 93.3 EPNdB at 3°, 87.9 EPNdB at 5.5°, a 5.4 EPNdB difference, at the 2 km certification point. The scheme says this method correlates well with turbofan measurements (p.11; example p.33; certification point p.6). | Height alone at 6 dB per doubling gives 5.3 dB (121 m vs 221 m), leaving about 0.1 dB over 2.5°. It is unclear whether AEDT changed thrust between the two runs. |
-| `13_Heathrow_3.2deg_SSA_Trial_Report_2016.pdf` | Measured 3.2° vs 3.0°, many A320-family flights: average about −0.5 dBA SEL, against about −0.7 dB expected from distance and air absorption alone (pp.55–56). | No clear extra thrust benefit, but the change is only 0.2° and the event-to-event variability is 1.0–1.7 dB. |
-| `14_Heathrow_3.2deg_SSA_Trial_Report_2018.pdf` | Second trial: average also about −0.5 dBA SEL (p.5). | As above. |
+| `12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf` | AEDT example for the E190: 93.3 EPNdB at 3°, 87.9 EPNdB at 5.5°, a 5.4 EPNdB difference, at the 2 km certification point. The scheme says this method correlates well with turbofan measurements (p.11; example p.33; certification point p.6). | Height alone at 6 dB per doubling gives 4.8 dB (120 m vs 208 m, the same threshold height on a 5.5° path), leaving about 0.6 dB over 2.5°, or about 0.25 dB when scaled by thrust to 5.5° vs 4.49°. It is unclear whether AEDT changed thrust between the two runs. |
+| `13_Heathrow_3.2deg_SSA_Trial_Report_2016.pdf` | Measured 3.2° vs 3.0° across nine aircraft types at three monitors: average about −0.5 dBA SEL. The aircraft averaged 3.14° because of low temperatures. The −0.7 dB the report expects assumes a true 3.2° (pp.55–56). It names thrust and flap settings only as uncontrolled variation, allows 0.4 dB for instrument error, and has event variability of 1.0–1.7 dB. | Doesn't isolate thrust and can't show that it is zero. Reduction beyond height and air, scaled by sin 5.5° − sin 4.49° against the angle change: about +1.2 to +1.8 dB (14.4 log and 10 log). The instrument allowance alone scales to about ±3 dB, and the conditions differ from London City's. |
+| `14_Heathrow_3.2deg_SSA_Trial_Report_2018.pdf` | Second trial: average angle about 3.24° and also about −0.5 dBA SEL (pp.5, 54). Monitor averages: −0.32, −0.55, −0.68 dBA, against −0.25, −0.49, −0.74 in the first trial. | Calculated the same way: about 0 to +0.5 dB, ±1.7 dB from the instrument allowance alone. The result barely changed although the angle change was 70% larger, so scatter dominates at this scale. |
 | `15_NASA_Effect_of_Thrust_and_Altitude_in_Steep_Approaches.pdf` | Four-engine turbojet, 1960s: about 7.5 dB from thrust between 3° and 6°; 19.4 dB per 100,000 N (p.6; aircraft p.4). | About 2.0–2.5 dB. Likely an upper bound, as turbojets are dominated by engine noise. |
 
 Calculation: the extra thrust needed is sin 5.5° − sin 4.49° = 0.0176 of aircraft weight, about 10 kN in total at 60 tonnes. This ignores any change in speed, flap or spoiler setting.
@@ -129,7 +136,7 @@ A text search of files 01–04 found no mention of flap, landing gear, spoiler, 
 
 ## Not saved
 
-The UK CAA noise sheet cited for the "vs E190-E2" scenario was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
+The UK CAA noise sheet cited for the "EASA: E190-E2" scenario was not obtained; the same 91.4 EPNdB appears on the EASA sheet above.
 
 ## Where each file came from
 
@@ -141,4 +148,5 @@ The UK CAA noise sheet cited for the "vs E190-E2" scenario was not obtained; the
 - **12:** London City Airport noise categorisation scheme: https://gat04-live-1517c8a4486c41609369c68f30c8-aa81074.divio-media.org/filer_public/67/94/6794b25f-cf1c-486a-b4cc-865ad2377c38/approved_cadp1_condition_18_2022_ancs_update_.pdf
 - **13–14:** Heathrow Airport: https://www.heathrow.com/content/dam/heathrow/web/common/documents/company/local-community/noise/reports-and-statistics/reports/operational-trial-reports/slightly-steeper-approach-trial/
 - **15:** NASA Technical Reports Server: https://ntrs.nasa.gov/api/citations/19680001785/downloads/19680001785.pdf
+- **18:** EASA: https://www.easa.europa.eu/en/downloads/20962/en
 - **16–17:** CAA airspace change portal, ACP-2025-003: https://airspacechange.caa.co.uk/PublicProposalArea?pID=695
