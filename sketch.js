@@ -140,12 +140,14 @@ const MIN_MODEL_NM = ARRIVAL_KM[0] / KM_PER_NM;                     // 0.50 km (
 const MAX_AIRPORT_NM = ARRIVAL_KM[ARRIVAL_KM.length - 1] / KM_PER_NM; // 5.00 km (2.70 nm), end of LCY's arrival table
 
 // The airport's own comparison of the A320neo with one other type
-function airportPreset(aircraft, basis) {
+function airportPreset(aircraft, basis, howBuilt = `The ${aircraft} is adjusted to fit London City's noise monitors`) {
   return {
     name: `Airport: ${aircraft}`,
+    kind: "Modelled",
+    tip: `The airport's own computer model (AEDT), not a measurement. ${howBuilt}; the A320neo, which can't yet land there, isn't adjusted to any measurement. SEL only, 0.5–5 km.`,
     baseline: aircraft,
     usesAirportTable: true,
-    desc: () => `LCY consultation Figs. 17–18, pp.30–31: **A320neo at 4.49° vs ${aircraft} at 5.5°** (SEL, net, **modelled**, published 0.5–5 km only).`,
+    desc: () => `**Modelled by the airport, not measured.** Its computer model's figure for the A320neo at 4.49° vs the ${aircraft} at 5.5°, including height, aircraft and thrust. SEL only, published from 0.5 to 5 km (LCY consultation Figs. 17–18, pp.30–31).`,
     sources: () => [
       `**Airport model.** AEDT 3g model, **not measured**. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (Annex C pp.8, 12).`,
       "**Published range.** From **0.5 to 5.0 km** (0.27–2.70 nm) only (Consultation pp.30–31).",
@@ -155,12 +157,15 @@ function airportPreset(aircraft, basis) {
   };
 }
 
-// Shared wording for the two model scenario types. The text ends with a verb, such as "gives".
-function modelDesc(aircraft, text, sourceDelta, thrustDelta, note = "") {
+// What every scenario other than the airport's adds to its aircraft difference
+const MODELLED_ON_TOP = "Height and air are then modelled, and thrust is estimated.";
+
+// Shared wording for the two model scenario types. The text ends just before the aircraft difference.
+function modelDesc(aircraft, kind, text, sourceDelta, thrustDelta, note = "") {
   if (!hasAdjustments()) {
     return `**Both sliders set to 0 dB:** showing height and atmospheric absorption alone on the 4.49° vs 5.5° paths (reset sliders to restore the ${aircraft} scenario values).`;
   }
-  return `${text} **${signed(sourceDelta, 2)} dB**, plus an estimated **${signed(thrustDelta, 1)} dB** thrust difference.${note}${slidersChangedNote()}`;
+  return `**${kind}.** ${text} **${signed(sourceDelta, 2)} dB**. An estimated **${signed(thrustDelta, 1)} dB** thrust difference is added.${note}${slidersChangedNote()}`;
 }
 
 function slidersChangedNote() {
@@ -190,8 +195,10 @@ const CERTIFICATE_SOURCES = {
 function easaPreset(aircraft, certificate, landingMass, sourceDelta, thrustDelta, slopeBasis, note = "") {
   return {
     name: `EASA: ${aircraft}`,
+    kind: "Certificates",
+    tip: `Compares the official noise certificates of the A320neo and the ${aircraft}: test flights on a 3° approach at certified weights, in EPNdB, not flights at London City. ${MODELLED_ON_TOP}`,
     baseline: aircraft,
-    desc: () => modelDesc(aircraft, `Approach certificates (EASA, 3°): A320neo 92.0–92.7 (midpoint 92.35) at 66.3 t vs ${certificate} EPNdB at ${landingMass} gives`, sourceDelta, thrustDelta),
+    desc: () => modelDesc(aircraft, "Certificates", `From EASA noise certificates, on a 3° test approach: A320neo 92.0–92.7 EPNdB (midpoint 92.35) at 66.3 t vs ${certificate} EPNdB at ${landingMass}. That makes the aircraft difference`, sourceDelta, thrustDelta),
     sourceDelta,
     thrustDelta,
     sources: () => [
@@ -205,12 +212,14 @@ function easaPreset(aircraft, certificate, landingMass, sourceDelta, thrustDelta
 }
 
 // Arrivals measured at Reagan National on typical approach angles, in place of the certificate difference
-function measuredPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, note, descNote = "") {
+function measuredPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, note, descNote = "", tipNote = "") {
   return {
     name: `Measured: ${aircraft}`,
+    kind: "Measured at Reagan National, US",
+    tip: `Real arrivals of both the A320neo and the ${aircraft}, measured at a US airport on typical approach angles, not at London City.${tipNote} The LAmax difference is used for SEL too. ${MODELLED_ON_TOP}`,
     wide: true,
     baseline: aircraft,
-    desc: () => modelDesc(aircraft, `Arrivals measured at Reagan National (AEF report, p.${aircraft === "A220" ? 9 : 8}): A320neo minus ${aircraft} in LAmax is`, sourceDelta, thrustDelta, descNote),
+    desc: () => modelDesc(aircraft, "Measured at Reagan National, US", `Real arrivals of both aircraft (AEF report, p.${aircraft === "A220" ? 9 : 8}): A320neo minus ${aircraft} in LAmax is`, sourceDelta, thrustDelta, descNote),
     sourceDelta,
     thrustDelta,
     sources: () => [
@@ -238,6 +247,8 @@ function monitor6Preset(aircraft) {
   };
   const preset = {
     name: `Monitor 6: ${aircraft}`,
+    kind: "Measured at London City + certificates",
+    tip: `Two steps. The E190 vs ${aircraft} gap is measured at London City's monitor 6, with both on the 5.5° approach (${flights} ${aircraft} arrivals). No A320neo has been measured there, so A320neo vs E190 comes from certificates. Height and air are then modelled, and the E190's thrust is estimated.`,
     wide: true,
     baseline: aircraft,
     monitor6: true,
@@ -246,13 +257,13 @@ function monitor6Preset(aircraft) {
       return Number((E190_CERTIFICATE_DELTA + monitor6Gap(aircraft)).toFixed(2));
     },
     desc: () => {
-      if (!hasAdjustments()) return modelDesc(aircraft, "", 0, 0);
+      if (!hasAdjustments()) return modelDesc(aircraft, "", "", 0, 0);
       const gap = monitor6Gap(aircraft).toFixed(1);
       const results = insideFirstAssessmentPoint(probeNM)
         ? ""
-        : ` At ${probeNM.toFixed(2)} nm that gives **${signed(resultFrom(E190_CERTIFICATE_DELTA, probeNM), 1)} dB** from certificates${slidersChanged() ? "" : " (the line shown)"} or **${signed(resultFrom(E190_MEASURED_DELTA, probeNM), 1)} dB** from Reagan National${hasThrustEstimate(probeNM) ? "" : ", leaving out thrust"}.`;
+        : ` At ${probeNM.toFixed(2)} nm that gives **${signed(resultFrom(E190_CERTIFICATE_DELTA, probeNM), 1)} dB**${slidersChanged() ? "" : " (the line shown)"}, or **${signed(resultFrom(E190_MEASURED_DELTA, probeNM), 1)} dB** using Reagan National measurements instead${hasThrustEstimate(probeNM) ? "" : ", leaving out thrust"}.`;
       const sample = flights < 20 ? ` **Small sample:** ${flights} ${aircraft} arrivals.` : "";
-      return `At monitor 6 the E190 measures **${gap} dB ${metricMode} louder** than the ${aircraft}, so this adds ${gap} dB to the E190 result.${results}${sample}${slidersChangedNote()}`;
+      return `**Measured at London City + certificates.** At monitor 6 the E190 measures **${gap} dB ${metricMode} louder** than the ${aircraft}. No A320neo has been measured there, so A320neo vs E190 comes from certificates (**${signed(E190_CERTIFICATE_DELTA, 2)} dB**), with an estimated **${signed(E190_THRUST_DELTA, 1)} dB** thrust difference.${results}${sample}${slidersChangedNote()}`;
     },
     sources: () => [
       ...modelSource(),
@@ -271,18 +282,20 @@ function thamesmeadGardenPreset() {
   const level = delta => site.levels.E190[metricMode] + delta;
   return {
     name: "Thamesmead garden",
+    kind: "Measured at Thamesmead + certificates",
+    tip: "Estimates an A320neo's level in a Thamesmead garden, 500 m beside the arrival path. It starts from the E190 level measured there, then adds the certificate difference between the aircraft. Height and air are then modelled, and thrust is estimated. No A320neo has been measured there.",
     wide: true,
     baseline: "E190",
     site: { nm, lateralM: site.lateralM },
     sourceDelta: E190_CERTIFICATE_DELTA,
     thrustDelta: E190_THRUST_DELTA,
     desc: () => {
-      if (!hasAdjustments()) return modelDesc("E190", "", 0, 0);
+      if (!hasAdjustments()) return modelDesc("E190", "", "", 0, 0);
       const ac = getAcoustics(nm);
       const range = evidenceRangeAt(nm);
       const reagan = ac.geomDB + ac.atmDB + E190_MEASURED_DELTA + E190_THRUST_DELTA;
       const measured = ["E190", "A220", "E190-E2"].map(type => `${type} ${site.levels[type][metricMode].toFixed(1)}`).join(", ");
-      return `RWY 27 arrivals: likely about **${level(ac.netDB).toFixed(1)} dB ${metricMode}** for an A320neo at the Thamesmead garden (range **${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}**), or **${level(reagan).toFixed(1)}** using Reagan National. Measured averages there: ${measured}. This is an **average flight**, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
+      return `**Measured at Thamesmead + certificates.** An A320neo arriving on RWY 27 would likely reach about **${level(ac.netDB).toFixed(1)} dB ${metricMode}** in the garden (range **${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}**), or **${level(reagan).toFixed(1)}** using Reagan National. **That is an estimate**, built on the E190's level. Averages measured there: ${measured}. This is an **average flight**, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
     },
     sources: () => [
       ...modelSource(),
@@ -309,12 +322,12 @@ const PRESETS = [
   airportPreset("E190-E2", "E190-E2: EMB190 data **−0.9 dB** (LCY Annex C p.10)."),
   easaPreset("E190-E2", "E190-E2 91.4", "49.05 t", 0.95, 0.1, E2_SLOPES),
   monitor6Preset("E190-E2"),
-  airportPreset("E195-E2", `E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). ${E195_FORECAST}`),
+  airportPreset("E195-E2", `E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). ${E195_FORECAST}`, "The E195-E2 is based on the E190-E2, allowing for its larger size"),
   easaPreset("E195-E2", "E195-E2 91.7", "54.0 t", 0.65, 0.2, E2_SLOPES, E195_FORECAST),
   airportPreset("A220", "A220-100: 737-500 data **−1.5 dB** (LCY Annex C p.10). Its table differs from the E190's by exactly 3.0 dB because both use that 737-500 data."),
   easaPreset("A220", "A220-100 91.9", "54.7 t", 0.45, 0.2, A220_SLOPES, "Reagan National arrivals measured **+2.5 dB LAmax** (AEF Table 6, p.9). **The sources disagree on the E190–A220 gap:** about 4.7 dB measured at Reagan National, 0.5 dB LAmax and 0.1 dB SEL at London City's monitor 6, 3.0 dB in the airport's tables, 0.6 dB on certificates."),
   monitor6Preset("A220"),
-  measuredPreset("A220", 2.5, 0.2, A220_SLOPES, "A320neo minus A220: **62.0 vs 59.5 dB LAmax** at monitor 6, **19 arrivals each** in January 2022, which AEF calls a snapshot (Table 6, p.9). The same monitor gives the E190's −2.2 dB, and its A320neo level is similar in both periods (62.0 and 62.8 dB). AEF notes that A220s at London City may be quieter because of their lower take-off weight (p.9). This figure implies the E190 is about 4.7 dB louder than the A220, while London City's monitor 6 measures 0.5 dB LAmax, so treat it with caution.", " **Small sample:** 19 arrivals each in one month, and London City's monitor 6 shows a much smaller E190–A220 gap.")
+  measuredPreset("A220", 2.5, 0.2, A220_SLOPES, "A320neo minus A220: **62.0 vs 59.5 dB LAmax** at monitor 6, **19 arrivals each** in January 2022, which AEF calls a snapshot (Table 6, p.9). The same monitor gives the E190's −2.2 dB, and its A320neo level is similar in both periods (62.0 and 62.8 dB). AEF notes that A220s at London City may be quieter because of their lower take-off weight (p.9). This figure implies the E190 is about 4.7 dB louder than the A220, while London City's monitor 6 measures 0.5 dB LAmax, so treat it with caution.", " **Small sample:** 19 arrivals each in one month, and London City's monitor 6 shows a much smaller E190–A220 gap.", " Only 19 arrivals each, in one month.")
 ];
 
 const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -639,8 +652,15 @@ function setup() {
   PRESETS.forEach((preset, i) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = preset.name;
+    const name = document.createElement("span");
+    name.className = "scenario-name";
+    name.textContent = preset.name;
+    const kind = document.createElement("span");
+    kind.className = "scenario-kind";
+    kind.textContent = preset.kind;
+    button.append(name, kind);
     button.classList.toggle("is-wide", preset.wide === true);
+    addScenarioTip(button, preset, i);
     button.addEventListener("click", () => {
       if (preset.site) probeNM = preset.site.nm;
       applyPreset(i);
@@ -661,6 +681,11 @@ function setup() {
       applyPreset(activePreset); // Monitor 6 scenarios have a different value in each metric
     });
   });
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") hideScenarioTip();
+  });
+  document.querySelector(".controls").addEventListener("scroll", hideScenarioTip);
 
   byId("fullscreen-btn").addEventListener("click", () => fullscreen(!fullscreen()));
   document.addEventListener("fullscreenchange", () => {
@@ -683,6 +708,55 @@ function setup() {
   }).observe(box);
 
   applyPreset(activePreset);
+}
+
+// The hover note on a scenario button. Screen readers get the same text through a hidden description.
+function addScenarioTip(button, preset, index) {
+  const description = document.createElement("span");
+  description.id = `scenario-tip-${index}`;
+  description.hidden = true;
+  description.textContent = preset.tip;
+  button.append(description);
+  button.setAttribute("aria-describedby", description.id);
+
+  button.addEventListener("pointerenter", event => {
+    if (event.pointerType !== "touch") showScenarioTip(button, preset);
+  });
+  button.addEventListener("pointerleave", hideScenarioTip);
+  button.addEventListener("focus", () => {
+    if (button.matches(":focus-visible")) showScenarioTip(button, preset);
+  });
+  button.addEventListener("blur", hideScenarioTip);
+  button.addEventListener("click", hideScenarioTip); // The description below now says the same
+}
+
+// Beside the scenario list when there's room, otherwise under the button (or above it, near the bottom of the window)
+function showScenarioTip(button, preset) {
+  const tip = byId("scenario-tip");
+  const heading = document.createElement("strong");
+  heading.textContent = preset.kind;
+  tip.replaceChildren(heading, preset.tip);
+  tip.hidden = false;
+
+  const margin = 8;
+  const buttonBox = button.getBoundingClientRect();
+  const listRight = byId("scenarios").getBoundingClientRect().right;
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+  const fitsBeside = listRight + 2 * margin + width <= window.innerWidth;
+  let left = listRight + 2 * margin;
+  let top = buttonBox.top;
+  if (!fitsBeside) {
+    left = buttonBox.left;
+    top = buttonBox.bottom + margin;
+    if (top + height > window.innerHeight - margin) top = buttonBox.top - height - margin;
+  }
+  tip.style.left = `${constrain(left, margin, window.innerWidth - width - margin)}px`;
+  tip.style.top = `${constrain(top, margin, window.innerHeight - height - margin)}px`;
+}
+
+function hideScenarioTip() {
+  byId("scenario-tip").hidden = true;
 }
 
 function placeBand(element, range, slider) {
