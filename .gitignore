@@ -1,2 +1,5 @@
 # Acoem manual: third-party copy, copyright notice prohibits reproduction
 Documents/37_Acoem_Fusion_User_Manual_DOC1130_Mar2024_FR.pdf
+
+# Python bytecode
+__pycache__/

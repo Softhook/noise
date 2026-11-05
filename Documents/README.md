@@ -319,6 +319,8 @@ These sources are cited in the [garden measurement plan](Thamesmead_Garden_Measu
 
 These sources are cited in the [Fusion data format plan](Fusion_Data_Format_Reverse_Engineering.md), not used in the model. They have no saved PDF:
 
+- **dBTrait user manual, DOC1081, September 2020:** a reseller's copy, read online and not saved because of its copyright notice. Installation, Viewer mode, CMG contents and WAV export. https://www.acoustic1.co.uk/_files/ugd/817d43_fc540aff69cf4e439281097a091eca33.pdf
+- **dBTrait version sheet, TDS1022, September 2020:** lists 6.3.0.1 as the latest release at that date. https://cdn.bfldr.com/Q3Z2TZY7/at/vqnvj3tt5gt3v92qcxjz7qjk/dBTrait_-_Resource_-_Firmware_specsheet.pdf
 - **dBTRAIT32 user manual:** older software, read online; its CMG, BID and export details may not apply to the Fusion. https://manualzilla.com/doc/6901230/user-manual
 - **Acoem Congrego notes on 01dB instruments:** HTTP polling limits. https://public.docs.acoemcloud.com/congrego/01db
 - **Acoem Airodis supported instruments:** lists CSV ingest for the Fusion. https://public.docs.acoemcloud.com/airodis/supported-instruments-and-protocols

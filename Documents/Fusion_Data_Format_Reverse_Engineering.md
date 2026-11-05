@@ -4,9 +4,13 @@
 
 ## Purpose
 
-Read our own Fusion 4G measurement data directly, especially the 100 ms levels, 100 ms spectra and RAW audio that the CSV output may not cover. This supports the [Thamesmead measurement plan](Thamesmead_Garden_Measurement_Plan.md).
+Build our own Mac software with full access to our Fusion 4G measurement data, especially the 100 ms levels, 100 ms spectra and RAW audio that the CSV output may not cover, and with the dBTrait analysis features we need. This supports the [Thamesmead measurement plan](Thamesmead_Garden_Measurement_Plan.md).
 
-We found no public specification or open-source parser for `.cmg`, so this would start from scratch. The campaign must not depend on it: run CSV and `.cmg` together, and treat the decoder as an extra route to the data.
+We're replacing our use of dBTrait, not porting it. dBTrait runs only temporarily, on a PC, to give us expected values to check our decoder against. Its analysis features are rebuilt from published acoustics formulas, not from its code.
+
+We found no public specification or open-source parser for `.cmg`, and no public installer or sample session, so this starts from scratch. The campaign must not depend on it: run CSV and `.cmg` together, and treat the decoder as an extra route to the data.
+
+**Status:** nothing is decoded yet, because we have no real session to work from. The inspection tool in [`tools/fusion`](../tools/fusion/fusion_inspect.py) is ready for the first recordings, but has only been tested on made-up files.
 
 Page numbers refer to the PDFs in this folder, which are listed in the [documents README](README.md).
 
@@ -33,7 +37,10 @@ The March 2024 manual (file 37) confirms the session layout and storage sizes be
 | Connections | USB mass storage, Ethernet, Wi-Fi, 4G, FTP server and FTP(S) client; MQTTS to Cadence | File 29, pp.10, 26; file 37, p.223 |
 | PC software | dBTrait, dBFileManager, dBFA | File 29, pp.5, 10 |
 | dBTrait Viewer | Usable without a licence since version 6.1 | File 33, p.1 |
-| Latest version sheet we have | dBTrait 6.2 | File 34, p.1 |
+| Latest version sheet we have saved | dBTrait 6.2 | File 34, p.1 |
+| Latest version sheet found online | dBTrait 6.3.0.1, September 2020. Newer versions may exist | dBTrait version sheet, September 2020 |
+| Getting dBTrait | On physical media or through the customer portal. The portal shows no dBTrait section without a login, and the installer is named like `setupdBTrait6.1.exe` | DOC1081, "On receipt of the software" and §2.1 |
+| dBTrait terms | The EULA is accepted during installation, so we haven't read it. Without a licence, dBTrait runs in Viewer mode with limited functions | DOC1081, "Conditions of use" and §2.2 |
 
 ### File format
 
@@ -48,6 +55,8 @@ The March 2024 manual (file 37) confirms the session layout and storage sizes be
 | Data can be fetched by type and date: instantaneous values, spectra, markers, fast-period events and audio | High | File 29, p.10 |
 | Data is written to the SD card every 10 s | High | File 29, p.27 |
 | Sessions hold channels such as Leq, Slow, Fast, Peak and band spectra | Medium; older manual | dBTRAIT32 manual |
+| A session can hold main and parallel-period data, weather, time signals, codings, "system codings" (overload, under-range, sensor fault), written and vocal comments, and global items | High for dBTrait sessions in general; not yet seen in a Fusion file | DOC1081, §3.1 |
+| 01dB's exported WAV is standard WAV with added metrological information, which may help with audio calibration | Medium; the contents aren't described | DOC1081, §14.4.6 |
 | `Partial Storage` `.cmg` files exist | Medium | File 33, p.8 |
 | Files may start with `CAMPAIGN`, and contain `_DESC_`, `_ITEM_` and `_DBTRAIT_GLOBAL_` | Low; a file-extension site, and the link to 01dB is our inference | FileExt |
 | Some timestamps may be Unix-style, because a dBTrait bug dated audio fragments to 1970 | Low; our inference | File 33, p.3 |
@@ -95,9 +104,11 @@ Ask for the format specification, the CSV column list, the manual edition for ou
 
 ### 2. Protect the source data
 
-Copy each session folder from the card, record SHA-256 checksums, and work only on copies. Don't open originals in dBTrait: it creates lock files and can save sessions in different storage formats (file 33, p.7).
+Copy each session folder from the card, record SHA-256 checksums, and work only on copies. Don't open originals in dBTrait: it creates lock files and can save sessions in different storage formats (file 33, p.7). The meter's USB, Ethernet and FTP connections should let a Mac copy sessions without dBTrait, though we haven't tried them.
 
-Record the serial number, firmware version and full configuration with each capture.
+Record the serial number, firmware version and full configuration with each capture. Keep session folders out of this repository.
+
+`survey --out` records the checksums, as long as the report is saved outside the session folder.
 
 ### 3. Make controlled recordings
 
@@ -121,14 +132,27 @@ Each run is 2–5 minutes, changes one thing and has a written log with times.
 | N | As C, with the high-pass filter at 0.3 Hz, then 10 Hz | Whether the band count or record length changes |
 | O | As C, in a quiet room with no calibrator | How below-range bands appear in the file, including the 0 dB value |
 
-### 4. Compare the outputs
+### 4. Capture expected values on the PC
+
+While dBTrait is temporarily installed:
+
+1. Read the EULA and save a copy before accepting it, then check it against the ground rules.
+2. Open **copies** of the test sessions, never the originals.
+3. Export tabulated levels and spectra, event lists and WAV files, and take screenshots of anything that won't export. Keep them with the session they came from.
+4. Check whether Viewer mode can export these. If not, ask Acoem for a demo or temporary licence.
+
+These become the expected answers in our regression tests.
+
+### 5. Compare the outputs
+
+Use `tools/fusion/fusion_inspect.py` for these checks: `survey`, `compare`, `level`, `time` and `strings`. Its matches are leads to test, not findings.
 
 - Map the folder tree, file names and sizes for each run.
 - Compare file size against record count × logging period, to find record lengths and headers.
 - Compare runs that differ by one setting to find which bytes change.
 - Check for text, compression and known file signatures. High entropy would suggest compression or encryption, which would change this plan.
 
-### 5. Decode in order
+### 6. Decode in order
 
 1. **Header:** signature, version, serial number and device strings. Start with the `.cmg`, which holds the reading rules.
 2. **Timestamps:** search for the known start time as Unix time, Windows FILETIME and OLE dates, in local time and UTC.
@@ -138,7 +162,7 @@ Each run is 2–5 minutes, changes one thing and has a written log with times.
 6. **Events and fast data:** decode the trigger records and 100 ms series.
 7. **RAW audio:** confirm the 24-in-32-bit layout, decode the header, then check its calibration against the recorded 94 dB tone.
 
-### 6. Validate
+### 7. Validate
 
 A decoded session counts as correct only if it passes all of these:
 
@@ -153,18 +177,29 @@ Keep the small test recordings and their expected values as regression tests.
 
 ## What to build
 
-A small read-only Python package that:
+A small read-only Python package for the Mac, with a viewer on top, which could be a browser app like the noise model. It:
 
 - Reads a session folder and never writes to it.
 - Records the firmware version and refuses unknown format versions, rather than guessing.
 - Exports levels, spectra, events and audio times to documented CSV or Parquet files.
 - Calculates SEL as set out in the measurement plan.
 
+Build features in this order. The first group is what the Thamesmead work needs:
+
+| Priority | Features |
+| --- | --- |
+| First | 100 ms time histories, 1/3-octave spectra, event SEL, calibrated audio |
+| Next | Sonagrams, re-averaged Leq over longer periods, statistical indices such as LA90, source coding and event lists |
+| Probably skip | Regulatory report templates, Word and Excel reports, other 01dB instruments |
+
+Our numbers and session edits may not carry over exactly into dBTrait. Check any figure we publish against dBTrait, and keep the original files as the record.
+
 ## Open questions
 
 - [ ] Will Acoem provide the format specification and the manual edition for our firmware?
 - [ ] Which firmware version do we have?
 - [ ] Does the CSV output include 1/3-octave spectra, and all the broadband indicators we've chosen?
+- [ ] Can we get the dBTrait installer through our customer login or from Acoem?
 - [ ] Can dBTrait Viewer show and copy all the values we need to check against?
 - [ ] Are any files compressed or encrypted?
 - [ ] Does the format change between firmware versions?
@@ -185,6 +220,8 @@ Saved in this folder:
 
 Online only:
 
+- [dBTrait user manual, DOC1081, September 2020](https://www.acoustic1.co.uk/_files/ugd/817d43_fc540aff69cf4e439281097a091eca33.pdf). A reseller's copy, not saved here because of its copyright notice.
+- [dBTrait version sheet, TDS1022, September 2020](https://cdn.bfldr.com/Q3Z2TZY7/at/vqnvj3tt5gt3v92qcxjz7qjk/dBTrait_-_Resource_-_Firmware_specsheet.pdf)
 - [dBTRAIT32 user manual](https://manualzilla.com/doc/6901230/user-manual). Older software, so its details may not apply to the Fusion.
 - [Acoem Congrego notes on 01dB instruments](https://public.docs.acoemcloud.com/congrego/01db)
 - [Acoem Airodis supported instruments](https://public.docs.acoemcloud.com/airodis/supported-instruments-and-protocols), which lists CSV ingest for the Fusion
