@@ -97,6 +97,32 @@ test("each type's certificate note links to its own certificate pages", () => {
   }
 });
 
+test("the distance-dependent NPD claim links to its supporting Doc 29 pages", () => {
+  const note = inPage("MODEL_NOTES")[2];
+  const pages = Array.from(citationParts(note))
+    .filter(part => part.doc && part.page !== undefined)
+    .map(part => [part.doc.file.slice(0, 2), part.page]);
+  assert.deepStrictEqual(pages, [["19", 747], ["19", 753], ["19", 793]]);
+});
+
+test("the E190 Flap 06 note links to its supporting EASA record", () => {
+  const scenario = SCENARIOS.find(entry => entry.name === "EASA: E190");
+  const note = scenario.sources().find(line => line.startsWith("**About this aircraft.**"));
+  const pages = Array.from(citationParts(note))
+    .filter(part => part.doc && part.page !== undefined)
+    .map(part => [part.doc.file.slice(0, 2), part.page]);
+  assert.ok(pages.some(([file, page]) => file === "10" && page === 39));
+});
+
+test("certificate scenarios describe EPNdB as an unvalidated proxy", () => {
+  const scenario = SCENARIOS.find(entry => entry.name === "EASA: E190");
+  state.scenarioIndex = SCENARIOS.indexOf(scenario);
+  state.sourceDelta = scenario.sourceDelta;
+  state.thrustDelta = scenario.thrustDelta;
+  assert.equal(scenario.kind, "EPNdB certificate proxy");
+  assert.match(scenario.desc(), /EPNdB gap as a dB\(A\) proxy/);
+});
+
 test("every linked page is within its document", () => {
   for (const { text, doc, note } of allPageLinks()) {
     const lastPage = Number(text.match(/\d+$/)[0]);
