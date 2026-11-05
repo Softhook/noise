@@ -155,12 +155,49 @@ These estimates are our own calculations, for a 3 m microphone, 500 m to the sid
 - **4G:** use it for health checks and instantaneous values, and collect audio from the card. The modem raises power use from about 1.2 W to as much as 3.8 W (p.27). If Cadence is on, it takes over push Server 1, so use Server 2 for our own server. Push can only be switched on or off in Ready mode (file 37, pp.157–158, 160).
 - **Calibration:** use a certified Class 1 calibrator at 94 dB (file 31, p.6), such as Acoem's CAL31 ([file 30](30_Acoem_Fusion_Datasheet_Nov2024.pdf), p.7). One isn't listed in the standard package. Record the reading at the start and end, and reject the new sensitivity offered at the end, so that any drift is reported rather than absorbed. Keep the default free-field correction and record it.
 - **Weather:** weather logging is an extra on every package (p.23). The WXT536 records wind, temperature, humidity, rain and pressure, and can share the meter's power supply (p.17). The weather logging period must be a multiple of the noise period, with a 1 s minimum (p.24). Temperature and humidity also affect air absorption.
-- **Clock:** confirm a GPS fix on site, and check whether the flight data uses UTC. Turn on GPS synchronisation, which needs at least 4 satellites. Without "synchronisation priority", the clock is only corrected when a measurement ends, so at midnight in continuous running; a clock that was running fast leaves overlapping data after midnight. With it on, a drift over 1 s lasting 15 s restarts the session (file 37, pp.149–150). We'd leave it off, because the clock drifts less than 0.5 s a day, but check the event log for corrections.
+- **Clock:** set the meter to UTC with summer time off, turn on GPS synchronisation and leave "synchronisation priority" off. See [Timing](#timing) for why, and for how we measure the drift.
 - **Remote checks:** the meter can send an SMS at 10% battery and if it's moved, and it stops and saves its data at 3% battery (pp.3, 20). Use these alerts during the campaign. The movement alert defaults to 200 m and needs a SIM that can send SMS (file 37, p.150). The meter can also push a health file every minute, giving battery, free card space, GPS, signal, weather station state and electrical check result (file 37, pp.157–160).
 - **Data:** CSV export is limited to periods of 1 s or longer (p.13), and the manual doesn't list its columns (file 37, p.150), so the 100 ms data will probably need Acoem's software or our own decoder. See the [data format plan](Fusion_Data_Format_Reverse_Engineering.md). Copy the data and record its checksums before opening it in any software.
 - **Firmware:** note the version at the start and don't update it between stages unless Acoem says it's necessary. On an approved instrument, a firmware change invalidates its previous verification (file 37, p.263).
 
 Before the full deployment, run a 2–3 day trial and take the data all the way through export, SEL calculation, spectra and flight matching.
+
+### Timing
+
+Noise events are matched to flights from the [ADS-B logger](../tools/adsb/README.md) by time. For this survey's questions, the two clocks only need to agree to about 1 s. Large errors, from minutes to an hour, are the real risk.
+
+**What each use needs.** As an arriving aircraft passes the garden, at about 70 m/s and 600 m away, it moves about 70 m and its direction from the microphone turns about 7° each second. The sound takes about 1.8 s to arrive, but that's calculated from the distance, so it isn't a clock error.
+
+| Use | Effect of a 1 s clock error | Clock agreement needed |
+|---|---|---|
+| Which flight caused an event | None. LCY flights are minutes apart | About 30 s |
+| Flagging another aircraft during the event, such as a helicopter or a high Heathrow arrival | Small. Whether its closest point falls in a 20–40 s window | A few seconds |
+| Height, distance and path angle at the closest point | None. These come from the ADS-B track alone | None |
+| LASmax, SEL, and the spectrum at LASmax | None. These come from the noise data alone | None |
+| Matching to NMT6 events | None | About 30 s |
+| Direction to the aircraft when the sound at LASmax left it (directivity) | About 7° | Under 0.5 s |
+| Level against direction, from each 100 ms value scaled to a standard distance | About 7°, smeared across the curve | Under 0.5 s |
+| Following a tone's Doppler shift in narrowband audio | About 2% of frequency per second near the closest point | About 0.1–0.2 s |
+
+Only the last three need a tight clock. All three study how the sound changes with direction, and none is in this plan. The microphone's 51–57° incidence comes from the geometry at the closest point, and tonality measures such as Aures don't need the Doppler shift removed. Even for those three, LASmax wanders by about a second from flight to flight, so there's little to gain beyond about 0.25 s. If we take one of them on, set a 0.25 s target, measure the meter's drift and correct for it.
+
+**Large errors.** These would damage the survey, so the setup is aimed at preventing and detecting them:
+
+| Cause | Size | Prevented or detected by |
+|---|---|---|
+| The Pi restarts after a power cut without a GPS fix. It has no battery-backed clock, so it starts from the last time it saved | The length of the cut: minutes to days | GPS on the Pi, and the clock status in the logger's health log |
+| The meter in local time, or with summer time on | Exactly 1 hour | Meter set to UTC with summer time off |
+| The meter's clock set by hand, or without a GPS fix for weeks | Seconds to minutes | GPS synchronisation, and the event log |
+| A time zone lost in export, such as a CSV opened in Excel | 1 hour, or day and month swapped | Times kept as UTC in ISO format; the matcher stops if a file's time zone is unknown |
+
+**The meter's clock.** The meter can set its clock from GPS, to within 50 ms, or by NTP over its 4G connection, but not both (file 37, p.149; p.27). Use GPS, as it doesn't depend on the mobile connection, and keep NTP as a fallback if the site can't get a fix. Either way, the meter only corrects its clock when a measurement ends, which is midnight in continuous running. "Synchronisation priority" only acts once the clock is more than 1 s out for 15 s, and then restarts the measurement (file 37, pp.149–150), so leave it off. The datasheet limits drift to 0.5 s a day (p.27), which is within our 1 s.
+
+**Time zone.** The meter has a time zone and an automatic summer time setting (file 37, p.149). Set it to UTC with summer time off, so both devices record UTC. Record the setting at the start of each stage.
+
+**Checks.**
+
+- **In the trial:** the meter records each clock correction in its event log (file 37, p.150). Read the corrections at midnight once, as a check that the drift is within the datasheet's limit. The manual doesn't say whether the log gives the size of each correction. If it doesn't, compare the meter's displayed time with GPS time on a visit.
+- **From the data, every day:** the sound from an arrival peaks at about the same delay after the aircraft's closest point each time. Take the median of (LASmax time − predicted sound arrival at the closest point) over each day's RWY 27 arrivals. A steady value confirms the clocks. A jump of more than about half a second shows a clock problem. This check can't separate clock error from the acoustic delay itself, so it detects problems rather than measuring the clocks.
 
 ## What to record
 
@@ -195,6 +232,8 @@ The under-the-path figure will remain an estimate, because it assumes the aircra
 - [ ] Can we get flight type, track and height data, and from whom?
 - [ ] Can we get NMT6 levels for the same flights?
 - [ ] Where will weather data come from?
+- [ ] Does the meter's event log record the size of each clock correction?
+- [ ] Can the meter get a GPS fix where it stands in the garden?
 - [ ] When would A320neos start flying the 4.49° approach?
 
 ## References

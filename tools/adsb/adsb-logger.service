@@ -1,0 +1,15 @@
+[Unit]
+Description=ADS-B flight logger for the Thamesmead noise survey
+After=readsb.service chrony.service
+Wants=readsb.service
+# Don't start without the SSD, rather than filling the SD card
+RequiresMountsFor=/var/lib/adsb-logger
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/adsb-logger/adsb_logger.py --config /etc/adsb-logger/site.json
+User=adsb-logger
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

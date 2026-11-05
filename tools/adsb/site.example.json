@@ -1,0 +1,22 @@
+{
+  "site": {
+    "lat": 51.5,
+    "lon": 0.1,
+    "ground_elevation_m": 3.0,
+    "mic_height_m": 3.0
+  },
+  "geoid_height_m": null,
+  "logger": {
+    "host": "127.0.0.1",
+    "port": 30154,
+    "log_dir": "/var/lib/adsb-logger",
+    "max_km": 30,
+    "flush_seconds": 30,
+    "health_seconds": 300,
+    "min_free_gb": 2
+  },
+  "analysis": {
+    "max_km": 15,
+    "runway_27_heading_deg": 273
+  }
+}
