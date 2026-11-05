@@ -409,7 +409,10 @@ function showComponent(element, db, suffix = "") {
 
 function showEvidenceRange(range) {
   byId("r-range").textContent = range ? `${signed(range.low, 1)} to ${signed(range.high, 1)} dB` : "—";
-  const crossed = range ? [-NOTICEABLE_DB, 0, NOTICEABLE_DB].filter(level => range.low < level && range.high > level) : [];
+  const round1 = value => Math.sign(value) * (Math.round((Math.abs(value) + 1e-12) * 10) / 10);
+  const low = range ? round1(range.low) : 0;
+  const high = range ? round1(range.high) : 0;
+  const crossed = range ? [-NOTICEABLE_DB, 0, NOTICEABLE_DB].filter(level => low < level && high > level) : [];
   byId("r-range-note").textContent = crossed.length
     ? `Range crosses ${crossed.map(level => (level === 0 ? "no change" : `${signed(level, 0)} dB`)).join(", ").replace(/, ([^,]*)$/, " and $1")}`
     : "";

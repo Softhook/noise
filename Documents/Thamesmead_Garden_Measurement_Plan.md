@@ -27,7 +27,7 @@ Then answer four questions:
 1. **Does the setup match?** Compare our averages and the gaps between aircraft with the table above. The airport's fleet may have changed since 2024, so compare type by type.
 2. **How much do flights vary?** Record the spread for each type, which the report doesn't give. It tells us how many flights we need to trust a 1–2 dB difference.
 3. **Does distance behave as the model predicts?** Compare E190 levels with each flight's actual distance from the garden. Flights passing closer should be louder by the amount the model calculates.
-4. **Do the two sites agree?** If we can get NMT6 data for the same flights, compare them. The model explains only about 8.6 dB of the E190's measured 11.8 dB LAmax drop from NMT6 to the garden, and this may show why.
+4. **Do the two sites agree?** If we can get NMT6 data for the same flights, compare them. The model explains only about 8.6 dB of the E190's measured 11.8 dB LAmax drop from NMT6 to the garden, and 5.4 dB of its 10.9 dB SEL drop. Alongside local shielding by houses and fences, quieter events in the garden (58–63 dB LAmax) may clip against the monitor's event trigger threshold before completing a full 10 dB-down window. The report gives no trigger settings, but in its Table 1 SEL minus LAmax tends to shrink with level, from 9.9 dB on the E190 to 8.5 dB on the Dash 8-Q400, where NMT6 reads 9.0 and 9.7 dB.
 
 ## Stage 2: compare the A320neo
 
@@ -58,6 +58,7 @@ Each flight needs its noise event matched to its aircraft type and position, oth
 | Data | Used for | Source |
 | --- | --- | --- |
 | LAmax and SEL for each event, with time | The levels being compared | Our monitor |
+| Continuous 1 s LAeq time history and monitor trigger settings | Computing true 10 dB-down SEL without event-threshold truncation on quieter arrivals | Our monitor |
 | Calibration checks and any gaps in recording | Showing the data is sound | Our monitor |
 | Aircraft type, runway and time for each flight | Matching events to aircraft | To be confirmed; the airport supplied this for the report |
 | Track and height for each flight | Replacing the nominal 500 m and heights | To be confirmed; the airport supplied this for the report |

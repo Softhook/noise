@@ -125,25 +125,36 @@ function activeEvidence() {
   if (!scenario.e190Gap) {
     return { source: SOURCE_RANGES[scenario.baseline], thrust: THRUST_RANGES[scenario.baseline] };
   }
+  const baseRange = SOURCE_RANGES.E190.range;
   const gap = scenario.e190Gap();
-  const range = SOURCE_RANGES.E190.range.map(value => value + gap);
+  const range = baseRange.map(value => value + gap);
   return {
-    source: { range, text: `E190 range −2.2 to +0.9, ${signed(gap, 1)} measured ${scenario.gapPlace}: ${signed(range[0], 1)} to ${signed(range[1], 1)}` },
+    source: {
+      range,
+      text: `E190 range ${signed(baseRange[0], 1)} to ${signed(baseRange[1], 1)}, ${signed(gap, 1)} measured ${scenario.gapPlace}: ${signed(range[0], 1)} to ${signed(range[1], 1)}`
+    },
     thrust: THRUST_RANGES.E190
   };
 }
 
+// Thrust evidence bounds by flight phase: full 5.5° vs 4.49° band while both descend (even where unestimated);
+// −2 to 0 dB where the 5.5° type is still level (no 5.5° relief); ±0.45 dB, a judgement with no source, where both are level beyond the 4.49° TOD.
+function thrustRangeAt(nm, thrust) {
+  if (nm <= currentTopOfDescent().nm) return thrust;
+  if (nm < proposedTopOfDescent().nm) return [Math.min(thrust[0], LEVEL_VS_DESCENDING_DB), 0];
+  const levelSpread = Math.abs(thrust[0]);
+  return [-levelSpread, levelSpread];
+}
+
 // Height + air plus the extremes of the aircraft and thrust evidence. Not a confidence interval.
-// The thrust band stays at full width everywhere, because a missing estimate isn't a known zero.
 function evidenceRangeAt(nm) {
   const ac = getAcoustics(nm);
   const heightAir = ac.geomDB + ac.atmDB;
   const evidence = activeEvidence();
   const source = evidence.source.range;
-  const thrust = evidence.thrust.range;
-  const levelVsDescending = nm > currentTopOfDescent().nm && nm < proposedTopOfDescent().nm;
+  const thrust = thrustRangeAt(nm, evidence.thrust.range);
   return {
-    low: heightAir + source[0] + (levelVsDescending ? Math.min(thrust[0], LEVEL_VS_DESCENDING_DB) : thrust[0]),
+    low: heightAir + source[0] + thrust[0],
     high: heightAir + source[1] + thrust[1]
   };
 }
@@ -162,7 +173,7 @@ function getAcoustics(nm) {
   const propDistance = Math.hypot(propHeight, lateralFt);
 
   // 20 log10 for peak level (LAmax), 10 log10 for Sound Exposure Level (SEL)
-  const coefficient = state.metric === "LAmax" ? 20 : 10;
+  const coefficient = currentMetric() === "LAmax" ? 20 : 10;
   const geomDB = coefficient * Math.log10(currDistance / propDistance);
   const atmDB = airLossDB(currDistance) - airLossDB(propDistance);
   const sourceDB = state.sourceDelta;

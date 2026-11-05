@@ -159,3 +159,30 @@ test("every scenario's values fit the sliders, in both metrics", () => {
     }
   });
 });
+
+// The shaded range is meant to contain the scenario's own line at every distance it is drawn
+test("every scenario's line stays inside its evidence range", () => {
+  forEachSelection(scenario => {
+    if (scenario.usesAirportTable) return;
+    const start = inPage("MIN_MODEL_NM");
+    for (let nm = start; nm <= inPage("CHART_MAX_NM"); nm += 0.01) {
+      const { netDB } = page.getAcoustics(nm);
+      const { low, high } = page.evidenceRangeAt(nm);
+      const label = `${scenario.name}, RWY ${state.runway}, ${state.metric}, ${nm.toFixed(2)} nm`;
+      assert.ok(netDB >= low - 1e-6 && netDB <= high + 1e-6, `${label}: ${netDB} is outside ${low} to ${high}`);
+    }
+  });
+});
+
+// Only while both aircraft descend does the band include 5.5° thrust relief
+test("the thrust band follows the flight phase", () => {
+  const thrust = [-0.45, 2.5];
+  for (const runway of ["27", "09"]) {
+    state.runway = runway;
+    const currTOD = page.currentTopOfDescent().nm;
+    const propTOD = page.proposedTopOfDescent().nm;
+    assert.deepStrictEqual([...page.thrustRangeAt(currTOD, thrust)], thrust);
+    assert.deepStrictEqual([...page.thrustRangeAt(currTOD + 0.01, thrust)], [-2, 0]);
+    assert.deepStrictEqual([...page.thrustRangeAt(propTOD, thrust)], [-0.45, 0.45]);
+  }
+});

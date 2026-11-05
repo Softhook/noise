@@ -59,19 +59,19 @@ const IEC_A_WEIGHTING = [
 // Sliders and evidence ranges
 // ---------------------------------------------------------------------------
 
-const SOURCE_SLIDER = { min: -4.0, max: 5.5 };
+const SOURCE_SLIDER = { min: -4.0, max: 6.0 };
 const THRUST_SLIDER = { min: -1.5, max: 3.0 };
 // Evidence ranges shown under the sliders; sources are listed in Documents/README.md
-// A320neo minus each type: Chapter 4+ certificates, and arrivals measured at Reagan National where available
+// A320neo minus each type: Chapter 4+ certificates across certified landing masses (66.3–68.4 t), and measured arrivals where available
 const SOURCE_RANGES = {
-  "E190":    { range: [-2.2, 0.9], text: "vs E190: −2.2 measured to +0.2 EASA certificates (+0.9 with Flap 06 inhibitor records)" },
-  "E190-E2": { range: [0.6, 1.3],  text: "vs E190-E2: +0.6 to +1.3 EASA certificates" },
-  "E195-E2": { range: [0.3, 1.0],  text: "vs E195-E2: +0.3 to +1.0 EASA certificates" },
-  "A220":    { range: [0.1, 2.5],  text: "vs A220: +0.1 to +0.8 EASA certificates, +2.5 measured" },
-  "Dash 8-Q400": { range: [-2.9, 3.15], text: "vs Dash 8-Q400: −2.9 to −0.3 EASA certificates, +3.15 measured at London City's monitor 6" }
+  "E190":    { range: [-2.2, 1.1], text: "vs E190: −2.2 measured, −0.8 to +0.4 EASA certificates (+1.1 with Flap 06 inhibitor)" },
+  "E190-E2": { range: [0.6, 1.5],  text: "vs E190-E2: +0.6 to +1.5 EASA certificates (66.3–68.4 t)" },
+  "E195-E2": { range: [0.3, 1.2],  text: "vs E195-E2: +0.3 to +1.2 EASA certificates (66.3–68.4 t)" },
+  "A220":    { range: [0.1, 2.5],  text: "vs A220: +0.1 to +1.0 EASA certificates (66.3–68.4 t), +2.5 measured" },
+  "Dash 8-Q400": { range: [-2.9, 3.15], text: "vs Dash 8-Q400: −2.9 to −0.1 EASA certificates, +3.15 via monitor 6 (includes 5.5° approach)" }
 };
 // Estimated thrust difference relative to 3° reference data: ΔL_base(3°→5.5°) − ΔL_A320(3°→4.49°).
-// Floor: spoilers cancel all relief on the 5.5° type, leaving −0.45 (the A320's mid relief, 0.34–0.51 dB).
+// Floor: spoilers cancel all relief on the 5.5° type, leaving −0.45 (the A320's mid relief at 1,000 ft, 0.34–0.51 dB).
 // E190: NPD slopes give +0.7 to +1.2; the airport's AEDT example gives about +2.5 at most (noise scheme p.33). The default is +0.4, a judgement.
 // Top of each new-generation band: the slope of the engine the airport uses as that type's proxy, scaled by its mass.
 // E190-E2 and E195-E2 use the EMB190's CF34-10E; the A220 uses the 737-500's CFM56-3. Neither is that type's real engine.
@@ -80,7 +80,7 @@ const THRUST_RANGES = {
   "E190-E2": { range: [-0.45, 1.4], text: "estimate: −0.45 if spoilers cancel relief, up to +1.4 with the E190's engine slope" },
   "E195-E2": { range: [-0.45, 1.6], text: "estimate: −0.45 if spoilers cancel relief, up to +1.6 with the E190's engine slope" },
   "A220":    { range: [-0.45, 2.7], text: "estimate: −0.45 if spoilers cancel relief, up to +2.7 with its 737-500 proxy's slope" },
-  "Dash 8-Q400": { range: [-0.45, 0.7], text: "estimate: −0.45 if all relief is cancelled, up to +0.7 with the E190's engine slope" }
+  "Dash 8-Q400": { range: [-0.45, 0.7], text: "estimate: −0.45 if all relief is cancelled, +0.7 with E190's turbofan slope (propeller unloading is in +3.15 above)" }
 };
 const E190_CERTIFICATE_DELTA = -0.15; // A320neo minus E190: certificate midpoint 92.35 vs 92.5 EPNdB
 const E190_MEASURED_DELTA = -2.0;     // A320neo minus E190: Reagan National arrivals (AEF Table 5, p.8)
@@ -89,7 +89,7 @@ const E190_THRUST_DELTA = 0.4;        // Judgement, below the +0.7 to +1.2 from 
 // flap from about 1,820 ft (3.7 nm on 4.49°) and the EMB190 from 1,500 ft (2.5 nm on 5.5°). Between those the E190 may
 // still be at idle, so the difference could be larger. Beyond 3.7 nm, or the 5.5° top of descent if nearer, no estimate is made.
 const THRUST_ESTIMATE_END_NM = 3.7;
-const LEVEL_VS_DESCENDING_DB = -2;     // E190 level vs descending at 4,000 ft, 73 vs 71 dB SEL (Consultation Fig. 22, p.32)
+const LEVEL_VS_DESCENDING_DB = -2;     // Level vs descending at 4,000 ft: E190 73 vs 71, new-gen 69–74 vs 68–72 dB SEL, no turboprops (Consultation Fig. 22, p.32)
 const NOTICEABLE_DB = 3;               // LCY Consultation 5.4.11: "noticeable differences of 3dB or more"
 
 // ---------------------------------------------------------------------------

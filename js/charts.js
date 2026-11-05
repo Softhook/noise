@@ -76,7 +76,7 @@ function noiseBounds() {
 
   let curveMin = 0;
   let curveMax = 0;
-  for (const nm of distanceSamples(MIN_MODEL_NM)) {
+  for (const nm of evidenceSamples()) {
     const ac = getAcoustics(nm);
     const heightAir = ac.geomDB + ac.atmDB;
     const range = hasAdjustments() ? evidenceRangeAt(nm) : { low: ac.netDB, high: ac.netDB };
@@ -131,6 +131,15 @@ function dbToY(db, area) {
 // Evenly spaced distances out to the end of the chart
 function distanceSamples(fromNM = 0) {
   return Array.from({ length: SAMPLE_STEPS + 1 }, (_, i) => lerp(fromNM, CHART_MAX_NM, i / SAMPLE_STEPS));
+}
+
+// Includes both sides of each top-of-descent step, so the evidence band aligns with the waypoint guides
+function evidenceSamples() {
+  const currTOD = currentTopOfDescent().nm;
+  const propTOD = proposedTopOfDescent().nm;
+  const steps = [currTOD, currTOD + NM_TOLERANCE, propTOD - NM_TOLERANCE, propTOD]
+    .filter(nm => nm >= MIN_MODEL_NM && nm <= CHART_MAX_NM);
+  return [...distanceSamples(MIN_MODEL_NM), ...steps].sort((a, b) => a - b);
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +526,7 @@ function drawNoThrustZone(area) {
 }
 
 function drawEvidenceRange(area) {
-  const samples = distanceSamples(MIN_MODEL_NM);
+  const samples = evidenceSamples();
   const edge = key => samples.map(nm => [distanceToX(nm, area), dbToY(evidenceRangeAt(nm)[key], area)]);
   noStroke();
   fill(COLORS.netRange);
