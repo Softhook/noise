@@ -7,6 +7,7 @@ commands:
   follow     keep collecting as new data appears (about 25 minutes behind real time)
   fetch      download a past period, in local time
   range      show the period WebTrak holds
+  serve      a local web app for starting downloads, watching them and seeing statistics
 
 NMT6, St Pauls Church in Thamesmead, is monitor 106 and is the default. --nmt 106,103 collects
 several monitors from the same downloads.
@@ -23,18 +24,12 @@ import signal
 import sys
 import time
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # Python 3.8 and earlier
-    ZoneInfo = None
-
 from . import client as client_mod
 from . import parse, store
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT = os.path.join(HERE, "data")
 DEFAULT_MONITOR = "106"
-SITE_ZONE = "Europe/London"
 
 # Used if the site configuration can't be read. From WebTrak's configuration on 5 Nov 2026.
 KNOWN_MONITORS = {
@@ -53,43 +48,38 @@ def log(message):
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def find_monitor(client, site, out_dir, monitor_id):
+def load_monitors(client, site, out_dir):
+    """The site's monitors: from WebTrak, else the copy saved last time, else the built-in list."""
     cache = os.path.join(out_dir, "monitors.json")
-    monitors = None
     try:
         monitors = client.monitors()
         os.makedirs(out_dir, exist_ok=True)
         with open(cache, "w") as f:
             json.dump(monitors, f, indent=1)
+        return monitors
     except Exception as error:  # the config service is separate from the data; carry on without it
         log(f"couldn't read the monitor list ({error}); using the saved copy")
-        try:
-            with open(cache) as f:
-                monitors = json.load(f)
-        except (OSError, ValueError):
-            monitors = KNOWN_MONITORS.get(site, [])
+    try:
+        with open(cache) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return KNOWN_MONITORS.get(site, [])
+
+
+def find_monitor(monitors, monitor_id):
     for m in monitors:
         if str(m["id"]) == str(monitor_id):
             return {"id": str(m["id"]), "name": m["name"], "lat": float(m["lat"]), "lon": float(m["lon"])}
     raise SystemExit(f"monitor {monitor_id} isn't in the site's monitor list; try the monitors command")
 
 
-def local_to_utc(text):
-    """'YYYY-MM-DD HH:MM' in airport local time, to UTC seconds."""
-    moment = dt.datetime.strptime(text.strip().replace("T", " "), "%Y-%m-%d %H:%M" if text.count(":") == 1
-                                  else "%Y-%m-%d %H:%M:%S")
-    if ZoneInfo is None:
-        raise SystemExit("Python 3.9 or later is needed for local times")
-    return moment.replace(tzinfo=ZoneInfo(SITE_ZONE)).timestamp()
-
-
 def print_events(events, monitor):
     for e in events:
-        who = e.get("callsign") or "no aircraft in range"
-        extra = ""
-        if e.get("callsign"):
+        who, extra = "no aircraft in range", ""
+        if e.get("track"):
+            who = e.get("callsign") or f"track {e['track']}"
             extra = (f" {e.get('type') or '?'} {e.get('direction')}/{e.get('airport') or '-'}"
-                     f" at {e['closest_slant_m']} m slant, {e['closest_height_m']:.0f} m up")
+                     f" at {e['closest_slant_m']} m slant, {e['closest_height_m']} m up")
         print(f"    NMT{monitor['id']} EVENT {e['start_local'][11:19]}  LAmax {e['lmax_db']:.1f}  "
               f"SEL {e['sel_db']:.1f}  {e['duration_s']:.0f} s  class {e['event_class']}  -> {who}{extra}", flush=True)
 
@@ -145,6 +135,8 @@ class Retry:
 
 
 MAX_FAILURES_IN_A_ROW = 3
+# Chunks fetched either side of a period, so that events near its ends see all the radar they need.
+PAD = store.MATCH_WINDOW_S // parse.WINDOW_S + 1
 
 
 def get_chunk(client, cache, handle):
@@ -163,15 +155,38 @@ def get_chunk(client, cache, handle):
     return chunk
 
 
-def save_range(client, cache, stores, first, last, quiet=False, retry=None):
+def missing(stores, first, last):
+    """Handles from first to last (inclusive) that at least one store hasn't saved, in order."""
+    return sorted({h for _, s in stores for a, b in s.gaps(first, last) for h in range(a, b + 1)})
+
+
+class Stop:
+    """Set by SIGINT or SIGTERM, so a run stops between chunks rather than in the middle of writing one."""
+
+    def __init__(self):
+        self.now = False
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, self.set)
+
+    def set(self, *_):
+        self.now = True
+
+    def __bool__(self):
+        return self.now
+
+
+def save_range(client, cache, stores, first, last, quiet=False, retry=None, give_up=True, stop=None):
     """Fetch and save every handle from first to last that some store hasn't saved.
 
     Returns (saved, failed): failed counts network failures, which a later run can retry.
     """
-    todo = sorted({h for _, s in stores for a, b in s.gaps(first, last) for h in range(a, b + 1)})
+    todo = missing(stores, first, last)
     saved = failed = in_a_row = 0
     unavailable = []
     for handle in todo:
+        if stop:
+            log("stopping")
+            break
         if retry is not None and retry.waiting(handle):
             continue
         try:
@@ -195,7 +210,7 @@ def save_range(client, cache, stores, first, last, quiet=False, retry=None):
         if retry is not None:
             retry.done(handle)
         for monitor, monitor_store in stores:
-            describe(monitor_store.save(chunk), monitor, quiet)
+            describe(monitor_store.save(chunk, give_up), monitor, quiet)
         saved += 1
     if unavailable:
         log(f"not available from WebTrak: {handle_ranges(unavailable)}")
@@ -219,14 +234,16 @@ def common_args(parser, delay):
 def setup(args):
     client = client_mod.Client(site=args.site, min_interval=max(0.5, args.delay))
     out_dir = os.path.join(args.out, args.site)
+    ids = list(dict.fromkeys(m.strip() for m in str(args.nmt).split(",") if m.strip()))
+    if not ids:
+        raise SystemExit("--nmt needs at least one monitor id")
+    monitors = load_monitors(client, args.site, out_dir)
     stores = []
-    for monitor_id in dict.fromkeys(m.strip() for m in str(args.nmt).split(",") if m.strip()):
-        monitor = find_monitor(client, args.site, out_dir, monitor_id)
+    for monitor_id in ids:
+        monitor = find_monitor(monitors, monitor_id)
         monitor_store = store.MonitorStore(out_dir, monitor, radius_m=args.radius)
         monitor_store.lock()
         stores.append((monitor, monitor_store))
-    if not stores:
-        raise SystemExit("--nmt needs at least one monitor id")
     cache = None if args.no_raw else store.RawCache(out_dir)
     return client, cache, stores
 
@@ -248,12 +265,10 @@ def cmd_follow(argv, prog):
         monitor_store.prime_buffer()
     log(f"following {names(stores)}, saving to {os.path.dirname(stores[0][1].dir)}")
 
-    stop = {"now": False}
-    signal.signal(signal.SIGINT, lambda *_: stop.update(now=True))
-    signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
+    stop = Stop()
     reported_lag = None
     retry = Retry()
-    while not stop["now"]:
+    while not stop:
         try:
             latest = client.latest_handle()
         except (OSError, parse.NotAvailable) as error:
@@ -267,13 +282,13 @@ def cmd_follow(argv, prog):
                     log(f"NMT{monitor['id']} gap: {earliest - last - 1} chunks are older than --backfill and are "
                         f"skipped; use fetch to get them")
             retry.forget_before(earliest)
-            save_range(client, cache, stores, earliest, latest, args.quiet, retry)
+            save_range(client, cache, stores, earliest, latest, args.quiet, retry, stop=stop)
             lag = round((time.time() - parse.utc_for_handle(latest) - parse.WINDOW_S) / 60)
             if reported_lag is None or abs(lag - reported_lag) >= 5:
                 log(f"WebTrak is {lag} minutes behind real time")
                 reported_lag = lag
         end = time.monotonic() + args.poll
-        while not stop["now"] and time.monotonic() < end:
+        while not stop and time.monotonic() < end:
             time.sleep(0.5)
     log("stopped; events still waiting for radar are kept and matched on the next run")
     return 0
@@ -285,37 +300,46 @@ def cmd_fetch(argv, prog):
     parser.add_argument("--from", dest="start", required=True, help="local start, 'YYYY-MM-DD HH:MM'")
     parser.add_argument("--to", dest="end", required=True, help="local end, 'YYYY-MM-DD HH:MM' (not included)")
     args = parser.parse_args(argv)
-    start, end = local_to_utc(args.start), local_to_utc(args.end)
+    start, end = parse.local_to_utc(args.start), parse.local_to_utc(args.end)
     if end <= start:
         raise SystemExit("--to must be after --from")
     client, cache, stores = setup(args)
     first, last = parse.handle_for_utc(start), parse.handle_for_utc(end - 1)
+    held_from = None
     try:
         held_text = client.date_range()[0]
-        held_from = parse.handle_for_utc(local_to_utc(held_text))
+        held_from = parse.handle_for_utc(parse.local_to_utc(held_text))
         if first < held_from:
             log(f"WebTrak's data starts at {held_text} local time; starting there")
             first = held_from
     except (OSError, ValueError) as error:
         log(f"couldn't read WebTrak's date range ({error}); carrying on")
-    latest = client.latest_handle()
+    try:
+        latest = client.latest_handle()
+    except (OSError, parse.NotAvailable) as error:
+        raise SystemExit(f"couldn't reach WebTrak: {error}")
     if last > latest:
         log("the end is later than WebTrak has data for; stopping at the latest chunk")
         last = latest
     if last < first:
         raise SystemExit("WebTrak holds no data for that period")
-    # A little past the end too, so events near it can be matched against the radar that follows.
-    extra = min(latest, last + store.MATCH_WINDOW_S // parse.WINDOW_S + 1)
-    todo = sorted({h for _, s in stores for a, b in s.gaps(first, extra) for h in range(a, b + 1)})
+    # A little either side too, so events near the ends are matched against all the radar around them.
+    lo, hi = max(first - PAD, held_from or 0), min(latest, last + PAD)
+    todo = missing(stores, lo, hi)
     downloads = sum(1 for h in todo if cache is None or not cache.has(h))
     log(f"{names(stores)}: {len(todo)} chunks to save, {downloads} to download, about "
-        f"{downloads * (client.min_interval + 0.3) / 60:.0f} minutes")
-    saved, failed = save_range(client, cache, stores, first, extra, args.quiet)
-    for monitor, monitor_store in stores:
-        rows = monitor_store.finish(extra)
-        if not args.quiet:
-            print_events(rows, monitor)
+        f"{downloads * (client.min_interval + client_mod.TYPICAL_REPLY_S) / 60:.0f} minutes")
+    stop = Stop()
+    saved, failed = save_range(client, cache, stores, lo, hi, args.quiet, give_up=False, stop=stop)
+    if not stop:  # a stopped run leaves its events waiting, for the rerun that carries on
+        for monitor, monitor_store in stores:
+            rows = monitor_store.finish(parse.utc_for_handle(first), parse.utc_for_handle(last + 1))
+            if not args.quiet:
+                print_events(rows, monitor)
     log(f"saved {saved} chunks to {os.path.dirname(stores[0][1].dir)}")
+    if stop:
+        log("stopped early; run the same command again to carry on")
+        return 1
     if failed:
         log(f"{failed} chunks failed; run the same command again to fetch just those")
         return 1
@@ -326,8 +350,9 @@ def cmd_monitors(argv, prog):
     parser = argparse.ArgumentParser(prog=prog, description="List the site's noise monitors.")
     parser.add_argument("--site", default="lcy")
     args = parser.parse_args(argv)
-    for m in client_mod.Client(site=args.site).monitors():
-        print(f"{m['id']:>5}  {m['lat']:.5f} {m['lon']:.5f}  {m['name']}  {m['status']}")
+    out_dir = os.path.join(DEFAULT_OUT, args.site)
+    for m in load_monitors(client_mod.Client(site=args.site), args.site, out_dir):
+        print(f"{m['id']:>5}  {m['lat']:.5f} {m['lon']:.5f}  {m['name']}  {m.get('status', '')}")
     return 0
 
 
@@ -343,7 +368,19 @@ def cmd_range(argv, prog):
     return 0
 
 
-COMMANDS = {"follow": cmd_follow, "fetch": cmd_fetch, "monitors": cmd_monitors, "range": cmd_range}
+def cmd_serve(argv, prog):
+    parser = argparse.ArgumentParser(prog=prog, description="Run the local web app (http://127.0.0.1:PORT).")
+    parser.add_argument("--site", default="lcy")
+    parser.add_argument("--out", default=DEFAULT_OUT, help="data folder (default tools/webtrak/data)")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--no-browser", action="store_true", help="don't open a browser window")
+    args = parser.parse_args(argv)
+    from . import server
+    return server.serve(os.path.abspath(args.out), args.site, args.port, open_browser=not args.no_browser)
+
+
+COMMANDS = {"follow": cmd_follow, "fetch": cmd_fetch, "monitors": cmd_monitors, "range": cmd_range,
+            "serve": cmd_serve}
 
 
 def main(argv=None):

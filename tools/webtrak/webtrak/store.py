@@ -13,7 +13,11 @@ and, shared by every monitor, OUT/<site>/raw/YYYY-MM-DD/<handle>.txt.gz: each ch
 
 An event is listed in one or two chunks around its time, but the radar for the minute after its
 LAmax can be in later chunks. So events wait in state.json until every chunk in their
-matching window is saved (or the data has moved GIVE_UP_S past it), and are matched then.
+matching window is saved (or, when following, the data has moved GIVE_UP_S past it), and are
+matched then. A historical fetch matches what is left at the end, with whatever radar there is.
+
+Seconds that WebTrak marks as having no measurement (see parse.Level.valid) are written with a
+blank level, keeping their flag.
 
 Folders under levels/ and aircraft/ use local (Europe/London) days. Times in the files are ISO 8601, UTC with a Z, and local
 with its offset.
@@ -47,6 +51,7 @@ EVENT_FIELDS = ["start_utc", "start_local", "lmax_time_local", "end_local", "dur
                 "lmax_after_closest_s", "candidates"]
 
 MATCH_WINDOW_S = 60      # look this far either side of the LAmax time for aircraft
+MAX_STEP_S = 20          # don't interpolate a track across a gap in its radar longer than this
 GIVE_UP_S = 10 * 60      # match with what we have once the data is this far past the window
 KEEP_S = 2 * 3600        # keep this much radar in memory either side of the newest chunk
 
@@ -64,19 +69,42 @@ def local_day(t, offset_s):
     return dt.datetime.fromtimestamp(t + offset_s, dt.timezone.utc).strftime("%Y-%m-%d")
 
 
+def ground_offset(lat0, lon0, lat, lon):
+    """(east, north) in metres from the first point to the second, by an equirectangular
+    approximation: well under 0.1% error within 20 km."""
+    mean = math.radians((lat0 + lat) / 2)
+    return (math.radians(lon - lon0) * math.cos(mean) * 6371008.8, math.radians(lat - lat0) * 6371008.8)
+
+
 def ground_distance(lat1, lon1, lat2, lon2):
-    """Metres, by an equirectangular approximation: well under 0.1% error within 20 km."""
-    mean = math.radians((lat1 + lat2) / 2)
-    dx = math.radians(lon2 - lon1) * math.cos(mean) * 6371008.8
-    dy = math.radians(lat2 - lat1) * 6371008.8
-    return math.hypot(dx, dy)
+    return math.hypot(*ground_offset(lat1, lon1, lat2, lon2))
 
 
-def _round(value, places=1):
-    if value is None:
-        return ""
-    r = round(value, places)
-    return int(r) if places == 0 else r
+def closest_approach(points, monitor):
+    """Where one track came closest (in slant distance) to the monitor: (slant, ground, height, utc).
+
+    Radar positions are 4 s, about 300 m, apart, so the closest point is looked for along the
+    straight line between each pair of neighbouring positions, not only at the positions.
+    """
+    xyz = []
+    for p in sorted(points, key=lambda p: p.utc):
+        east, north = ground_offset(monitor["lat"], monitor["lon"], p.lat, p.lon)
+        xyz.append((p.utc, east, north, p.height_m or 0.0))
+    best = None
+    for i, (t, x, y, z) in enumerate(xyz):
+        candidates = [(t, x, y, z)]
+        if i + 1 < len(xyz) and 0 < xyz[i + 1][0] - t <= MAX_STEP_S:
+            t2, x2, y2, z2 = xyz[i + 1]
+            dx, dy, dz = x2 - x, y2 - y, z2 - z
+            length2 = dx * dx + dy * dy + dz * dz
+            if length2 > 0:
+                f = min(1.0, max(0.0, -(x * dx + y * dy + z * dz) / length2))
+                candidates.append((t + f * (t2 - t), x + f * dx, y + f * dy, z + f * dz))
+        for ct, cx, cy, cz in candidates:
+            slant = math.sqrt(cx * cx + cy * cy + cz * cz)
+            if best is None or slant < best[0]:
+                best = (slant, math.hypot(cx, cy), cz, ct)
+    return best
 
 
 def match_event(event, positions, monitor, window=MATCH_WINDOW_S):
@@ -88,20 +116,15 @@ def match_event(event, positions, monitor, window=MATCH_WINDOW_S):
     for p in positions:
         if abs(p.utc - event.lmax_time) <= window:
             tracks[p.track].append(p)
-    best = None
-    for points in tracks.values():
-        for p in points:
-            d = ground_distance(monitor["lat"], monitor["lon"], p.lat, p.lon)
-            slant = math.hypot(d, p.height_m or 0.0)
-            if best is None or slant < best[0]:
-                best = (slant, d, p)
-    if best is None:
+    if not tracks:
         return {"candidates": 0}
-    slant, d, p = best
+    approaches = [(closest_approach(points, monitor), points[0]) for points in tracks.values()]
+    (slant, ground, height, when), p = min(approaches, key=lambda item: item[0][0])
+    when = round(when)
     return {"callsign": p.callsign, "type": p.aircraft_type, "direction": p.direction, "airport": p.airport,
-            "track": p.track, "closest_time_local": iso_local(p.utc, event.offset_s),
-            "closest_distance_m": round(d), "closest_height_m": _round(p.height_m, 0),
-            "closest_slant_m": round(slant), "lmax_after_closest_s": round(event.lmax_time - p.utc),
+            "track": p.track, "closest_time_local": iso_local(when, event.offset_s),
+            "closest_distance_m": round(ground), "closest_height_m": round(height),
+            "closest_slant_m": round(slant), "lmax_after_closest_s": round(event.lmax_time - when),
             "candidates": len(tracks)}
 
 
@@ -119,6 +142,49 @@ def _position_from_row(row):
         callsign=row["callsign"], registration=row["registration"], squawk="", lat=float(row["lat"]),
         lon=float(row["lon"]), height_m=number("height_m"), altitude_m=number("altitude_m"),
         speed_ms=number("speed_ms"), origin=row["origin"], destination=row["destination"])
+
+
+def gaps(ranges, first, last):
+    """Handles between first and last (inclusive) not in the saved ranges, as (a, b) ranges."""
+    out, cursor = [], first
+    for a, b in ranges:
+        if b < cursor:
+            continue
+        if a > last:
+            break
+        if a > cursor:
+            out.append((cursor, a - 1))
+        cursor = max(cursor, b + 1)
+    if cursor <= last:
+        out.append((cursor, last))
+    return out
+
+
+def count_saved(ranges, first, last):
+    return sum(max(0, min(b, last) - max(a, first) + 1) for a, b in ranges)
+
+
+def read_state(monitor_dir):
+    """A monitor folder's state.json, or {} (read-only: for watching another process's progress)."""
+    try:
+        with open(os.path.join(monitor_dir, "state.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def is_locked(monitor_dir):
+    """True if a webtrak process is writing to this monitor folder now."""
+    path = os.path.join(monitor_dir, "lock")
+    if fcntl is None or not os.path.exists(path):
+        return False
+    with open(path) as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(f, fcntl.LOCK_UN)
+    return False
 
 
 class RawCache:
@@ -219,18 +285,7 @@ class MonitorStore:
 
     def gaps(self, first, last):
         """Handles between first and last (inclusive) that haven't been saved, as (a, b) ranges."""
-        out, cursor = [], first
-        for a, b in self.state.get("saved", []):
-            if b < cursor:
-                continue
-            if a > last:
-                break
-            if a > cursor:
-                out.append((cursor, a - 1))
-            cursor = max(cursor, b + 1)
-        if cursor <= last:
-            out.append((cursor, last))
-        return out
+        return gaps(self.state.get("saved", []), first, last)
 
     # --- radar for matching ---------------------------------------------------------------
 
@@ -326,20 +381,23 @@ class MonitorStore:
         self._append(self.events_path, EVENT_FIELDS, rows)
         return rows
 
-    def finish(self, up_to_handle):
-        """Match waiting events whose window starts by up_to_handle, with whatever radar is saved.
+    def finish(self, start_utc, end_utc):
+        """Match waiting events whose LAmax is from start_utc up to end_utc, with whatever radar is saved.
 
-        For the end of a historical fetch; events after it, such as ones from following, keep waiting.
+        For the end of a historical fetch. Other events keep waiting: one just outside the period
+        may yet have the rest of its radar saved by a fetch of the period next to it.
         """
-        rows = self._match(lambda e: match_handles(e)[0] <= up_to_handle)
+        rows = self._match(lambda e: start_utc <= e.lmax_time < end_utc)
         if rows:
             self._save_state()
         return rows
 
-    def save(self, chunk, text=None):
+    def save(self, chunk, give_up=True):
         """Save one chunk and return a summary for the console, or None if it was saved before.
 
         The summary's events are the ones matched now, which may have come from earlier chunks.
+        give_up=False keeps an event waiting however far the data moves on, for a historical fetch
+        (which saves in time order, so radar missing from before an event would never arrive).
         """
         if self.has(chunk.handle):
             return None
@@ -350,7 +408,7 @@ class MonitorStore:
         by_day = collections.defaultdict(list)
         for lv in levels:
             by_day[local_day(lv.utc, off)].append({"time_utc": iso_utc(lv.utc), "time_local": iso_local(lv.utc, off),
-                                                   "level_db": lv.level, "flag": lv.flag})
+                                                   "level_db": lv.level if lv.valid else "", "flag": lv.flag})
         for day, rows in by_day.items():
             self._append(os.path.join(self.dir, "levels", f"{day}.csv"), LEVEL_FIELDS, rows)
 
@@ -380,11 +438,11 @@ class MonitorStore:
             self.pending.append(event)
         chunk_end = chunk.start_utc + parse.WINDOW_S
         matched = self._match(lambda e: all(self.has(h) for h in match_handles(e))
-                              or chunk_end >= e.lmax_time + MATCH_WINDOW_S + GIVE_UP_S)
+                              or (give_up and chunk_end >= e.lmax_time + MATCH_WINDOW_S + GIVE_UP_S))
         self._save_state()
         self._prune(chunk.handle)
 
-        values = [lv.level for lv in levels]
+        values = [lv.level for lv in levels if lv.valid]
         leq = 10 * math.log10(sum(10 ** (v / 10) for v in values) / len(values)) if values else None
         return {"handle": chunk.handle, "start": iso_local(chunk.start_utc, off), "seconds": len(values),
                 "leq": leq, "max": max(values) if values else None, "events": matched,

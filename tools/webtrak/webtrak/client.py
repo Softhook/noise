@@ -9,12 +9,14 @@ for one new chunk every 30 s, which is what an open WebTrak tab does.
 from __future__ import annotations
 
 import gzip
+import http.client
 import json
 import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 from . import parse
 
@@ -23,6 +25,7 @@ CONFIG_URL = "https://focus-apis.emsbk.com/productinfo"
 FALLBACK_DATA_HOST = "webtrak-server-eu.emsbk.com"
 USER_AGENT = "thamesmead-noise-survey/0.1 (personal, non-commercial noise research)"
 MAX_RETRY_AFTER_S = 900
+TYPICAL_REPLY_S = 3.5  # how long WebTrak took to answer a chunk request on 5 Nov 2026, for estimates
 
 
 def retry_after(error):
@@ -74,13 +77,15 @@ class Client:
                     raw = response.read()
                     encoding = (getattr(response, "headers", None) or {}).get("Content-Encoding", "")
                 return _decode(raw, encoding)
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, EOFError) as error:
+            except (OSError, EOFError, zlib.error, http.client.HTTPException) as error:
+                # OSError covers URLError, HTTPError and timeouts; EOFError and zlib.error are a cut-off or
+                # corrupt gzip reply, HTTPException a cut-off plain one (IncompleteRead) or a bad status line.
                 if isinstance(error, urllib.error.HTTPError) and 400 <= error.code < 500 and error.code != 429:
                     raise
                 if attempt == self.retries:
-                    if isinstance(error, EOFError):  # a truncated gzip reply
-                        raise OSError(f"truncated reply from {url}") from error
-                    raise
+                    if isinstance(error, OSError):
+                        raise
+                    raise OSError(f"bad reply from {url}: {error!r}") from error
                 self._sleep(max(delay, retry_after(error)))
                 delay *= 3
             finally:

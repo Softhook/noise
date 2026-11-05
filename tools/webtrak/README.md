@@ -10,7 +10,8 @@ WebTrak is powered by Envirosuite (formerly Brüel & Kjær EMS). The web applica
 
 - **Live delay:** WebTrak runs approximately **25 minutes behind real time** for community display. The "current" or "live" view is the latest 30-second chunk published.
 - **Noise monitors (NMT):** Each chunk contains 1-second sound levels (dB) per active monitor, plus calculated noise events (`LAmax`, `SEL`, `Leq`, `EPNL`, duration, and start/end times).
-- **Radar tracks:** 4-second position updates with callsign, ICAO type, direction (Arrival/Departure/Other), airport, latitude/longitude, height above aerodrome (metres), and ground speed (m/s).
+- **Gaps at 00:00 and 12:00:** for about 40 s from midnight and noon every monitor reports 20.0 dB with flag `9` (possibly an automatic calibration check; WebTrak doesn't say). That is a placeholder, not a measurement, so those seconds are saved with a blank `level_db`.
+- **Radar tracks:** 4-second position updates with callsign, ICAO type, direction (Arrival/Departure/Other), airport, latitude/longitude, height above aerodrome (metres), and ground speed (m/s). WebTrak gives a callsign only for LCY's scheduled flights; for other aircraft the `callsign` column holds the registration, or is blank if there is none either.
 - **NMT6:** Listed as monitor ID `106` (*"St Pauls Church, Thamesmead"*, 51.50535° N, 0.11075° E).
 
 All network calls use only Python's standard library (`urllib`). Requests are spaced out (1 s apart when following, 2 s for historical fetches, timed from the end of each reply), replies are gzipped (about 6 KB a chunk instead of 30 KB), retries back off and honour `Retry-After`, and every chunk is cached so it is downloaded only once.
@@ -23,6 +24,9 @@ Run from `tools/webtrak` (or from the project root with `PYTHONPATH=tools/webtra
 
 ```bash
 cd tools/webtrak
+
+# The web app: start downloads, watch their progress, see statistics (http://127.0.0.1:8765)
+python3 -m webtrak serve
 
 # Run tests (no network calls)
 python3 -m unittest discover tests
@@ -43,7 +47,13 @@ python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00"
 python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00" --nmt 106,103
 ```
 
-`fetch` carries on past a chunk that fails, and stops only after 3 failures in a row. Run the same command again to pick up whatever is missing; chunks already saved or cached are not downloaded again. `follow` retries missing chunks within its `--backfill` window, waiting 1, 2, 4 … up to 30 minutes between attempts. Only one process at a time can write to a monitor's folder.
+### The web app
+
+`serve` runs a small web app on this computer only (standard library, no installs). From it you can start a `fetch` for a period or `follow` live, for one or several monitors, with an estimate of how many chunks need downloading and how long it will take. You can then watch each download's progress, rate and time left, see which half-minutes of a day each monitor has saved, and look at statistics for any saved period: LAeq, L10/L50/L90, the aircraft share of the sound energy, a chart of 1-minute LAeq with every event's LAmax, 15-minute figures, results by aircraft type, and the list of events.
+
+Downloads run as ordinary `fetch`/`follow` processes, so closing the app doesn't stop them; Stop finishes the current chunk and exits cleanly (as Ctrl-C now does on the command line). A download started from the command line shows as "being written" on its monitor, and the app won't start a second one there.
+
+`fetch` also gets 90 s either side of the period, so events near its ends are matched against all the radar around them. It carries on past a chunk that fails, and stops only after 3 failures in a row. Run the same command again to pick up whatever is missing; chunks already saved or cached are not downloaded again. `follow` retries missing chunks within its `--backfill` window, waiting 1, 2, 4 … up to 30 minutes between attempts. Only one process at a time can write to a monitor's folder.
 
 ## Output data structure
 
@@ -51,6 +61,7 @@ Data is stored under `tools/webtrak/data/<site>/` (git-ignored):
 
 ```text
 tools/webtrak/data/lcy/
+├── jobs/                            # Downloads started from the web app: settings and logs
 ├── raw/YYYY-MM-DD/<handle>.txt.gz   # Each chunk as received (UTC day), shared by all monitors; --no-raw turns it off
 └── nmt106/
     ├── state.json          # Saved chunk ranges, and events still waiting for radar
@@ -65,13 +76,15 @@ Each chunk holds every monitor and all radar, so the raw cache lets you add moni
 
 ### Event matching (`events.csv`)
 
-For each noise event reported by NMT6, the scraper correlates nearby radar tracks within ±60 seconds of the `LAmax` peak time. An event is listed in one or two chunks around its time (the one where it starts, the one where it ends, or both), so the radar for the minute after its LAmax may still be to come: the event waits (in `state.json`, so a restart doesn't lose it) until those chunks are saved, and is matched then. If they never arrive it is matched with what there is once the data is 10 minutes further on, or at the end of a `fetch`. The match identifies:
-- Matched aircraft callsign, aircraft type, direction (`A`/`D`/`O`), origin/destination.
-- Closest approach: ground distance (m), height (m), slant distance (m), and timing difference relative to `LAmax`.
+For each noise event reported by NMT6, the scraper looks at the radar tracks within the `--radius` during the 60 seconds either side of the `LAmax` time, and picks the one that came closest in slant distance. Radar positions are 4 s (about 300 m) apart, so the closest point is looked for along the line between neighbouring positions, not only at the positions themselves.
+
+An event is listed in one or two chunks around its time (the one where it starts, the one where it ends, or both), so the radar for the minute after its LAmax may still be to come: the event waits (in `state.json`, so a restart doesn't lose it) until those chunks are saved, and is matched then. When following, an event whose chunks never arrive is matched with what there is once the data is 10 minutes further on; a `fetch` matches the events in its period that are still waiting at the end. The match identifies:
+- Matched aircraft callsign (or registration), aircraft type, direction (`A`/`D`/`O`), airport, track id.
+- Closest approach: ground distance (m), height (m), slant distance (m), and how many seconds `LAmax` came after it. `candidates` is the number of tracks in range.
 
 ### Output files schema
 
-- **`levels/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `level_db`, `flag` (flag `1` during an event, `5` background).
+- **`levels/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `level_db`, `flag` (flag `1` during an event, `5` background, `9` no measurement). `level_db` is blank when there was no measurement.
 - **`aircraft/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `track`, `callsign`, `type`, `registration`, `direction`, `airport`, `origin`, `destination`, `lat`, `lon`, `height_m`, `altitude_m`, `speed_ms`, `distance_m`, `slant_m`.
 - **`events.csv`**: `start_utc`, `start_local`, `lmax_time_local`, `end_local`, `duration_s`, `lmax_db`, `sel_db`, `leq_db`, `epnl_db`, `event_class`, `callsign`, `type`, `direction`, `airport`, `track`, `closest_time_local`, `closest_distance_m`, `closest_height_m`, `closest_slant_m`, `lmax_after_closest_s`, `candidates`.
 
@@ -79,4 +92,4 @@ For each noise event reported by NMT6, the scraper correlates nearby radar track
 
 WebTrak data is provided for personal and non-commercial community engagement. This tool sets an honest user-agent header, asks for compressed replies and stores data locally.
 
-There is no published rate limit, and the server sends no rate-limit headers, but it serves WebTrak for many airports. Following live (one chunk every 30 s) is what an open browser tab does. A historical fetch is much heavier: a day is 2,880 requests (about 2½ hours at the default 2 s) and a month about 86,000. For long periods, fetch only what lines up with the garden measurements, run it overnight UK time, and consider asking London City Airport for the NMT6 data directly.
+There is no published rate limit, and the server sends no rate-limit headers, but it serves WebTrak for many airports. Following live (one chunk every 30 s) is what an open browser tab does. A historical fetch is much heavier: a day is 2,880 requests (about 4½ hours at the default 2 s, as WebTrak takes about 3.5 s to answer each) and a month about 86,000. For long periods, fetch only what lines up with the garden measurements, run it overnight UK time, and consider asking London City Airport for the NMT6 data directly.

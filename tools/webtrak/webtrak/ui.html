@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebTrak Collector</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --good-ink: #006300;
+  --fill-soft: #cde2fb; --button: #0b0b0b; --button-ink: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-ink: #0ca30c;
+    --fill-soft: #184f95; --button: #f0efec; --button-ink: #0b0b0b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good-ink: #0ca30c;
+  --fill-soft: #184f95; --button: #f0efec; --button-ink: #0b0b0b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 20px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+h2 { font-size: 15px; margin: 0 0 12px; font-weight: 650; }
+h3 { font-size: 13px; margin: 16px 0 8px; font-weight: 600; color: var(--ink-2); }
+.sub { color: var(--ink-2); }
+.muted { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 820px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+label { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+input, select, button { font: inherit; color: inherit; }
+input[type=datetime-local], input[type=date], input[type=number], select {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--axis); border-radius: 6px; background: var(--surface); }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.row > div { flex: 1 1 160px; min-width: 0; }
+.row > div.narrow { flex: 0 1 110px; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.checks label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink); margin: 0; }
+button { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--axis); background: var(--surface); cursor: pointer; }
+button.primary { background: var(--button); color: var(--button-ink); border-color: var(--button); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.link { border: none; background: none; padding: 2px 6px; color: var(--ink-2); text-decoration: underline; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.presets button { padding: 4px 10px; font-size: 12px; }
+.plan { margin: 10px 0 12px; color: var(--ink-2); min-height: 20px; }
+.warn { color: var(--critical); }
+.job { border-top: 1px solid var(--grid); padding: 12px 0; }
+.job:first-child { border-top: none; padding-top: 0; }
+.job-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: baseline; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--muted); }
+.dot.run { background: var(--good); } .dot.bad { background: var(--critical); } .dot.wait { background: var(--warning); }
+.bar { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin: 8px 0 4px; }
+.bar > div { height: 100%; background: var(--s1); border-radius: 4px; transition: width .4s; }
+pre { background: var(--page); border: 1px solid var(--grid); border-radius: 6px; padding: 8px; font-size: 12px;
+  overflow-x: auto; margin: 8px 0 0; max-height: 220px; }
+details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; margin-top: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 12px; border-bottom: 1px solid var(--axis); padding: 6px 8px; }
+td { border-bottom: 1px solid var(--grid); padding: 5px 8px; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; }
+.scroll { overflow-x: auto; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.tile .v { font-size: 24px; font-weight: 650; }
+.tile .v small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+.tile .k { font-size: 12px; color: var(--ink-2); }
+.tile .n { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(0,0,0,.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; min-width: 160px; display: none; z-index: 2; }
+.tip b { font-size: 14px; }
+.tip .t { color: var(--ink-2); margin-bottom: 4px; }
+.tip .r { display: flex; align-items: center; gap: 6px; }
+.cov { margin-bottom: 10px; }
+.cov canvas { width: 100%; height: 18px; display: block; border-radius: 3px; }
+.cov .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.loading { opacity: .5; transition: opacity .2s; }
+.empty { color: var(--muted); padding: 8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>WebTrak collector</h1>
+      <div class="sub">London City Airport noise monitors · times are UK local</div>
+    </div>
+    <div class="sub" id="range">Checking WebTrak…</div>
+  </header>
+
+  <div class="grid2">
+    <section class="card" aria-labelledby="new-h">
+      <h2 id="new-h">New download</h2>
+      <label>Monitors</label>
+      <div class="checks" id="monitor-checks"></div>
+      <div class="presets" id="presets">
+        <button type="button" data-preset="last2">Latest 2 h</button>
+        <button type="button" data-preset="today">Today so far</button>
+        <button type="button" data-preset="yesterday">Yesterday</button>
+      </div>
+      <div class="row">
+        <div><label for="from">From</label><input type="datetime-local" id="from"></div>
+        <div><label for="to">To (not included)</label><input type="datetime-local" id="to"></div>
+        <div class="narrow"><label for="delay">Seconds apart</label><input type="number" id="delay" min="0.5" step="0.5" value="2"></div>
+      </div>
+      <div class="plan" id="plan" aria-live="polite"></div>
+      <div class="row">
+        <button class="primary" id="fetch-btn" type="button">Download period</button>
+        <button id="follow-btn" type="button" title="Keep collecting new data as it appears, about 25 minutes behind real time">Follow live</button>
+      </div>
+      <div class="plan warn" id="start-error" role="alert"></div>
+    </section>
+
+    <section class="card" aria-labelledby="jobs-h">
+      <h2 id="jobs-h">Downloads</h2>
+      <div id="jobs"><div class="empty">No downloads started from here yet.</div></div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="mon-h">
+    <div class="row" style="justify-content: space-between; align-items: baseline;">
+      <h2 id="mon-h" style="margin:0">Saved data</h2>
+      <div style="flex:0 1 180px"><label for="cov-day">Coverage for day</label><input type="date" id="cov-day"></div>
+    </div>
+    <div class="scroll" style="margin-top:12px"><table id="monitors"></table></div>
+    <div id="coverage" style="margin-top:14px"></div>
+  </section>
+
+  <section aria-labelledby="stats-h">
+    <div class="card">
+      <h2 id="stats-h">Statistics</h2>
+      <div class="row">
+        <div class="narrow" style="flex-basis:180px"><label for="s-mon">Monitor</label><select id="s-mon"></select></div>
+        <div><label for="s-from">From</label><input type="datetime-local" id="s-from"></div>
+        <div><label for="s-to">To</label><input type="datetime-local" id="s-to"></div>
+        <div class="narrow" style="flex:0 0 auto"><button class="primary" id="s-go" type="button">Show</button></div>
+      </div>
+      <div class="plan" id="s-note"></div>
+    </div>
+    <div id="stats-body"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const ZONE = "Europe/London";
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid != null) n.append(kid);
+  return n;
+};
+const svg = (tag, attrs = {}) => {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+const fmt = (v, d = 1) => (v == null || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
+
+// Times: the server takes and gives London local times; the browser may be elsewhere.
+const parts = (utc) => {
+  const p = {};
+  for (const x of new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(utc * 1000))) p[x.type] = x.value;
+  return p;
+};
+const localInput = (utc) => { const p = parts(utc); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; };
+const localDay = (utc) => localInput(utc).slice(0, 10);
+const hm = (utc) => { const p = parts(utc); return `${p.hour}:${p.minute}`; };
+const hms = (utc) => { const p = parts(utc); return `${p.hour}:${p.minute}:${p.second}`; };
+const dayLabel = (utc) => new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, day: "numeric", month: "short" }).format(new Date(utc * 1000));
+const span = (a, b) => localDay(a) === localDay(b - 1) ? `${dayLabel(a)} ${hm(a)}–${hm(b)}` : `${dayLabel(a)} ${hm(a)} – ${dayLabel(b)} ${hm(b)}`;
+const inputLabel = (s) => s ? s.replace("T", " ") : "";
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+let monitors = [], latestUtc = null, lastStatus = null;
+
+// --- header: WebTrak's range ------------------------------------------------------------
+async function loadRange() {
+  try {
+    const r = await api("/api/range");
+    if (r.error) { $("range").textContent = `WebTrak not reachable: ${r.error}`; return; }
+    latestUtc = r.latest_utc;
+    $("range").textContent = `WebTrak holds ${r.first.slice(0, 10)} to ${r.last.slice(0, 16)} · newest data ${r.lag_min} min behind`;
+  } catch (e) { $("range").textContent = `WebTrak not reachable: ${e.message}`; }
+}
+
+// --- new download -----------------------------------------------------------------------
+function chosen() { return [...document.querySelectorAll("#monitor-checks input:checked")].map((c) => c.value); }
+
+function setPreset(name) {
+  const now = latestUtc || Date.now() / 1000 - 30 * 60;
+  const floorMin = (t) => Math.floor(t / 60) * 60;
+  let a, b;
+  if (name === "last2") { b = floorMin(now); a = b - 7200; }
+  if (name === "today") { $("from").value = `${localDay(now)}T00:00`; $("to").value = localInput(floorMin(now)); return planSoon(); }
+  if (name === "yesterday") {
+    const y = localDay(now - 86400);
+    $("from").value = `${y}T00:00`; $("to").value = `${localDay(now)}T00:00`; return planSoon();
+  }
+  $("from").value = localInput(a); $("to").value = localInput(b); planSoon();
+}
+
+let planTimer = null;
+function planSoon() { clearTimeout(planTimer); planTimer = setTimeout(plan, 250); }
+async function plan() {
+  const ids = chosen(), f = $("from").value, t = $("to").value;
+  $("fetch-btn").disabled = true; $("follow-btn").disabled = !ids.length;
+  if (!ids.length) { $("plan").textContent = "Choose at least one monitor."; return; }
+  if (!f || !t) { $("plan").textContent = "Choose a period."; return; }
+  try {
+    const p = await api(`/api/plan?${new URLSearchParams({ nmt: ids.join(","), from: f, to: t, delay: $("delay").value })}`);
+    const txt = p.to_save === 0 ? `All ${p.chunks} chunks are already saved.`
+      : `${p.chunks} chunks · ${p.to_save} to save · ${p.to_download} to download · about ${p.minutes < 1 ? "<1" : Math.round(p.minutes)} min`;
+    $("plan").textContent = txt;
+    $("plan").classList.remove("warn");
+    if (p.busy.length) {
+      $("plan").textContent = `${txt}. NMT${p.busy.join(", NMT")} is being written by another download; wait for it or stop it.`;
+      $("plan").classList.add("warn");
+    }
+    $("fetch-btn").disabled = p.to_save === 0 || p.busy.length > 0;
+    $("follow-btn").disabled = p.busy.length > 0;
+  } catch (e) { $("plan").textContent = e.message; $("plan").classList.add("warn"); }
+}
+
+async function start(kind) {
+  $("start-error").textContent = "";
+  const body = { kind, nmt: chosen().join(","), delay: Number($("delay").value) || 2 };
+  if (kind === "fetch") Object.assign(body, { from: $("from").value, to: $("to").value });
+  else Object.assign(body, { backfill: 1, delay: Math.max(1, Number($("delay").value) || 1) });
+  try { await api("/api/jobs", body); await refreshStatus(); planSoon(); }
+  catch (e) { $("start-error").textContent = e.message; }
+}
+
+// --- downloads and saved data --------------------------------------------------------------
+function jobState(j) {
+  if (j.running) return ["run", j.kind === "follow" ? "following" : "downloading"];
+  if (j.exit === 0) return ["", "finished"];
+  if (j.exit === "unknown") return ["", "ended"];
+  if (j.exit === 1) return ["wait", "stopped or incomplete"];
+  return ["bad", `failed (exit ${j.exit})`];
+}
+
+function renderJobs(jobs) {
+  const box = $("jobs");
+  box.replaceChildren();
+  if (!jobs.length) { box.append(el("div", { class: "empty", text: "No downloads started from here yet." })); return; }
+  for (const j of jobs.slice(0, 8)) {
+    const [dotCls, label] = jobState(j);
+    const title = j.kind === "fetch" ? `${inputLabel(j.from)} → ${inputLabel(j.to).slice(11)}` : `Follow live (backfill ${j.backfill} h)`;
+    const actions = el("div");
+    if (j.running) actions.append(el("button", { type: "button", text: "Stop", onclick: () => api("/api/jobs/stop", { id: j.id }).then(refreshStatus) }));
+    else actions.append(el("button", { class: "link", type: "button", text: "Remove", onclick: () => api("/api/jobs/forget", { id: j.id }).then(refreshStatus) }));
+    if (j.kind === "fetch") actions.prepend(el("button", { class: "link", type: "button", text: "Statistics", onclick: () => {
+      $("s-mon").value = j.nmt[0]; $("s-from").value = j.from; $("s-to").value = j.to; loadStats(); $("stats-h").scrollIntoView({ behavior: "smooth" }); } }));
+    const node = el("div", { class: "job" },
+      el("div", { class: "job-head" },
+        el("div", {}, el("strong", { text: title }), el("span", { class: "muted", text: `  NMT${j.nmt.join(", NMT")}` })),
+        el("span", { class: "badge" }, el("span", { class: `dot ${dotCls}` }), label)));
+    if (j.kind === "fetch") {
+      const pct = j.total ? Math.min(100, 100 * j.done / j.total) : 0;
+      node.append(el("div", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": j.total, "aria-valuenow": j.done },
+        el("div", { style: `width:${pct}%` })));
+      const bits = [`${j.done} of ${j.total} chunks (${Math.floor(pct)}%)`];
+      if (j.running && j.per_minute) bits.push(`${fmt(j.per_minute, 0)} a minute`);
+      if (j.running && j.eta_min != null) bits.push(`about ${j.eta_min < 1 ? "<1" : Math.ceil(j.eta_min)} min left`);
+      node.append(el("div", { class: "sub", text: bits.join(" · ") }));
+    } else if (j.last_utc) {
+      node.append(el("div", { class: "sub", text: `Newest saved data ${dayLabel(j.last_utc)} ${hm(j.last_utc)}, ${Math.round((Date.now() / 1000 - j.last_utc) / 60)} min ago` }));
+    }
+    const row = el("div", { class: "row", style: "justify-content:space-between;align-items:center;margin-top:4px" });
+    const det = el("details", {}, el("summary", { text: "Log" }), el("pre", { text: (j.log || []).join("\n") || "(nothing yet)" }));
+    row.append(det, actions);
+    node.append(row);
+    box.append(node);
+  }
+}
+
+function renderMonitors(list, jobs) {
+  const t = $("monitors");
+  t.replaceChildren();
+  if (!list.length) { t.append(el("tr", {}, el("td", { class: "empty", text: "Nothing saved yet." }))); return; }
+  t.append(el("tr", {}, ...["Monitor", "Saved", "From", "To", "Separate periods", "Events waiting", "Status"].map((h, i) =>
+    el("th", { class: i && i < 6 && i !== 2 && i !== 3 ? "num" : "", text: h }))));
+  const appWriting = new Set(jobs.filter((j) => j.running).flatMap((j) => j.nmt));
+  for (const m of list) {
+    const hours = m.chunks * 30 / 3600;
+    const status = m.writing ? (appWriting.has(m.id) ? "being written" : "being written (started outside the app)") : "idle";
+    t.append(el("tr", {},
+      el("td", {}, el("strong", { text: `NMT${m.id}` }), document.createTextNode(` ${m.name}`)),
+      el("td", { class: "num", text: hours >= 1 ? `${fmt(hours)} h` : `${m.chunks * 30 / 60} min` }),
+      el("td", { text: m.first_utc ? `${dayLabel(m.first_utc)} ${hm(m.first_utc)}` : "—" }),
+      el("td", { text: m.last_utc ? `${dayLabel(m.last_utc)} ${hm(m.last_utc)}` : "—" }),
+      el("td", { class: "num", text: m.ranges }),
+      el("td", { class: "num", text: m.pending_events }),
+      el("td", {}, el("span", { class: "badge" }, el("span", { class: `dot ${m.writing ? "run" : ""}` }), status))));
+  }
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    lastStatus = s;
+    renderJobs(s.jobs);
+    renderMonitors(s.monitors, s.jobs);
+    syncStatsMonitors(s.monitors);
+  } catch (e) { $("jobs").replaceChildren(el("div", { class: "warn", text: `The app isn't answering: ${e.message}` })); }
+}
+
+async function refreshCoverage() {
+  const day = $("cov-day").value;
+  if (!day) return;
+  let c;
+  try { c = await api(`/api/coverage?day=${day}`); } catch (e) { return; }
+  const box = $("coverage");
+  box.replaceChildren();
+  const css = getComputedStyle(document.documentElement);
+  for (const [id, bits] of Object.entries(c.monitors)) {
+    const saved = [...bits].filter((b) => b === "1").length;
+    const canvas = el("canvas", { role: "img", "aria-label": `NMT${id}: ${saved} of ${bits.length} half-minute chunks saved on ${day}` });
+    const wrap = el("div", { class: "cov" },
+      el("div", { class: "sub", style: "font-size:12px;margin-bottom:3px", text: `NMT${id} · ${fmt(saved * 30 / 3600)} h of ${fmt(bits.length * 30 / 3600, 0)} h saved` }),
+      canvas, el("div", { class: "axis" }, ...[0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => el("span", { text: String(h).padStart(2, "0") }))));
+    box.append(wrap);
+    requestAnimationFrame(() => {
+      const w = canvas.clientWidth, h = 18, dpr = window.devicePixelRatio || 1;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      const g = canvas.getContext("2d");
+      g.scale(dpr, dpr);
+      g.fillStyle = css.getPropertyValue("--grid"); g.fillRect(0, 0, w, h);
+      g.fillStyle = css.getPropertyValue("--s1");
+      const n = bits.length;
+      let i = 0;
+      while (i < n) {
+        if (bits[i] !== "1") { i++; continue; }
+        let j = i; while (j < n && bits[j] === "1") j++;
+        g.fillRect(i / n * w, 0, Math.max(1, (j - i) / n * w), h);
+        i = j;
+      }
+    });
+  }
+  if (!Object.keys(c.monitors).length) box.append(el("div", { class: "empty", text: "No monitors saved yet." }));
+}
+
+// --- statistics ---------------------------------------------------------------------------
+function syncStatsMonitors(list) {
+  const sel = $("s-mon");
+  const ids = list.map((m) => m.id).join(",");
+  if (sel.dataset.ids === ids) return;
+  const keep = sel.value;
+  sel.replaceChildren(...list.map((m) => el("option", { value: m.id, text: `NMT${m.id} ${m.name}` })));
+  sel.dataset.ids = ids;
+  if (keep && ids.split(",").includes(keep)) sel.value = keep;
+}
+
+let statsTimer = null;
+async function loadStats() {
+  const q = { nmt: $("s-mon").value, from: $("s-from").value, to: $("s-to").value };
+  if (!q.nmt || !q.from || !q.to) { $("s-note").textContent = "Choose a monitor and a period."; return; }
+  const body = $("stats-body");
+  body.classList.add("loading");
+  try {
+    const s = await api(`/api/stats?${new URLSearchParams(q)}`);
+    renderStats(s, q);
+    $("s-note").textContent = "";
+  } catch (e) { $("s-note").textContent = e.message; }
+  body.classList.remove("loading");
+  clearTimeout(statsTimer);
+  // Keep it current while a download is writing to this monitor.
+  const busy = lastStatus && lastStatus.monitors.some((m) => m.id === q.nmt && m.writing);
+  if (busy) statsTimer = setTimeout(loadStats, 15000);
+}
+
+function tile(k, v, unit, note) {
+  return el("div", { class: "tile" }, el("div", { class: "k", text: k }),
+    el("div", { class: "v" }, v, unit ? el("small", { text: unit }) : null), note ? el("div", { class: "n", text: note }) : null);
+}
+
+function table(head, rows, numeric) {
+  return el("div", { class: "scroll" }, el("table", {},
+    el("tr", {}, ...head.map((h, i) => el("th", { class: numeric[i] ? "num" : "", text: h }))),
+    ...rows.map((r) => el("tr", {}, ...r.map((v, i) => el("td", { class: numeric[i] ? "num" : "", text: v }))))));
+}
+
+function renderStats(s, q) {
+  const body = $("stats-body");
+  body.replaceChildren();
+  const cov = s.coverage;
+  const pct = cov.chunks ? Math.round(100 * cov.saved / cov.chunks) : 0;
+  if (!cov.seconds) {
+    body.append(el("div", { class: "card empty", text: "Nothing saved for this monitor in that period yet." }));
+    return;
+  }
+  const covNote = `${pct}% of the period saved` + (cov.no_measurement_seconds ? ` · ${cov.no_measurement_seconds} s without a measurement` : "")
+    + (cov.pending_events ? ` · ${cov.pending_events} events waiting for radar` : "");
+  const tiles = el("div", { class: "tiles" },
+    tile("LAeq", fmt(s.laeq), "dB", span(s.start, s.end)),
+    tile("Background L90", fmt(s.l90), "dB", "exceeded 90% of the time"),
+    tile("Median L50", fmt(s.l50), "dB", "exceeded half the time"),
+    tile("L10", fmt(s.l10), "dB", "exceeded 10% of the time"),
+    tile("Highest 1 s level", fmt(s.lmax), "dB"),
+    tile("Noise events", String(s.events), "", `${s.aircraft_events} aircraft (class 1)`),
+    tile("Aircraft share", s.aircraft_share == null ? "—" : String(s.aircraft_share), s.aircraft_share == null ? "" : "%",
+      s.laeq_aircraft == null ? "of the sound energy" : `of the sound energy · ${fmt(s.laeq_aircraft)} dB from aircraft alone`),
+    tile("LAeq outside events", fmt(s.laeq_outside_events), "dB", "the seconds not in a noise event"));
+  body.append(el("div", { class: "sub", style: "margin:-4px 0 12px", text: covNote }), tiles);
+
+  const chartCard = el("div", { class: "card" }, el("h2", { text: `Sound level, NMT${q.nmt}` }));
+  const legend = el("div", { class: "legend" });
+  const key = (draw, label) => { const k = svg("svg", { width: 22, height: 12 }); draw(k); return el("span", {}, k, label); };
+  legend.append(
+    key((k) => k.append(svg("line", { x1: 1, x2: 21, y1: 6, y2: 6, stroke: "var(--s1)", "stroke-width": 2 })), `${s.bucket_s / 60}-minute LAeq`),
+    key((k) => k.append(svg("circle", { cx: 11, cy: 6, r: 4.5, fill: "var(--s2)" })), "Aircraft event, at its LAmax"),
+    key((k) => k.append(svg("circle", { cx: 11, cy: 6, r: 3.8, fill: "none", stroke: "var(--s3)", "stroke-width": 2 })), "Other noise event"));
+  const holder = el("div", { class: "chart" });
+  chartCard.append(legend, holder);
+  body.append(chartCard);
+  drawChart(holder, s);
+  new ResizeObserver(() => drawChart(holder, s)).observe(holder);
+
+  const twoCol = el("div", { class: "grid2" });
+  const qCard = el("div", { class: "card" }, el("h2", { text: "Every 15 minutes" }),
+    table(["Start", "LAeq", "L90", "Max", "Events", "Aircraft"],
+      s.quarters.map((x) => [hm(x.t), fmt(x.laeq), fmt(x.l90), fmt(x.max), String(x.events), String(x.aircraft)]),
+      [false, true, true, true, true, true]));
+  const tCard = el("div", { class: "card" }, el("h2", { text: "Aircraft events by type" }),
+    s.types.length ? table(["Type", "Events", "LAmax median", "SEL median", "Slant median (m)"],
+      s.types.map((x) => [x.type, String(x.count), fmt(x.lmax), fmt(x.sel), x.slant == null ? "—" : String(x.slant)]),
+      [false, true, true, true, true]) : el("div", { class: "empty", text: "No aircraft events in this period." }),
+    el("div", { class: "muted", style: "font-size:12px;margin-top:8px", text: "Slant: straight-line distance from the monitor at the aircraft's closest point." }));
+  twoCol.append(qCard, tCard);
+  body.append(twoCol);
+
+  const evCard = el("div", { class: "card" }, el("h2", { text: `Noise events (${s.event_list.length})` }),
+    table(["LAmax at", "LAmax", "SEL", "Length (s)", "Class", "Aircraft", "Type", "Dir", "Slant (m)", "Height (m)"],
+      s.event_list.map((e) => [hms(e.t), fmt(e.lmax), fmt(e.sel), fmt(e.duration, 0), e.event_class,
+        e.track ? (e.callsign || `track ${e.track}`) : "none in range", e.type || "", e.direction || "",
+        e.slant == null ? "—" : String(e.slant), e.height == null ? "—" : String(e.height)]),
+      [false, true, true, true, false, false, false, false, true, true]),
+    el("div", { class: "muted", style: "font-size:12px;margin-top:8px", text: "Class 1 looks like WebTrak's aircraft-correlated events, 5 other noise (an inference). Dir: A arrival, D departure, O other." }));
+  body.append(evCard);
+}
+
+function drawChart(holder, s) {
+  const W = Math.max(320, holder.clientWidth), H = 280, m = { l: 40, r: 12, t: 10, b: 26 };
+  const pts = s.series, evs = s.event_list;
+  const vals = pts.map((p) => p.laeq).concat(evs.map((e) => e.lmax));
+  const lo = Math.max(0, Math.floor((Math.min(...vals) - 3) / 10) * 10), hi = Math.ceil((Math.max(...vals) + 2) / 10) * 10;
+  const x = (t) => m.l + (t - s.start) / (s.end - s.start) * (W - m.l - m.r);
+  const y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
+    "aria-label": `Sound level from ${span(s.start, s.end)}: LAeq ${fmt(s.laeq)} dB, ${s.events} events. The tables below have the values.` });
+  for (let v = lo; v <= hi; v += 10) {
+    root.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: v === lo ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }));
+    const t = svg("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }); t.textContent = v; root.append(t);
+  }
+  const hours = (s.end - s.start) / 3600;
+  const step = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].find((st) => (s.end - s.start) / st <= Math.max(3, W / 90)) || 86400;
+  for (let t = Math.ceil(s.start / step) * step; t <= s.end; t += step) {
+    const anchor = x(t) < m.l + 20 ? "start" : x(t) > W - m.r - 20 ? "end" : "middle";
+    const lab = svg("text", { x: x(t), y: H - 8, "text-anchor": anchor, "font-size": 11, fill: "var(--muted)" });
+    lab.textContent = hours > 30 && hm(t) === "00:00" ? dayLabel(t) : hm(t);
+    root.append(lab);
+  }
+  // The line, broken where data is missing.
+  let d = "", prev = null;
+  for (const p of pts) {
+    if (p.laeq == null) { prev = null; continue; }
+    d += `${prev == null || p.t - prev > s.bucket_s * 1.5 ? "M" : "L"}${x(p.t + s.bucket_s / 2).toFixed(1)},${y(p.laeq).toFixed(1)}`;
+    prev = p.t;
+  }
+  root.append(svg("path", { d, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  for (const e of evs) {
+    const air = e.event_class === "1";
+    root.append(air ? svg("circle", { cx: x(e.t), cy: y(e.lmax), r: 4.5, fill: "var(--s2)", stroke: "var(--surface)", "stroke-width": 2 })
+      : svg("circle", { cx: x(e.t), cy: y(e.lmax), r: 3.8, fill: "var(--surface)", stroke: "var(--s3)", "stroke-width": 2 }));
+  }
+  const cross = svg("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
+  root.append(cross);
+  const hit = svg("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent", tabindex: 0 });
+  root.append(hit);
+  const tip = el("div", { class: "tip" });
+  holder.replaceChildren(root, tip);
+
+  const show = (t) => {
+    let best = null;
+    for (const p of pts) if (best == null || Math.abs(p.t + s.bucket_s / 2 - t) < Math.abs(best.t + s.bucket_s / 2 - t)) best = p;
+    if (!best) return;
+    let ev = null;
+    for (const e of evs) if (Math.abs(e.t - t) <= (s.end - s.start) / (W - m.l - m.r) * 12 && (!ev || Math.abs(e.t - t) < Math.abs(ev.t - t))) ev = e;
+    const cx = x(ev ? ev.t : best.t + s.bucket_s / 2);
+    cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
+    const line = (color, value, label, ring) => {
+      const k = svg("svg", { width: 14, height: 10 });
+      k.append(ring ? svg("circle", { cx: 7, cy: 5, r: 3.5, fill: "none", stroke: color, "stroke-width": 2 })
+        : color === "var(--s1)" ? svg("line", { x1: 0, x2: 14, y1: 5, y2: 5, stroke: color, "stroke-width": 2 }) : svg("circle", { cx: 7, cy: 5, r: 4, fill: color }));
+      return el("div", { class: "r" }, k, el("b", { text: value }), el("span", { class: "muted", text: label }));
+    };
+    const kids = [el("div", { class: "t", text: `${hm(best.t)}–${hm(best.t + s.bucket_s)}` }),
+      line("var(--s1)", `${fmt(best.laeq)} dB`, `LAeq · max ${fmt(best.max)}`)];
+    if (ev) {
+      const who = ev.track ? `${ev.callsign || "track " + ev.track} ${ev.type || ""} ${ev.direction || ""}`.trim() : "no aircraft in range";
+      kids.push(el("div", { class: "t", style: "margin-top:6px", text: `Event ${hms(ev.t)}` }),
+        line(ev.event_class === "1" ? "var(--s2)" : "var(--s3)", `${fmt(ev.lmax)} dB`, `LAmax · SEL ${fmt(ev.sel)}`, ev.event_class !== "1"),
+        el("div", { class: "muted", text: who + (ev.slant != null ? ` · ${ev.slant} m slant` : "") }));
+    }
+    tip.replaceChildren(...kids);
+    tip.style.display = "block";
+    const box = holder.getBoundingClientRect(), scale = box.width / W;
+    let left = cx * scale + 14;
+    if (left + tip.offsetWidth > box.width) left = cx * scale - tip.offsetWidth - 14;
+    tip.style.left = `${Math.max(0, left)}px`; tip.style.top = `${m.t + 4}px`;
+  };
+  hit.addEventListener("pointermove", (ev) => {
+    const r = root.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * W / r.width;
+    show(s.start + (px - m.l) / (W - m.l - m.r) * (s.end - s.start));
+  });
+  hit.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+  let kb = null;
+  hit.addEventListener("keydown", (ev) => {
+    if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
+    ev.preventDefault();
+    kb = (kb == null ? s.start : kb) + (ev.key === "ArrowRight" ? 1 : -1) * s.bucket_s;
+    kb = Math.min(s.end, Math.max(s.start, kb)); show(kb);
+  });
+  hit.addEventListener("blur", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+}
+
+// --- start --------------------------------------------------------------------------------
+async function init() {
+  monitors = await api("/api/monitors");
+  $("monitor-checks").replaceChildren(...monitors.map((m) => el("label", {},
+    el("input", { type: "checkbox", value: m.id, ...(m.id === "106" ? { checked: "" } : {}), onchange: planSoon }),
+    `NMT${m.id} ${m.name}`)));
+  $("presets").addEventListener("click", (e) => { if (e.target.dataset.preset) setPreset(e.target.dataset.preset); });
+  for (const id of ["from", "to", "delay"]) $(id).addEventListener("input", planSoon);
+  $("fetch-btn").addEventListener("click", () => start("fetch"));
+  $("follow-btn").addEventListener("click", () => start("follow"));
+  $("s-go").addEventListener("click", loadStats);
+  $("cov-day").addEventListener("change", refreshCoverage);
+  await loadRange();
+  setPreset("last2");
+  $("cov-day").value = localDay(latestUtc || Date.now() / 1000);
+  await refreshStatus();
+  // Statistics start on the newest download, or else the latest 2 hours.
+  const lastFetch = lastStatus.jobs.find((j) => j.kind === "fetch");
+  const firstMon = lastStatus.monitors[0];
+  const want = new URLSearchParams(location.search);
+  if (want.get("from") && want.get("to")) {
+    $("s-mon").value = want.get("nmt") || "106"; $("s-from").value = want.get("from"); $("s-to").value = want.get("to");
+  } else if (lastFetch) { $("s-mon").value = lastFetch.nmt[0]; $("s-from").value = lastFetch.from; $("s-to").value = lastFetch.to; }
+  else if (firstMon && firstMon.last_utc) {
+    $("s-mon").value = firstMon.id; $("s-to").value = localInput(firstMon.last_utc); $("s-from").value = localInput(firstMon.last_utc - 7200);
+  }
+  refreshCoverage();
+  if ($("s-from").value) loadStats();
+  setInterval(refreshStatus, 2000);
+  setInterval(refreshCoverage, 10000);
+  setInterval(loadRange, 300000);
+}
+init().catch((e) => {
+  // Opened as a plain file, or from a server that isn't the app's: there is no /api to talk to.
+  const hint = location.protocol === "file:" || /HTTP 404|Failed to fetch|NetworkError/.test(e.message)
+    ? " This page needs the app's own server: run  python3 -m webtrak serve  in tools/webtrak, then open http://127.0.0.1:8765/" : "";
+  document.querySelector("main").prepend(el("div", { class: "card warn", text: `Couldn't start: ${e.message}.${hint}` }));
+});
+</script>
+</body>
+</html>

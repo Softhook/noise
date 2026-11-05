@@ -17,7 +17,10 @@ against real data on 5 Nov 2026:
 - ``noise``: time, monitor id, monitor id, flag, level in dB. One per second per monitor. The
   flag is 1 during a noise event and 5 otherwise. The peak 1 s level matches the event LAmax, and
   the levels' energy mean is close to the event Leq, so they look like 1 s LAeq or similar, but
-  WebTrak doesn't say which.
+  WebTrak doesn't say which. For about 40 s from 00:00 and 12:00 local time every monitor at once
+  reports 20.0 dB with flag 9 (seen on 4 and 5 Nov 2026; perhaps an automatic calibration check).
+  That is a placeholder, not a measurement, and the first second of it can carry flag 1 instead,
+  so a level counts as valid only if its flag isn't 9 and it is above 20.0.
 - ``event``: start, monitor id, monitor id, class, LAmax, LAmax time, SEL, Leq, EPNL, duration in
   s, end. SEL = Leq + 10 log10(duration). Class 1 looks like an aircraft-correlated event and 5 a
   non-aircraft one (an inference). An event is listed, complete, in one or two chunks around
@@ -28,6 +31,8 @@ against real data on 5 Nov 2026:
   m/s, registration, squawk, origin, destination, scheduled time, tag group, altitude in metres.
   Metres and m/s were checked against an E190 departure: its reported speed matched the speed
   worked out from its positions, and altitude minus height is the aerodrome's 6 m elevation.
+  WebTrak gives a callsign only for LCY's scheduled flights (5 of 122 tracks on 5 Nov 2026);
+  other aircraft have just a registration, and some just a squawk code.
 """
 
 from __future__ import annotations
@@ -37,7 +42,15 @@ import dataclasses
 import datetime as dt
 import re
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # Python 3.8 and earlier
+    ZoneInfo = None
+
 WINDOW_S = 30
+SITE_ZONE = "Europe/London"
+INVALID_FLAG = "9"
+NO_DATA_DB = 20.0
 
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
 _HEADER = re.compile(r"<data\b([^>]*)>", re.S)
@@ -54,6 +67,11 @@ class Level:
     monitor: str
     flag: str
     level: float
+
+    @property
+    def valid(self):
+        """False for the 20 dB placeholder WebTrak sends when a monitor has no measurement."""
+        return self.flag != INVALID_FLAG and self.level > NO_DATA_DB
 
 
 @dataclasses.dataclass
@@ -112,6 +130,19 @@ def local_naive_seconds(text):
     return calendar.timegm(moment.timetuple())
 
 
+def site_zone():
+    if ZoneInfo is None:
+        raise SystemExit("Python 3.9 or later is needed for local times")
+    return ZoneInfo(SITE_ZONE)
+
+
+def local_to_utc(text):
+    """'YYYY-MM-DD HH:MM[:SS]' (or with a T) in airport local time, to UTC seconds."""
+    text = text.strip().replace("T", " ")
+    moment = dt.datetime.strptime(text, "%Y-%m-%d %H:%M" if text.count(":") == 1 else "%Y-%m-%d %H:%M:%S")
+    return moment.replace(tzinfo=site_zone()).timestamp()
+
+
 def handle_for_utc(seconds):
     return int(seconds // WINDOW_S)
 
@@ -128,7 +159,7 @@ def _number(text):
 
 
 def parse_chunk(text, handle=None):
-    """Parse one chunk. Raises NotAvailable for WebTrak's error reply or an empty answer."""
+    """Parse one chunk. Raises NotAvailable for WebTrak's error reply, an empty or a cut-off answer."""
     error = _ERROR.search(text)
     if error and "<data" not in text:
         attrs = dict(_ATTR.findall(error.group(1)))
@@ -137,20 +168,25 @@ def parse_chunk(text, handle=None):
     if not header:
         raise NotAvailable("no <data> element")
     attrs = dict(_ATTR.findall(header.group(1)))
-    if handle is None:
-        handle = int(attrs["handle"])
-    start_utc = utc_for_handle(handle)
-    if attrs.get("startTime", "").startswith("1970"):
+    start_text = attrs.get("startTime", "")
+    if start_text.startswith("1970"):
         raise NotAvailable("empty chunk")
+    try:
+        if handle is None:
+            handle = int(attrs["handle"])
+        local_start = local_naive_seconds(start_text)
+    except (KeyError, ValueError):
+        raise NotAvailable(f"unreadable chunk header: {header.group(0)[:200]!r}") from None
+    start_utc = utc_for_handle(handle)
     # UTC offset in whole quarter hours, from the chunk's local start time and its handle.
-    raw_offset = local_naive_seconds(attrs["startTime"]) - start_utc
-    offset = int(round(raw_offset / 900.0)) * 900
+    offset = int(round((local_start - start_utc) / 900.0)) * 900
 
-    body = text[header.end():]
-    body = body.split("</data>", 1)[0]
+    body, closed, _ = text[header.end():].partition("</data>")
     if not body.strip():
         # Periods before WebTrak's data range come back like this, with radarStatus="offline".
         raise NotAvailable("empty chunk")
+    if not closed:
+        raise NotAvailable("reply cut off before </data>")
     chunk = Chunk(handle, start_utc, offset, attrs.get("radarStatus", ""), [], [], [])
 
     def utc(local_text):
@@ -176,7 +212,7 @@ def parse_chunk(text, handle=None):
                     continue
                 chunk.positions.append(Position(
                     utc=utc(parts[1]), track=parts[2], direction=parts[3], airport=parts[4],
-                    aircraft_type=parts[5], callsign=parts[6] or parts[12] or parts[13],
+                    aircraft_type=parts[5], callsign=parts[6] or parts[12],
                     registration=parts[12], squawk=parts[13], lat=lat, lon=lon,
                     height_m=_number(parts[10]), altitude_m=_number(parts[18]),
                     speed_ms=_number(parts[11]), origin=parts[14], destination=parts[15]))
