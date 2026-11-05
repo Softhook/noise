@@ -29,9 +29,9 @@ Downloaded 4 November 2026. Page numbers are PDF page numbers, not the numbers p
 | `19_EU_Directive_2015-996_Doc29_Noise_Method.pdf` | Doc 29 method as adopted in 2015: 24-band AIR-1845 atmospheric attenuation rates (`50 Hz–10 kHz`) and spectral air-absorption equation | Appendix D, equation D-1 and Table D-1, p.118 |
 | | Lossless infinite-path exposure scaling (`10 log` for SEL vs `20 log` for peak) and finite-segment exposure method | Appendix E, equation E-8 and section E3, pp.122–123 |
 | | 2015 ANP aircraft profiles, approach NPD curves and reference spectra: `737500` (`CFM563`), `A320-211`/`232` (`CFM565`/`V2527A`), `EMB190` (`CF3410E`), and Spectral Class `205` (*"Approach, 2-Engine High-Bypass"*) | Appendix I: pp.146, 153, 166, 189–190, 198–199, 221, 747, 752–754, 793–794; Table I-10, p.800 |
-| | Lateral attenuation, Λ(β,ℓ), for a listener beside the path ("Thamesmead garden" scenario, not applied) | Equations 2.7.40–2.7.44, p.80 |
+| | Lateral attenuation, Λ(β,ℓ), for a listener beside the path ("Thamesmead garden" scenarios, not applied) | Equations 2.7.40–2.7.44, p.80 |
 | `20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf` | Lateral-attenuation duration coefficients: contouring programs assumed 10 (`10 log` SEL); measured 8.4 for a Boeing 747 (`11.6 log` before air) and 5.5 for a T-38 | pp.3–6; Table 1, p.8 |
-| `21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf` | Arrivals measured by aircraft type at London City's NMT6, 2 September to 8 October 2024 ("Monitor 6" scenarios), and at the Thamesmead survey site ("Thamesmead garden" scenario). The report also has departures, which the model doesn't use. | Table 3, p.8; NMT6 overflown by RWY 27 arrivals, p.9; Table 1, p.6; site position, pp.4–5 |
+| `21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf` | Arrivals measured by aircraft type at London City's NMT6, 2 September to 8 October 2024 ("Monitor 6" scenarios), and at the Thamesmead survey site ("Thamesmead garden" scenarios). The report also has departures, which the model doesn't use. | Table 3, p.8; NMT6 overflown by RWY 27 arrivals, p.9; Table 1, p.6; site position, pp.4–5 |
 
 ## Certified approach levels extracted from the EASA sheets
 
@@ -109,17 +109,18 @@ The differences are calculated here. The certificates match the A220's LAmax dif
 
 ## Thamesmead garden
 
-The Thamesmead survey site in `file 21`, around 4 km from the RWY 27 threshold and around 500 m north of the arrival path (pp.4–5). It was a temporary monitor, not one of the airport's NMTs. RWY 09 arrivals don't fly near it, so the scenario is RWY 27 only. Because it isn't under the path, its gaps between aircraft aren't used to test the Monitor 6 scenarios.
+The Thamesmead survey site in `file 21`, around 4 km from the RWY 27 threshold and around 500 m north of the arrival path (pp.4–5). It was a temporary monitor, not one of the airport's NMTs. RWY 09 arrivals don't fly near it, so these scenarios are RWY 27 only. Because it isn't under the path, its gaps between aircraft aren't used to test the Monitor 6 scenarios.
 
 | Arrivals at the site (Table 1, p.6) | Flights | LAmax | SEL |
 |---|---:|---:|---:|
 | Embraer E190 | 1,009 | 63.0 | 72.9 |
 | Airbus A220-100 | 48 | 62.1 | 71.1 |
 | Embraer E190-E2 | 12 | 61.3 | 70.5 |
-| **A320neo, estimated here** | | **64.0** (61.1 to 67.2) | **73.6** (70.7 to 76.8) |
-| A320neo, estimated from Reagan National's −2.0 dB | | 62.2 | 71.8 |
+| **A320neo, estimated from the E190** | | **64.0** (61.1 to 67.2) | **73.6** (70.7 to 76.8) |
+| A320neo, estimated from the E190 and Reagan National's −2.0 dB | | 62.2 | 71.8 |
+| **A320neo, estimated from the E190-E2** | | **63.1** (62.2 to 64.8) | **72.0** (71.1 to 73.7) |
 
-**Method (model choice):** The A320neo level is the E190's measured level plus the "EASA: E190" difference (`−0.15 dB` aircraft, `+0.4 dB` thrust), with height and air worked out over the straight-line distance to a listener 500 m to the side. At 4 km that makes height + air `+0.8 dB` LAmax and `+0.5 dB` SEL, against `+2.1` and `+1.3 dB` directly below the path. The bracketed range is the usual evidence range. These are per-flight averages, not the loudest flights, and no A320neo has been measured there.
+**Method (model choice):** The A320neo level is the E190's measured level plus the "EASA: E190" difference (`−0.15 dB` aircraft, `+0.4 dB` thrust), with height and air worked out over the straight-line distance to a listener 500 m to the side. At 4 km that makes height + air `+0.8 dB` LAmax and `+0.5 dB` SEL, against `+2.1` and `+1.3 dB` directly below the path. The bracketed range is the usual evidence range. The "Thamesmead garden: E190-E2" scenario works the same way from the E190-E2's measured level and the "EASA: E190-E2" difference (`+0.95 dB` aircraft, `+0.1 dB` thrust). It rests on only 12 arrivals, and no Reagan National figure exists for that type. These are per-flight averages, not the loudest flights, and no A320neo has been measured there.
 
 **Limits:**
 
