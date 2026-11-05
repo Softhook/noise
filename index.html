@@ -84,6 +84,8 @@
         </section>
       </aside>
 
+      <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize settings panel" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+
       <main class="workspace">
         <dl class="readout" aria-live="off">
           <div><dt>From threshold</dt><dd id="r-distance"></dd></div>
@@ -93,14 +95,13 @@
           <div class="model-only"><dt>Height + air</dt><dd id="r-geom"></dd></div>
           <div class="model-only"><dt>Aircraft + thrust</dt><dd id="r-source"></dd></div>
           <div class="model-only"><dt>Evidence range</dt><dd id="r-range"></dd></div>
-          <div class="model-only"><dt>Airport table</dt><dd id="r-table"></dd></div>
           <div class="readout-net">
             <dt id="r-net-label"></dt>
             <dd><span id="r-net"></span> <span class="chip" id="r-chip"></span><span class="range-note" id="r-range-note"></span></dd>
           </div>
         </dl>
         <div class="chart" id="chart"></div>
-        <p class="chart-hint">Move across the charts to read any distance. Arrow keys also work when the chart is focused.</p>
+        <p class="chart-hint" id="chart-hint"></p>
         <div class="visually-hidden" id="probe-status" role="status" aria-live="polite" aria-atomic="true"></div>
       </main>
     </div>

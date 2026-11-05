@@ -365,6 +365,7 @@ const adjustedSource = {}; // Aircraft Δ the viewer has set, by scenario
 const adjustedThrust = {}; // Thrust Δ the viewer has set, by scenario
 let metricMode = "LAmax"; // "LAmax" (20 log), the metric this model is mainly for, or "SEL" (10 log). The airport's tables are SEL only.
 let probeNM = 2.0;        // Default highlight at 2.0 nm
+let probeLocked = false;  // Clicking the charts holds the line in place, so the pointer can leave without moving it
 let activeRunway = "27";
 let announceTimer = null;
 
@@ -623,7 +624,79 @@ function setCitedText(element, text) {
   element.replaceChildren(...nodes);
 }
 
+// The divider beside the settings panel: drag it, or use the arrow keys when it's focused.
+// The chart follows through its ResizeObserver, and the width is remembered in this browser.
+function setupSidebarResizer() {
+  const SIDEBAR_MIN = 280;
+  const CHARTS_MIN = 480; // Below this the chart titles get cut off
+  const KEY_STEP = 24;
+  const STORAGE_KEY = "noise-sidebar-width";
+
+  const layout = document.querySelector(".layout");
+  const sidebar = document.querySelector(".controls");
+  const handle = byId("sidebar-resizer");
+  const widest = () => Math.max(SIDEBAR_MIN, layout.clientWidth - handle.offsetWidth - CHARTS_MIN);
+
+  const announce = () => {
+    handle.setAttribute("aria-valuemin", SIDEBAR_MIN);
+    handle.setAttribute("aria-valuemax", widest());
+    handle.setAttribute("aria-valuenow", sidebar.offsetWidth);
+  };
+
+  const remember = value => {
+    try {
+      if (value === null) localStorage.removeItem(STORAGE_KEY);
+      else localStorage.setItem(STORAGE_KEY, value);
+    } catch (error) {
+      // Storage can be blocked. The panel still resizes, it just won't be remembered.
+    }
+  };
+
+  const setWidth = px => {
+    const next = Math.round(constrain(px, SIDEBAR_MIN, widest()));
+    layout.style.setProperty("--sidebar-width", `${next}px`);
+    remember(next);
+    announce();
+  };
+
+  let saved = null;
+  try {
+    saved = Number(localStorage.getItem(STORAGE_KEY));
+  } catch (error) {
+    // As above: start from the default width
+  }
+  if (saved >= SIDEBAR_MIN) layout.style.setProperty("--sidebar-width", `${saved}px`);
+  announce();
+  new ResizeObserver(announce).observe(layout);
+
+  handle.addEventListener("pointerdown", event => {
+    if (event.button === 0) handle.setPointerCapture(event.pointerId);
+  });
+  handle.addEventListener("pointermove", event => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    setWidth(event.clientX - layout.getBoundingClientRect().left - handle.offsetWidth / 2);
+  });
+  handle.addEventListener("dblclick", () => {
+    layout.style.removeProperty("--sidebar-width");
+    remember(null);
+    announce();
+  });
+  handle.addEventListener("keydown", event => {
+    const current = sidebar.offsetWidth;
+    const targets = {
+      ArrowLeft: current - KEY_STEP,
+      ArrowRight: current + KEY_STEP,
+      Home: SIDEBAR_MIN,
+      End: widest()
+    };
+    if (!(event.key in targets)) return;
+    event.preventDefault();
+    setWidth(targets[event.key]);
+  });
+}
+
 function setup() {
+  setupSidebarResizer(); // First, so the chart starts at its final size
   const box = byId("chart");
   const canvas = createCanvas(box.clientWidth, box.clientHeight);
   canvas.parent(box);
@@ -666,7 +739,7 @@ function setup() {
     button.classList.toggle("is-wide", preset.wide === true);
     addScenarioTip(button, preset, i);
     button.addEventListener("click", () => {
-      if (preset.site) probeNM = preset.site.nm;
+      if (preset.site && !probeLocked) probeNM = preset.site.nm; // A locked line stays put, to compare scenarios at one distance
       applyPreset(i);
     });
     byId("scenarios").appendChild(button);
@@ -699,12 +772,13 @@ function setup() {
   const element = canvas.elt;
   element.tabIndex = 0;
   element.setAttribute("role", "img");
-  element.setAttribute("aria-label", "Flight profile and ground noise difference against distance from the runway threshold. Values at the selected distance are listed above the chart.");
+  element.setAttribute("aria-label", "Flight profile and ground noise difference against distance from the runway threshold. Values at the selected distance are listed above the chart. Press Enter to lock or unlock the selected distance.");
   element.addEventListener("pointermove", movePointer);
   element.addEventListener("pointerdown", movePointer);
+  element.addEventListener("click", toggleProbeLock);
   element.addEventListener("keydown", moveProbeWithKeys);
 
-  // The chart area changes size with the window and the sidebar's stacking
+  // The chart area changes size with the window, the sidebar's width and its stacking
   new ResizeObserver(() => {
     if (box.clientWidth !== width || box.clientHeight !== height) {
       resizeCanvas(box.clientWidth, box.clientHeight);
@@ -872,20 +946,48 @@ function feet(value) {
 // Pointer and keyboard
 // ---------------------------------------------------------------------------
 
-function movePointer(event) {
+// The distance under the pointer, or null when it's outside the plots
+function distanceAtPointer(event) {
   const area = chartLayout();
   const rect = event.currentTarget.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
-  if (x < area.L || x > area.R || y < area.profile.top || y > area.noise.bottom) return;
+  if (x < area.L || x > area.R || y < area.profile.top || y > area.noise.bottom) return null;
   const fraction = activeRunway === "27"
     ? map(x, area.L, area.R, 0, 1)
     : map(x, area.R, area.L, 0, 1);
-  probeNM = constrain(fraction * 6.5, 0, 6.5);
+  return constrain(fraction * 6.5, 0, 6.5);
+}
+
+function movePointer(event) {
+  if (probeLocked) return;
+  const nm = distanceAtPointer(event);
+  if (nm === null) return;
+  probeNM = nm;
   redraw();
 }
 
+// Locks at the point clicked. Unlocking works anywhere on the canvas, and the line picks up at the pointer.
+function toggleProbeLock(event) {
+  const nm = distanceAtPointer(event);
+  if (nm === null && !probeLocked) return;
+  if (nm !== null) probeNM = nm;
+  setProbeLocked(!probeLocked);
+}
+
+function setProbeLocked(locked) {
+  probeLocked = locked;
+  byId("chart").classList.toggle("is-locked", locked);
+  redraw();
+  announceProbe(locked ? "Line locked. " : "Line unlocked. ");
+}
+
 function moveProbeWithKeys(event) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    setProbeLocked(!probeLocked);
+    return;
+  }
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
   event.preventDefault();
   const step = event.shiftKey ? 0.5 : 0.05;
@@ -917,13 +1019,13 @@ function moveProbeWithKeys(event) {
   announceProbe();
 }
 
-function announceProbe() {
+function announceProbe(prefix = "") {
   clearTimeout(announceTimer);
   announceTimer = setTimeout(() => {
     const status = byId("probe-status");
     if (status) {
       const rangeText = byId("r-range").textContent;
-      status.textContent = `${byId("r-distance").textContent}: ${byId("r-net-label").textContent} ${byId("r-net").textContent}${rangeText === "—" ? "" : `, evidence range ${rangeText}`}`;
+      status.textContent = `${prefix}${byId("r-distance").textContent}: ${byId("r-net-label").textContent} ${byId("r-net").textContent}${rangeText === "—" ? "" : `, evidence range ${rangeText}`}`;
     }
   }, 150);
 }
@@ -1028,6 +1130,7 @@ function draw() {
   drawFlightProfile(area);
   drawNoiseGraph(area);
   drawProbeDots(area);
+  drawLockBadge(area);
   updateReadout();
 }
 
@@ -1474,10 +1577,45 @@ function insideFirstAssessmentPoint(nm) {
 
 function drawCrosshair(area) {
   const x = distanceToX(probeNM, area.L, area.R);
-  stroke(COLORS.crosshair);
+  stroke(probeLocked ? COLORS.ink : COLORS.crosshair);
+  strokeWeight(probeLocked ? 2 : 1);
   line(x, area.profile.top, x, area.profile.bottom);
   line(x, area.noise.top, x, area.noise.bottom);
+  strokeWeight(1);
   noStroke();
+}
+
+// A padlock and "Locked" on a pill at the top of the line
+function drawLockBadge(area) {
+  if (!probeLocked) return;
+  const label = "Locked";
+  const pillH = 20;
+  const iconW = 9;
+  textSize(11);
+  textStyle(BOLD);
+  const pillW = 7 + iconW + 4 + textWidth(label) + 8;
+  const left = constrain(distanceToX(probeNM, area.L, area.R) - pillW / 2, 0, width - pillW);
+  const top = area.profile.top;
+  const middle = top + pillH / 2;
+
+  noStroke();
+  fill(COLORS.ink);
+  rect(left, top, pillW, pillH, pillH / 2);
+
+  fill(255);
+  const iconX = left + 7;
+  rect(iconX, middle - 1, iconW, 6.5, 1.5);
+  noFill();
+  stroke(255);
+  strokeWeight(1.5);
+  arc(iconX + iconW / 2, middle - 1, 5.5, 7, PI, TWO_PI);
+  strokeWeight(1);
+  noStroke();
+
+  fill(255);
+  textAlign(LEFT, CENTER);
+  text(label, iconX + iconW + 4, middle);
+  textStyle(NORMAL);
 }
 
 function drawProbeDots(area) {
@@ -1510,6 +1648,9 @@ function updateReadout() {
   const tooClose = insideFirstAssessmentPoint(probeNM);
 
   byId("r-distance").textContent = `${probeNM.toFixed(2)} nm · ${(probeNM * KM_PER_NM).toFixed(2)} km`;
+  byId("chart-hint").textContent = probeLocked
+    ? `Line locked at ${probeNM.toFixed(2)} nm. Click the charts to unlock it. Arrow keys still nudge it when the chart is focused.`
+    : "Move across the charts to read any distance, and click to lock the line. Arrow keys also work when the chart is focused.";
   byId("r-curr").textContent = feet(ac.currAlt);
   byId("r-prop").textContent = feet(ac.propAlt);
   byId("r-drop").textContent = `${signed(-Math.round(ac.deltaFt), 0)} ft`;
@@ -1533,10 +1674,6 @@ function updateReadout() {
   rangeNote.textContent = crossed.length
     ? `Range crosses ${crossed.map(level => (level === 0 ? "no change" : `${signed(level, 0)} dB`)).join(", ").replace(/, ([^,]*)$/, " and $1")}`
     : "";
-  const tableDB = airportPrediction(probeNM);
-  byId("r-table").textContent = PRESETS[activePreset].site
-    ? "Below the path only"
-    : (tableDB === null ? "Outside 0.5–5 km" : `${signed(tableDB, 1)} dB SEL`);
 
   const pair = `A320neo minus ${baselineAircraft}`;
   const chip = byId("r-chip");
