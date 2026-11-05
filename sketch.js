@@ -365,7 +365,9 @@ const adjustedSource = {}; // Aircraft Δ the viewer has set, by scenario
 const adjustedThrust = {}; // Thrust Δ the viewer has set, by scenario
 let metricMode = "LAmax"; // "LAmax" (20 log), the metric this model is mainly for, or "SEL" (10 log). The airport's tables are SEL only.
 let probeNM = 2.0;        // Default highlight at 2.0 nm
-let probeLocked = false;  // Clicking the charts holds the line in place, so the pointer can leave without moving it
+let probePinned = false;  // Clicking the charts holds the line in place, so the pointer can leave without moving it
+let probePress = null;    // Where and how the pointer last went down on the charts, to tell a click from a drag or a tap
+const CLICK_SLOP_PX = 4;  // Further than this between press and release is a drag
 let activeRunway = "27";
 let announceTimer = null;
 
@@ -627,8 +629,8 @@ function setCitedText(element, text) {
 // The divider beside the settings panel: drag it, or use the arrow keys when it's focused.
 // The chart follows through its ResizeObserver, and the width is remembered in this browser.
 function setupSidebarResizer() {
-  const SIDEBAR_MIN = 280;
-  const CHARTS_MIN = 480; // Below this the chart titles get cut off
+  const SIDEBAR_MIN = 320; // Narrower breaks the scenario labels at their hyphens
+  const CHARTS_MIN = 600; // Narrower makes the plots too small to read. Also in the layout's columns in style.css.
   const KEY_STEP = 24;
   const STORAGE_KEY = "noise-sidebar-width";
 
@@ -739,7 +741,7 @@ function setup() {
     button.classList.toggle("is-wide", preset.wide === true);
     addScenarioTip(button, preset, i);
     button.addEventListener("click", () => {
-      if (preset.site && !probeLocked) probeNM = preset.site.nm; // A locked line stays put, to compare scenarios at one distance
+      if (preset.site && !probePinned) probeNM = preset.site.nm; // A pinned line stays put, to compare scenarios at one distance
       applyPreset(i);
     });
     byId("scenarios").appendChild(button);
@@ -772,10 +774,11 @@ function setup() {
   const element = canvas.elt;
   element.tabIndex = 0;
   element.setAttribute("role", "img");
-  element.setAttribute("aria-label", "Flight profile and ground noise difference against distance from the runway threshold. Values at the selected distance are listed above the chart. Press Enter to lock or unlock the selected distance.");
+  element.setAttribute("aria-label", "Flight profile and ground noise difference against distance from the runway threshold. Values at the selected distance are listed above the chart. Press Enter to pin or unpin the selected distance.");
   element.addEventListener("pointermove", movePointer);
   element.addEventListener("pointerdown", movePointer);
-  element.addEventListener("click", toggleProbeLock);
+  element.addEventListener("pointerdown", rememberProbePress);
+  element.addEventListener("click", toggleProbePin);
   element.addEventListener("keydown", moveProbeWithKeys);
 
   // The chart area changes size with the window, the sidebar's width and its stacking
@@ -924,6 +927,7 @@ function syncControls() {
   }));
 
   document.body.classList.toggle("is-airport", airport);
+  document.body.classList.toggle("is-site", Boolean(preset.site));
 }
 
 function currentMetric() {
@@ -960,32 +964,40 @@ function distanceAtPointer(event) {
 }
 
 function movePointer(event) {
-  if (probeLocked) return;
+  if (probePinned) return;
   const nm = distanceAtPointer(event);
   if (nm === null) return;
   probeNM = nm;
   redraw();
 }
 
-// Locks at the point clicked. Unlocking works anywhere on the canvas, and the line picks up at the pointer.
-function toggleProbeLock(event) {
-  const nm = distanceAtPointer(event);
-  if (nm === null && !probeLocked) return;
-  if (nm !== null) probeNM = nm;
-  setProbeLocked(!probeLocked);
+function rememberProbePress(event) {
+  probePress = { x: event.clientX, y: event.clientY, pointerType: event.pointerType };
 }
 
-function setProbeLocked(locked) {
-  probeLocked = locked;
-  byId("chart").classList.toggle("is-locked", locked);
+// Pins at the point clicked. Unpinning works anywhere on the canvas, and the line picks up at the pointer.
+function toggleProbePin(event) {
+  // Letting go after dragging across the charts is a click too, but not a request to pin
+  if (Math.hypot(event.clientX - probePress.x, event.clientY - probePress.y) > CLICK_SLOP_PX) return;
+  // Without hover the line already stays where it's put, so a tap only moves it. It can still unpin, on a device with both a mouse and touch.
+  if (probePress.pointerType !== "mouse" && !probePinned) return;
+  const nm = distanceAtPointer(event);
+  if (nm === null && !probePinned) return;
+  if (nm !== null) probeNM = nm;
+  setProbePinned(!probePinned);
+}
+
+function setProbePinned(pinned) {
+  probePinned = pinned;
+  byId("chart").classList.toggle("is-pinned", pinned);
   redraw();
-  announceProbe(locked ? "Line locked. " : "Line unlocked. ");
+  announceProbe(pinned ? "Line pinned. " : "Line unpinned. ");
 }
 
 function moveProbeWithKeys(event) {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
-    setProbeLocked(!probeLocked);
+    if (!event.repeat) setProbePinned(!probePinned);
     return;
   }
   if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -1126,11 +1138,13 @@ function draw() {
   textStyle(NORMAL);
 
   const area = chartLayout();
-  drawCrosshair(area);
+  drawCrosshair(area, area.profile); // Behind the plot, to keep its labels clear
+  if (!probePinned) drawCrosshair(area, area.noise);
   drawFlightProfile(area);
   drawNoiseGraph(area);
+  if (probePinned) drawCrosshair(area, area.noise); // In front, or the hatching breaks up the heavier line
   drawProbeDots(area);
-  drawLockBadge(area);
+  drawPinBadge(area);
   updateReadout();
 }
 
@@ -1575,27 +1589,29 @@ function insideFirstAssessmentPoint(nm) {
   return nm < MIN_MODEL_NM - 1e-6;
 }
 
-function drawCrosshair(area) {
+function drawCrosshair(area, plot) {
   const x = distanceToX(probeNM, area.L, area.R);
-  stroke(probeLocked ? COLORS.ink : COLORS.crosshair);
-  strokeWeight(probeLocked ? 2 : 1);
-  line(x, area.profile.top, x, area.profile.bottom);
-  line(x, area.noise.top, x, area.noise.bottom);
+  stroke(probePinned ? COLORS.ink : COLORS.crosshair);
+  strokeWeight(probePinned ? 2 : 1);
+  line(x, plot.top, x, plot.bottom);
   strokeWeight(1);
   noStroke();
 }
 
-// A padlock and "Locked" on a pill at the top of the line
-function drawLockBadge(area) {
-  if (!probeLocked) return;
-  const label = "Locked";
+// A pin and "Pinned" on a pill on the line, at whichever end of the plot is further from the flight paths and their labels
+function drawPinBadge(area) {
+  if (!probePinned) return;
+  const label = "Pinned";
   const pillH = 20;
-  const iconW = 9;
+  const iconW = 7;
   textSize(11);
   textStyle(BOLD);
   const pillW = 7 + iconW + 4 + textWidth(label) + 8;
-  const left = constrain(distanceToX(probeNM, area.L, area.R) - pillW / 2, 0, width - pillW);
-  const top = area.profile.top;
+  const left = constrain(distanceToX(probeNM, area.L, area.R) - pillW / 2, area.L, area.R - pillW);
+  const alts = getAltitudes(probeNM);
+  const pathY = altitudeToY(Math.max(alts.curr, alts.prop), area);
+  const pathNearTop = pathY < (area.profile.top + area.profile.bottom) / 2;
+  const top = pathNearTop ? area.profile.bottom - pillH - 4 : area.profile.top;
   const middle = top + pillH / 2;
 
   noStroke();
@@ -1603,18 +1619,15 @@ function drawLockBadge(area) {
   rect(left, top, pillW, pillH, pillH / 2);
 
   fill(255);
-  const iconX = left + 7;
-  rect(iconX, middle - 1, iconW, 6.5, 1.5);
-  noFill();
-  stroke(255);
-  strokeWeight(1.5);
-  arc(iconX + iconW / 2, middle - 1, 5.5, 7, PI, TWO_PI);
-  strokeWeight(1);
-  noStroke();
+  const iconX = left + 7 + iconW / 2;
+  circle(iconX, middle - 2, iconW);
+  triangle(iconX - 3, middle, iconX + 3, middle, iconX, middle + 6);
+  fill(COLORS.ink);
+  circle(iconX, middle - 2, 2.5);
 
   fill(255);
   textAlign(LEFT, CENTER);
-  text(label, iconX + iconW + 4, middle);
+  text(label, left + 7 + iconW + 4, middle);
   textStyle(NORMAL);
 }
 
@@ -1639,6 +1652,17 @@ function drawProbeDot(x, y, col) {
   noStroke();
 }
 
+function chartHint() {
+  if (probePinned) {
+    const site = PRESETS[activePreset].site;
+    const away = site && Math.abs(probeNM - site.nm) >= 0.005 ? ` This scenario's estimate is for its site at ${site.nm.toFixed(2)} nm.` : "";
+    return `Line pinned at ${probeNM.toFixed(2)} nm.${away} Click the charts or press Enter to unpin it. Arrow keys nudge it when the chart is focused.`;
+  }
+  return window.matchMedia("(hover: hover)").matches
+    ? "Move across the charts to read any distance, and click to pin the line. When the chart is focused, arrow keys also move it and Enter pins it."
+    : "Drag across the charts or tap to read any distance.";
+}
+
 function updateReadout() {
   // The monitor 6 description quotes results at the selected distance
   if (PRESETS[activePreset].monitor6) setCitedText(byId("scenario-desc"), PRESETS[activePreset].desc());
@@ -1648,9 +1672,7 @@ function updateReadout() {
   const tooClose = insideFirstAssessmentPoint(probeNM);
 
   byId("r-distance").textContent = `${probeNM.toFixed(2)} nm · ${(probeNM * KM_PER_NM).toFixed(2)} km`;
-  byId("chart-hint").textContent = probeLocked
-    ? `Line locked at ${probeNM.toFixed(2)} nm. Click the charts to unlock it. Arrow keys still nudge it when the chart is focused.`
-    : "Move across the charts to read any distance, and click to lock the line. Arrow keys also work when the chart is focused.";
+  byId("chart-hint").textContent = chartHint();
   byId("r-curr").textContent = feet(ac.currAlt);
   byId("r-prop").textContent = feet(ac.propAlt);
   byId("r-drop").textContent = `${signed(-Math.round(ac.deltaFt), 0)} ft`;
@@ -1695,7 +1717,11 @@ function updateReadout() {
   }
 
   const db = airport ? airport.db : ac.netDB;
-  byId("r-net-label").textContent = airport ? `Airport prediction, ${pair}` : (noThrust ? `${pair}, leaving out thrust` : pair);
+  // A site scenario has a different listener, which a comparison at one distance needs to show
+  const site = PRESETS[activePreset].site;
+  byId("r-net-label").textContent = airport
+    ? `Airport prediction, ${pair}`
+    : [pair, noThrust && "leaving out thrust", site && `${site.lateralM} m beside the path`].filter(Boolean).join(", ");
   netEl.textContent = `${signed(db, 1)} dB ${currentMetric()}`;
   netEl.title = `${signed(db, 2)} dB ${currentMetric()} unrounded`;
 

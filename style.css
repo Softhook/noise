@@ -141,7 +141,7 @@ button:disabled { cursor: not-allowed; }
   min-height: 0;
   display: grid;
   /* The second limit keeps room for the charts when the window is narrower than the saved sidebar width */
-  grid-template-columns: min(var(--sidebar-width, 320px), calc(100% - 489px)) 9px minmax(0, 1fr);
+  grid-template-columns: min(var(--sidebar-width, 320px), calc(100% - 609px)) 9px minmax(0, 1fr);
 }
 
 .controls {
@@ -451,6 +451,11 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
 
 .readout-net dd { font-size: 20px; line-height: 1.2; }
 
+/* A site scenario's label also names the listener, so it needs more room */
+@media (min-width: 961px) {
+  .is-site .readout-net { min-width: 390px; }
+}
+
 .chip {
   display: inline-block;
   margin-left: 4px;
@@ -494,7 +499,7 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   touch-action: pan-y; /* Drag sideways to move the readout, vertically to scroll the page */
 }
 
-.chart.is-locked canvas { cursor: pointer; }
+.chart.is-pinned canvas { cursor: pointer; }
 
 .chart-hint {
   padding-top: 6px;
