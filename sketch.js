@@ -60,7 +60,14 @@ function airLossDB(heightFt) {
   return UNATTENUATED_A_TOTAL - 10 * Math.log10(energy);
 }
 
-const MODEL_NOTE = "LAmax distance: 6 dB per doubling (20 log; LCY Annex C p.41); AEF p.9 gives 10 dB as an unsourced rule of thumb. SEL distance: 10 log lossless line-integral exposure scaling (Directive 2015/996 Appendix E, p.122); a Boeing 747 lateral test implies about 11.6 log before air (NASA TM 83214, Table 1, p.8). Air: 24-band 1/3-octave AIR-1845 attenuation applied to ANP Spectral Class 205 (twin high-bypass approach, Directive 2015/996 Table D-1 p.118 and Table I-10 p.800), the same spectrum for both aircraft. Against CF34-10E approach NPD data (p.747) this is within 0.13 dB per table interval for SEL and overstates the fall by 0.2–0.4 dB per interval for LAmax. The aircraft difference is held constant with distance, a simplification: in the same NPD tables the A320ceo minus E190 gap falls about 1.4–2.6 dB LAmax and 2.2–4.2 dB SEL between 200 and 4,000 ft, at each aircraft's 3° thrust. The shaded range adds the extremes of the aircraft and thrust evidence; it is not a confidence interval. No estimate is plotted inside 0.5 km (0.27 nm), the airport's first assessment point.";
+// Note text can mark **bold** words. Each string is one paragraph, and starts with a bold label.
+const MODEL_NOTES = [
+  "**Distance.** **LAmax: 6 dB per doubling** (20 log; LCY Annex C p.41); AEF p.9 gives 10 dB as an unsourced rule of thumb. **SEL: 10 log**, lossless line-integral exposure scaling (Directive 2015/996 Appendix E, p.122); a Boeing 747 lateral test implies about 11.6 log before air (NASA TM 83214, Table 1, p.8).",
+  "**Air.** 24-band 1/3-octave AIR-1845 attenuation applied to ANP Spectral Class 205 (twin high-bypass approach, Directive 2015/996 Table D-1 p.118 and Table I-10 p.800), the same spectrum for both aircraft. Against CF34-10E approach NPD data (p.747) this is within 0.13 dB per table interval for SEL and overstates the fall by 0.2–0.4 dB per interval for LAmax.",
+  "**Aircraft difference.** Held constant with distance, a simplification: in the same NPD tables the A320ceo minus E190 gap falls about 1.4–2.6 dB LAmax and 2.2–4.2 dB SEL between 200 and 4,000 ft, at each aircraft's 3° thrust.",
+  "**Evidence range.** The shaded range adds the extremes of the aircraft and thrust evidence; **it is not a confidence interval**.",
+  "**Closest point.** No estimate is plotted inside 0.5 km (0.27 nm), the airport's first assessment point."
+];
 
 const SOURCE_SLIDER = { min: -4.0, max: 3.5 };
 const THRUST_SLIDER = { min: -1.5, max: 3.0 };
@@ -138,10 +145,12 @@ function airportPreset(aircraft, basis) {
     name: `Airport: ${aircraft}`,
     baseline: aircraft,
     usesAirportTable: true,
-    desc: () => `LCY consultation Figs. 17–18, pp.30–31: A320neo at 4.49° vs ${aircraft} at 5.5° (SEL, net, modelled, published 0.5–5 km only).`,
+    desc: () => `LCY consultation Figs. 17–18, pp.30–31: **A320neo at 4.49° vs ${aircraft} at 5.5°** (SEL, net, **modelled**, published 0.5–5 km only).`,
     sources: () => [
-      `AEDT 3g model, not measured. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (Annex C pp.8, 12).`,
-      "Published from 0.5 to 5.0 km (0.27–2.70 nm) only (Consultation pp.30–31). For level flight before descent, Consultation Fig. 22 (p.32) gives 80 vs 77–81 dB SEL at 2,000 ft and 75 vs 72–77 dB SEL at 3,000 ft (E190 vs new-generation types). Thrust and weight are estimated internally by AEDT, with no values, flap, gear or weather settings published (Annex C p.7)."
+      `**Airport model.** AEDT 3g model, **not measured**. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (Annex C pp.8, 12).`,
+      "**Published range.** From **0.5 to 5.0 km** (0.27–2.70 nm) only (Consultation pp.30–31).",
+      "**Level flight.** Before descent, Consultation Fig. 22 (p.32) gives **80 vs 77–81 dB SEL at 2,000 ft** and **75 vs 72–77 dB SEL at 3,000 ft** (E190 vs new-generation types).",
+      "**Not published.** Thrust and weight are estimated internally by AEDT, with no values, flap, gear or weather settings published (Annex C p.7)."
     ]
   };
 }
@@ -149,9 +158,9 @@ function airportPreset(aircraft, basis) {
 // Shared wording for the two model scenario types. The text ends with a verb, such as "gives".
 function modelDesc(aircraft, text, sourceDelta, thrustDelta, note = "") {
   if (!hasAdjustments()) {
-    return `Both sliders set to 0 dB: showing height and atmospheric absorption alone on the 4.49° vs 5.5° paths (reset sliders to restore the ${aircraft} scenario values).`;
+    return `**Both sliders set to 0 dB:** showing height and atmospheric absorption alone on the 4.49° vs 5.5° paths (reset sliders to restore the ${aircraft} scenario values).`;
   }
-  return `${text} ${signed(sourceDelta, 2)} dB, plus an estimated ${signed(thrustDelta, 1)} dB thrust difference.${note}${slidersChangedNote()}`;
+  return `${text} **${signed(sourceDelta, 2)} dB**, plus an estimated **${signed(thrustDelta, 1)} dB** thrust difference.${note}${slidersChangedNote()}`;
 }
 
 function slidersChangedNote() {
@@ -159,7 +168,12 @@ function slidersChangedNote() {
 }
 
 function thrustSource(thrustDelta, slopeBasis) {
-  return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data (Directive pp.747, 753, 793), which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the low end of the thrust range becomes ${signed(LEVEL_VS_DESCENDING_DB, 0)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
+  return [
+    `**Thrust: ${signed(thrustDelta, 1)} dB, an estimate, not a measurement.** It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data (Directive pp.747, 753, 793), which has no neo, PW1500G or PW1900G tables. ${slopeBasis}`,
+    `**Spoilers.** Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about **−0.45 dB**.`,
+    `**Where thrust applies.** Only up to **${THRUST_ESTIMATE_END_NM} nm**, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. London City's profiles are custom (Annex C p.8) and may differ from these defaults.`,
+    `**Beyond that.** The hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the low end of the thrust range becomes ${signed(LEVEL_VS_DESCENDING_DB, 0)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32).`
+  ];
 }
 
 // Where each type's approach certificate is listed
@@ -181,10 +195,11 @@ function easaPreset(aircraft, certificate, landingMass, sourceDelta, thrustDelta
     sourceDelta,
     thrustDelta,
     sources: () => [
-      modelSource(),
-      `Certificates listed in: A320neo, EASA A320 sheet p.175 (LEAP-1A) and p.226 (PW1100G); ${aircraft}, ${CERTIFICATE_SOURCES[aircraft]}.`,
-      `Certificates are in EPNdB at 3° test conditions and certified landing masses, not London City's angles or weights. Using an EPNdB difference as a dB(A) difference is an assumption: EPNdB adds tone corrections and a different frequency weighting, and includes duration. 66.3 t is the lowest listed A320neo mass; no document gives typical London City landing weights. The midpoint is a simple choice for an unknown engine, not a sourced method, and the sources don't say which E190 modifications or A320neo engine would be used there. ${note}`.trim(),
-      thrustSource(thrustDelta, slopeBasis)
+      ...modelSource(),
+      `**Where the certificates are.** A320neo, EASA A320 sheet p.175 (LEAP-1A) and p.226 (PW1100G); ${aircraft}, ${CERTIFICATE_SOURCES[aircraft]}.`,
+      `**Certificate limits.** Certificates are in EPNdB at **3° test conditions** and certified landing masses, not London City's angles or weights. **Using an EPNdB difference as a dB(A) difference is an assumption**: EPNdB adds tone corrections and a different frequency weighting, and includes duration. 66.3 t is the lowest listed A320neo mass; no document gives typical London City landing weights. The midpoint is a simple choice for an unknown engine, not a sourced method, and the sources don't say which E190 modifications or A320neo engine would be used there.`,
+      ...(note ? [`**About this aircraft.** ${note}`] : []),
+      ...thrustSource(thrustDelta, slopeBasis)
     ]
   };
 }
@@ -199,9 +214,10 @@ function measuredPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, note, de
     sourceDelta,
     thrustDelta,
     sources: () => [
-      modelSource(),
-      `${note} Measured at a US airport on typical approach angles, with aircraft weights, engine variants and flight settings not reported, and applied here to SEL as well as LAmax. The monitors are 3.1–7.1 km from the airport, but the figure is applied unchanged from 0.5 km.`,
-      thrustSource(thrustDelta, slopeBasis)
+      ...modelSource(),
+      `**Measurement.** ${note}`,
+      "**Measurement limits.** **Measured at a US airport** on typical approach angles, with aircraft weights, engine variants and flight settings not reported, and applied here to SEL as well as LAmax. The monitors are 3.1–7.1 km from the airport, but the figure is applied unchanged from 0.5 km.",
+      ...thrustSource(thrustDelta, slopeBasis)
     ]
   };
 }
@@ -234,14 +250,15 @@ function monitor6Preset(aircraft) {
       const gap = monitor6Gap(aircraft).toFixed(1);
       const results = insideFirstAssessmentPoint(probeNM)
         ? ""
-        : ` At ${probeNM.toFixed(2)} nm that gives ${signed(resultFrom(E190_CERTIFICATE_DELTA, probeNM), 1)} dB from certificates${slidersChanged() ? "" : " (the line shown)"} or ${signed(resultFrom(E190_MEASURED_DELTA, probeNM), 1)} dB from Reagan National${hasThrustEstimate(probeNM) ? "" : ", leaving out thrust"}.`;
-      const sample = flights < 20 ? ` Small sample: ${flights} ${aircraft} arrivals.` : "";
-      return `At monitor 6 the E190 measures ${gap} dB ${metricMode} louder than the ${aircraft}, so this adds ${gap} dB to the E190 result.${results}${sample}${slidersChangedNote()}`;
+        : ` At ${probeNM.toFixed(2)} nm that gives **${signed(resultFrom(E190_CERTIFICATE_DELTA, probeNM), 1)} dB** from certificates${slidersChanged() ? "" : " (the line shown)"} or **${signed(resultFrom(E190_MEASURED_DELTA, probeNM), 1)} dB** from Reagan National${hasThrustEstimate(probeNM) ? "" : ", leaving out thrust"}.`;
+      const sample = flights < 20 ? ` **Small sample:** ${flights} ${aircraft} arrivals.` : "";
+      return `At monitor 6 the E190 measures **${gap} dB ${metricMode} louder** than the ${aircraft}, so this adds ${gap} dB to the E190 result.${results}${sample}${slidersChangedNote()}`;
     },
     sources: () => [
-      modelSource(),
-      `Monitor 6: E190 ${MONITOR_6.E190.LAmax} dB LAmax and ${MONITOR_6.E190.SEL} dB SEL from ${MONITOR_6.E190.flights} arrivals; ${aircraft} ${MONITOR_6[aircraft].LAmax} dB LAmax and ${MONITOR_6[aircraft].SEL} dB SEL from ${flights} arrivals (Bickerdike Allen Thamesmead survey, Table 3, p.8). RWY 27 arrivals overfly this monitor, 2 September to 8 October 2024. It measures both types at London City on the 5.5° approach, so it includes their real thrust and weights. The gap is measured at one place, about 3 km from the threshold, and is applied unchanged at every distance. The report gives no spread for these averages. There are no A320neo figures, so the A320neo minus E190 part comes from the certificates (${signed(E190_CERTIFICATE_DELTA, 2)} dB) for the sliders and chart line, or from Reagan National arrivals (${signed(E190_MEASURED_DELTA, 2)} dB) for the second result.`,
-      thrustSource(E190_THRUST_DELTA, `${E190_SLOPES} This is the E190's estimate: the ${aircraft}'s own thrust isn't estimated, because monitor 6 measured it.`)
+      ...modelSource(),
+      `**Monitor 6 measurements.** E190 ${MONITOR_6.E190.LAmax} dB LAmax and ${MONITOR_6.E190.SEL} dB SEL from ${MONITOR_6.E190.flights} arrivals; ${aircraft} ${MONITOR_6[aircraft].LAmax} dB LAmax and ${MONITOR_6[aircraft].SEL} dB SEL from ${flights} arrivals (Bickerdike Allen Thamesmead survey, Table 3, p.8). RWY 27 arrivals overfly this monitor, 2 September to 8 October 2024. It measures both types at London City on the 5.5° approach, so it includes their real thrust and weights.`,
+      `**Monitor 6 limits.** The gap is measured at **one place**, about 3 km from the threshold, and is applied unchanged at every distance. The report gives no spread for these averages. **There are no A320neo figures**, so the A320neo minus E190 part comes from the certificates (${signed(E190_CERTIFICATE_DELTA, 2)} dB) for the sliders and chart line, or from Reagan National arrivals (${signed(E190_MEASURED_DELTA, 2)} dB) for the second result.`,
+      ...thrustSource(E190_THRUST_DELTA, `${E190_SLOPES} This is the E190's estimate: the ${aircraft}'s own thrust isn't estimated, because monitor 6 measured it.`)
     ]
   };
   return preset;
@@ -265,36 +282,39 @@ function thamesmeadGardenPreset() {
       const range = evidenceRangeAt(nm);
       const reagan = ac.geomDB + ac.atmDB + E190_MEASURED_DELTA + E190_THRUST_DELTA;
       const measured = ["E190", "A220", "E190-E2"].map(type => `${type} ${site.levels[type][metricMode].toFixed(1)}`).join(", ");
-      return `RWY 27 arrivals: likely about ${level(ac.netDB).toFixed(1)} dB ${metricMode} for an A320neo at the Thamesmead garden (range ${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}), or ${level(reagan).toFixed(1)} using Reagan National. Measured averages there: ${measured}. This is an average flight, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
+      return `RWY 27 arrivals: likely about **${level(ac.netDB).toFixed(1)} dB ${metricMode}** for an A320neo at the Thamesmead garden (range **${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}**), or **${level(reagan).toFixed(1)}** using Reagan National. Measured averages there: ${measured}. This is an **average flight**, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
     },
     sources: () => [
-      modelSource(),
-      `Measured at the Thamesmead survey site, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread. The site is around 4 km from the RWY 27 threshold and around 500 m north of the arrival path, and RWY 09 arrivals don't fly near it (pp.4–5), so this scenario is RWY 27 only. The A320neo level is the E190's measured level plus the modelled difference, and hasn't been measured. Aircraft and thrust differences are the E190 scenario's, which aren't specific to a listener beside the path. Doc 29 lateral attenuation isn't included; it would lower the difference by about 0.1 dB, because the lower A320neo is seen at a shallower angle (Directive p.80). Departures fly over the site, measuring E190 74.8 dB LAmax and 84.5 dB SEL (Bickerdike Allen, Table 2, p.6), but aren't part of this model.`,
-      thrustSource(E190_THRUST_DELTA, E190_SLOPES)
+      ...modelSource(),
+      `**Measured at the site.** Thamesmead survey site, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): **E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL** from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread.`,
+      "**Where it is.** Around **4 km** from the RWY 27 threshold and around **500 m** north of the arrival path, and RWY 09 arrivals don't fly near it (Bickerdike Allen, pp.4–5), so this scenario is RWY 27 only.",
+      "**How the estimate works.** The A320neo level is the E190's measured level plus the modelled difference, and **hasn't been measured**. Aircraft and thrust differences are the E190 scenario's, which aren't specific to a listener beside the path.",
+      "**Left out.** Doc 29 lateral attenuation isn't included; it would lower the difference by about 0.1 dB, because the lower A320neo is seen at a shallower angle (Directive p.80). Departures fly over the site, measuring E190 74.8 dB LAmax and 84.5 dB SEL (Bickerdike Allen, Table 2, p.6), but aren't part of this model.",
+      ...thrustSource(E190_THRUST_DELTA, E190_SLOPES)
     ]
   };
 }
 
-const E190_SLOPES = "CF34-10E relief 3°→5.5° is about 1.2–1.55 dB; A320 CFM56-5A and V2527 relief 3°→4.49° is about 0.34–0.51 dB. Those slopes give +0.7 to +1.2 dB, and the airport's AEDT E190 example implies up to about +2.5 dB net (noise scheme p.33). The +0.4 dB default is a judgement, set lower because half the E190 range is below its table, the slopes ignore spoilers, a same-type A220 comparison shows little relief, and A321neo flight-recorder and 737 steep-approach tests show no clear thrust effect. No E190 has been measured at both angles.";
-const FLAT_SLOPES = "No NPD data exists here for this type's engine, so an A320-like slope is assumed, giving about −0.1 to +0.4 dB.";
-const E2_SLOPES = `${FLAT_SLOPES} The airport models the E2 family from the EMB190 (Annex C pp.10–11), and the E190's CF34-10E slope would give about +0.9 to +1.6 dB.`;
-const A220_SLOPES = `${FLAT_SLOPES} The airport models the A220-100 from the 737-500 (Annex C p.10), whose CFM56-3 slope would give about +2.3 to +2.7 dB, though that is not the A220's engine.`;
+const E190_SLOPES = "CF34-10E relief 3°→5.5° is about 1.2–1.55 dB; A320 CFM56-5A and V2527 relief 3°→4.49° is about 0.34–0.51 dB. Those slopes give **+0.7 to +1.2 dB**, and the airport's AEDT E190 example implies up to about **+2.5 dB** net (noise scheme p.33). **The +0.4 dB default is a judgement**, set lower because half the E190 range is below its table, the slopes ignore spoilers, a same-type A220 comparison shows little relief, and A321neo flight-recorder and 737 steep-approach tests show no clear thrust effect. No E190 has been measured at both angles.";
+const FLAT_SLOPES = "No NPD data exists here for this type's engine, so an A320-like slope is **assumed**, giving about **−0.1 to +0.4 dB**.";
+const E2_SLOPES = `${FLAT_SLOPES} The airport models the E2 family from the EMB190 (Annex C pp.10–11), and the E190's CF34-10E slope would give about **+0.9 to +1.6 dB**.`;
+const A220_SLOPES = `${FLAT_SLOPES} The airport models the A220-100 from the 737-500 (Annex C p.10), whose CFM56-3 slope would give about **+2.3 to +2.7 dB**, though that is not the A220's engine.`;
 const E195_FORECAST = "The most-flown type in the airport's 2038 forecast without the change (Consultation Fig. 3, p.12).";
 
 const PRESETS = [
-  airportPreset("E190", "E190: 737-500 data +1.5 dB, fitted at London City noise monitors 1–6 (LCY Annex C pp.9–10). The 3–5 km drop may come from a flap step in that data (1,000 ft in the Doc 29 default profile, Directive p.189), but Annex C's profiles are custom (p.8), so this is an inference."),
-  easaPreset("E190", "E190 92.5", "43 t", E190_CERTIFICATE_DELTA, E190_THRUST_DELTA, E190_SLOPES, "E190 92.5: the airport's example (noise scheme p.33); 92.4 records are Chapter 3 only. The 91.8 records need a Flap 06 inhibitor and are left out of the default, but no source here says which flap setting London City's E190s use: they would give +0.55 dB. Reagan National arrivals measured about −2 dB LAmax (AEF Table 5, p.8)."),
-  measuredPreset("E190", E190_MEASURED_DELTA, E190_THRUST_DELTA, E190_SLOPES, "A320neo minus E190: −2.2, −2.0 and −1.8 dB LAmax at monitors 6, 8 and 17, from 545/180, 959/309 and 26/8 arrivals over 6 months in 2024–25 (AEF Table 5, p.8)."),
+  airportPreset("E190", "E190: 737-500 data **+1.5 dB**, fitted at London City noise monitors 1–6 (LCY Annex C pp.9–10). The 3–5 km drop may come from a flap step in that data (1,000 ft in the Doc 29 default profile, Directive p.189), but Annex C's profiles are custom (p.8), so this is an inference."),
+  easaPreset("E190", "E190 92.5", "43 t", E190_CERTIFICATE_DELTA, E190_THRUST_DELTA, E190_SLOPES, "E190 92.5: the airport's example (noise scheme p.33); 92.4 records are Chapter 3 only. The 91.8 records need a Flap 06 inhibitor and are left out of the default, but no source here says which flap setting London City's E190s use: they would give +0.55 dB. Reagan National arrivals measured **about −2 dB LAmax** (AEF Table 5, p.8)."),
+  measuredPreset("E190", E190_MEASURED_DELTA, E190_THRUST_DELTA, E190_SLOPES, "A320neo minus E190: **−2.2, −2.0 and −1.8 dB LAmax** at monitors 6, 8 and 17, from 545/180, 959/309 and 26/8 arrivals over 6 months in 2024–25 (AEF Table 5, p.8)."),
   thamesmeadGardenPreset(),
-  airportPreset("E190-E2", "E190-E2: EMB190 data −0.9 dB (LCY Annex C p.10)."),
+  airportPreset("E190-E2", "E190-E2: EMB190 data **−0.9 dB** (LCY Annex C p.10)."),
   easaPreset("E190-E2", "E190-E2 91.4", "49.05 t", 0.95, 0.1, E2_SLOPES),
   monitor6Preset("E190-E2"),
   airportPreset("E195-E2", `E195-E2: based on the E190-E2 with an allowance for its larger size (LCY Annex C p.11). ${E195_FORECAST}`),
   easaPreset("E195-E2", "E195-E2 91.7", "54.0 t", 0.65, 0.2, E2_SLOPES, E195_FORECAST),
-  airportPreset("A220", "A220-100: 737-500 data −1.5 dB (LCY Annex C p.10). Its table differs from the E190's by exactly 3.0 dB because both use that 737-500 data."),
-  easaPreset("A220", "A220-100 91.9", "54.7 t", 0.45, 0.2, A220_SLOPES, "Reagan National arrivals measured +2.5 dB LAmax (AEF Table 6, p.9). The sources disagree on the E190–A220 gap: about 4.7 dB measured at Reagan National, 0.5 dB LAmax and 0.1 dB SEL at London City's monitor 6, 3.0 dB in the airport's tables, 0.6 dB on certificates."),
+  airportPreset("A220", "A220-100: 737-500 data **−1.5 dB** (LCY Annex C p.10). Its table differs from the E190's by exactly 3.0 dB because both use that 737-500 data."),
+  easaPreset("A220", "A220-100 91.9", "54.7 t", 0.45, 0.2, A220_SLOPES, "Reagan National arrivals measured **+2.5 dB LAmax** (AEF Table 6, p.9). **The sources disagree on the E190–A220 gap:** about 4.7 dB measured at Reagan National, 0.5 dB LAmax and 0.1 dB SEL at London City's monitor 6, 3.0 dB in the airport's tables, 0.6 dB on certificates."),
   monitor6Preset("A220"),
-  measuredPreset("A220", 2.5, 0.2, A220_SLOPES, "A320neo minus A220: 62.0 vs 59.5 dB LAmax at monitor 6, 19 arrivals each in January 2022, which AEF calls a snapshot (Table 6, p.9). The same monitor gives the E190's −2.2 dB, and its A320neo level is similar in both periods (62.0 and 62.8 dB). AEF notes that A220s at London City may be quieter because of their lower take-off weight (p.9). This figure implies the E190 is about 4.7 dB louder than the A220, while London City's monitor 6 measures 0.5 dB LAmax, so treat it with caution.", " Small sample: 19 arrivals each in one month, and London City's monitor 6 shows a much smaller E190–A220 gap.")
+  measuredPreset("A220", 2.5, 0.2, A220_SLOPES, "A320neo minus A220: **62.0 vs 59.5 dB LAmax** at monitor 6, **19 arrivals each** in January 2022, which AEF calls a snapshot (Table 6, p.9). The same monitor gives the E190's −2.2 dB, and its A320neo level is similar in both periods (62.0 and 62.8 dB). AEF notes that A220s at London City may be quieter because of their lower take-off weight (p.9). This figure implies the E190 is about 4.7 dB louder than the A220, while London City's monitor 6 measures 0.5 dB LAmax, so treat it with caution.", " **Small sample:** 19 arrivals each in one month, and London City's monitor 6 shows a much smaller E190–A220 gap.")
 ];
 
 const FONT_STACK = 'system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -345,20 +365,20 @@ function waypoints() {
 function listenerNote() {
   const turn = activeRunway === "09" ? " Beyond about 4 nm RWY 09 arrivals are turning, so the straight line is a simplification." : "";
   const site = PRESETS[activePreset].site;
-  const where = site ? `Listener ${site.lateralM} m beside the path, using the straight-line distance from the aircraft when abeam` : "Listener directly below the path";
+  const where = site ? `**Listener.** ${site.lateralM} m beside the path, using the straight-line distance from the aircraft when abeam` : "**Listener.** Directly below the path";
   return `${where}, flat ground. Place names are approximate.${turn}`;
 }
 
 function modelSource() {
   const correction = activeRunway === "27" ? "its 1 nm label of 574 ft corrected to 547 ft" : "its 1,692 ft label replaced by slope value 1,656 ft";
-  return `Altitudes (ft AMSL): LCY Consultation ${altitudeFigure()} (${correction}). Runway elevation is ${RUNWAY_ELEVATION_FT} ft AMSL (Consultation p.11) and threshold crossing heights are 35 ft on 5.5° and 50 ft on 4.49° above threshold (Stage 2 pp.50, 61), giving 55 and 70 ft AMSL; acoustic distances use height above the ${RUNWAY_ELEVATION_FT} ft runway plane. ${MODEL_NOTE} ${listenerNote()}`;
+  return [`**Flight paths.** Altitudes (ft AMSL): LCY Consultation ${altitudeFigure()} (${correction}). Runway elevation is ${RUNWAY_ELEVATION_FT} ft AMSL (Consultation p.11) and threshold crossing heights are 35 ft on 5.5° and 50 ft on 4.49° above threshold (Stage 2 pp.50, 61), giving 55 and 70 ft AMSL; acoustic distances use height above the ${RUNWAY_ELEVATION_FT} ft runway plane.`, ...MODEL_NOTES, listenerNote()];
 }
 
 // The sliders at 0 show height and air alone
 function customSources() {
   return [
-    modelSource(),
-    "With both sliders at 0, this is height and air alone. If other types flew 4.49°, the airport estimates under 2 dB from height (LCY Annex C p.41); the Stage 4 draft rule (p.33) limits it to authorised A320neo operators."
+    ...modelSource(),
+    "**Sliders at 0.** This is height and air alone. If other types flew 4.49°, the airport estimates under 2 dB from height (LCY Annex C p.41); the Stage 4 draft rule (p.33) limits it to authorised A320neo operators."
   ];
 }
 
@@ -550,17 +570,40 @@ function citationParts(text) {
   return parts;
 }
 
+function citedLink(part) {
+  const link = document.createElement("a");
+  link.textContent = part.text;
+  link.href = `Documents/${part.doc.file}${part.page ? `#page=${part.page}` : ""}`;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.title = `${part.doc.title}${part.page ? `, page ${part.page}` : ""}`;
+  return link;
+}
+
+// Fills an element with note text, turning citations into links and **marked** words into bold
 function setCitedText(element, text) {
-  element.replaceChildren(...citationParts(text).map(part => {
-    if (!part.doc) return document.createTextNode(part.text);
-    const link = document.createElement("a");
-    link.textContent = part.text;
-    link.href = `Documents/${part.doc.file}${part.page ? `#page=${part.page}` : ""}`;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.title = `${part.doc.title}${part.page ? `, page ${part.page}` : ""}`;
-    return link;
-  }));
+  const nodes = [];
+  let bold = false;
+  const add = node => {
+    if (!bold) {
+      nodes.push(node);
+      return;
+    }
+    const strong = document.createElement("strong");
+    strong.append(node);
+    nodes.push(strong);
+  };
+  for (const part of citationParts(text)) {
+    if (part.doc) {
+      add(citedLink(part));
+      continue;
+    }
+    part.text.split("**").forEach((piece, i) => {
+      if (i > 0) bold = !bold;
+      if (piece) add(document.createTextNode(piece));
+    });
+  }
+  element.replaceChildren(...nodes);
 }
 
 function setup() {

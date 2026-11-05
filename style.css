@@ -322,7 +322,13 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   font-size: 12px;
 }
 
-.sources p + p { margin-top: 6px; }
+.sources p + p { margin-top: 8px; }
+
+.sources strong,
+.description strong {
+  color: var(--ink);
+  font-weight: 600;
+}
 
 .sources a,
 .description a {
