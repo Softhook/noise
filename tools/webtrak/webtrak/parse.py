@@ -20,7 +20,8 @@ against real data on 5 Nov 2026:
   WebTrak doesn't say which.
 - ``event``: start, monitor id, monitor id, class, LAmax, LAmax time, SEL, Leq, EPNL, duration in
   s, end. SEL = Leq + 10 log10(duration). Class 1 looks like an aircraft-correlated event and 5 a
-  non-aircraft one (an inference). The same event is repeated in several chunks.
+  non-aircraft one (an inference). An event is listed once, complete, in the chunk where it
+  starts, so its end and the radar after its LAmax may only arrive in the next chunks.
 - ``radar``: time, track id, direction (A arrival, D departure, O other), airport, ICAO type,
   callsign, icon type, longitude, latitude, height above the aerodrome in metres, ground speed in
   m/s, registration, squawk, origin, destination, scheduled time, tag group, altitude in metres.
@@ -66,6 +67,7 @@ class Event:
     epnl: float
     duration: float
     event_class: str
+    offset_s: int = 0  # the UTC offset of the chunk it came from, for local times
 
     @property
     def key(self):
@@ -145,6 +147,9 @@ def parse_chunk(text, handle=None):
 
     body = text[header.end():]
     body = body.split("</data>", 1)[0]
+    if not body.strip():
+        # Periods before WebTrak's data range come back like this, with radarStatus="offline".
+        raise NotAvailable("empty chunk")
     chunk = Chunk(handle, start_utc, offset, attrs.get("radarStatus", ""), [], [], [])
 
     def utc(local_text):
@@ -162,7 +167,8 @@ def parse_chunk(text, handle=None):
                 chunk.events.append(Event(
                     monitor=parts[3], start=utc(parts[1]), lmax_time=utc(parts[6]), end=utc(parts[11]),
                     lmax=_number(parts[5]), sel=_number(parts[7]), leq=_number(parts[8]),
-                    epnl=_number(parts[9]), duration=_number(parts[10]), event_class=parts[4]))
+                    epnl=_number(parts[9]), duration=_number(parts[10]), event_class=parts[4],
+                    offset_s=offset))
             elif kind == "radar" and len(parts) >= 19:
                 lon, lat = _number(parts[8]), _number(parts[9])
                 if lon is None or lat is None:

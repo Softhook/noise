@@ -5,10 +5,17 @@ Layout, under OUT/<site>/nmt<id>/:
     levels/YYYY-MM-DD.csv     one row per second: UTC, local time, level, flag
     aircraft/YYYY-MM-DD.csv   radar positions within --radius of the monitor
     events.csv                one row per noise event, with the aircraft that passed closest
-    state.json                the last chunk saved, so a restart carries on without gaps
-    raw/YYYY-MM-DD/*.txt.gz   the chunks as received, only with --keep-raw
+    state.json                which chunks are saved, and events still waiting for radar
+    lock                      held while a process writes here, so two can't at once
 
-Days are local (Europe/London) days. Times in the files are ISO 8601, UTC with a Z, and local
+and, shared by every monitor, OUT/<site>/raw/YYYY-MM-DD/<handle>.txt.gz: each chunk as received
+(the folder is the UTC day), so that a chunk is downloaded only once whichever monitors are wanted.
+
+An event is listed once, in the chunk where it starts, but the radar for the minute after its
+LAmax can be in the next chunks. So events wait in state.json until every chunk in their
+matching window is saved (or the data has moved GIVE_UP_S past it), and are matched then.
+
+Folders under levels/ and aircraft/ use local (Europe/London) days. Times in the files are ISO 8601, UTC with a Z, and local
 with its offset.
 """
 
@@ -16,11 +23,17 @@ from __future__ import annotations
 
 import collections
 import csv
+import dataclasses
 import datetime as dt
 import gzip
 import json
 import math
 import os
+
+try:
+    import fcntl
+except ImportError:  # Windows: no locking
+    fcntl = None
 
 from . import parse
 
@@ -34,7 +47,8 @@ EVENT_FIELDS = ["start_utc", "start_local", "lmax_time_local", "end_local", "dur
                 "lmax_after_closest_s", "candidates"]
 
 MATCH_WINDOW_S = 60      # look this far either side of the LAmax time for aircraft
-BUFFER_S = 20 * 60       # keep this much radar in memory for matching
+GIVE_UP_S = 10 * 60      # match with what we have once the data is this far past the window
+KEEP_S = 2 * 3600        # keep this much radar in memory either side of the newest chunk
 
 
 def iso_utc(t):
@@ -85,28 +99,86 @@ def match_event(event, positions, monitor, window=MATCH_WINDOW_S):
         return {"candidates": 0}
     slant, d, p = best
     return {"callsign": p.callsign, "type": p.aircraft_type, "direction": p.direction, "airport": p.airport,
-            "track": p.track, "closest_time_local": iso_local(p.utc, event_offset(event)),
+            "track": p.track, "closest_time_local": iso_local(p.utc, event.offset_s),
             "closest_distance_m": round(d), "closest_height_m": _round(p.height_m, 0),
             "closest_slant_m": round(slant), "lmax_after_closest_s": round(event.lmax_time - p.utc),
             "candidates": len(tracks)}
 
 
-def event_offset(event):
-    return getattr(event, "offset_s", 0)
+def match_handles(event, window=MATCH_WINDOW_S):
+    """The chunks whose radar the event's match needs."""
+    return range(parse.handle_for_utc(event.lmax_time - window), parse.handle_for_utc(event.lmax_time + window) + 1)
+
+
+def _position_from_row(row):
+    def number(key):
+        return float(row[key]) if row.get(key) else None
+    t = dt.datetime.strptime(row["time_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp()
+    return parse.Position(
+        utc=t, track=row["track"], direction=row["direction"], airport=row["airport"], aircraft_type=row["type"],
+        callsign=row["callsign"], registration=row["registration"], squawk="", lat=float(row["lat"]),
+        lon=float(row["lon"]), height_m=number("height_m"), altitude_m=number("altitude_m"),
+        speed_ms=number("speed_ms"), origin=row["origin"], destination=row["destination"])
+
+
+class RawCache:
+    """Chunks as received, gzipped, shared by all monitors of a site."""
+
+    def __init__(self, site_dir):
+        self.dir = os.path.join(site_dir, "raw")
+
+    def path(self, handle):
+        day = dt.datetime.fromtimestamp(parse.utc_for_handle(handle), dt.timezone.utc).strftime("%Y-%m-%d")
+        return os.path.join(self.dir, day, f"{handle}.txt.gz")
+
+    def has(self, handle):
+        return os.path.exists(self.path(handle))
+
+    def get(self, handle):
+        try:
+            with gzip.open(self.path(handle), "rt", encoding="utf-8") as f:
+                return f.read()
+        except (OSError, EOFError):
+            return None
+
+    def put(self, handle, text):
+        path = self.path(handle)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        temp = path + ".tmp"
+        with gzip.open(temp, "wt", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(temp, path)
 
 
 class MonitorStore:
-    def __init__(self, root, monitor, radius_m=3000.0, keep_raw=False):
+    def __init__(self, root, monitor, radius_m=3000.0):
         self.monitor = monitor
         self.dir = os.path.join(root, f"nmt{monitor['id']}")
         self.radius_m = radius_m
-        self.keep_raw = keep_raw
         self.state_path = os.path.join(self.dir, "state.json")
         self.events_path = os.path.join(self.dir, "events.csv")
         os.makedirs(self.dir, exist_ok=True)
         self.state = self._load_state()
-        self.seen_events = self._load_event_keys()
-        self.buffer = collections.deque()
+        self.pending = []
+        for d in self.state.get("pending", []):
+            try:
+                self.pending.append(parse.Event(**d))
+            except TypeError:
+                continue
+        self.seen_events = self._load_event_keys() | {e.key for e in self.pending}
+        self.radar = collections.defaultdict(list)  # handle -> nearby positions in that chunk
+        self.loaded = set()                         # handles whose nearby radar is in self.radar
+        self._lock_file = None
+
+    def lock(self):
+        """Stop a second process writing to this monitor's files at the same time."""
+        if fcntl is None:
+            return
+        self._lock_file = open(os.path.join(self.dir, "lock"), "w")
+        try:
+            fcntl.flock(self._lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise SystemExit(f"another webtrak process is writing to {self.dir}; stop it first")
 
     # --- state ----------------------------------------------------------------------------
 
@@ -118,6 +190,8 @@ class MonitorStore:
             return {}
 
     def _save_state(self):
+        self.state["monitor"] = self.monitor
+        self.state["pending"] = [dataclasses.asdict(e) for e in self.pending]
         temp = self.state_path + ".tmp"
         with open(temp, "w") as f:
             json.dump(self.state, f, indent=1)
@@ -158,34 +232,56 @@ class MonitorStore:
             out.append((cursor, last))
         return out
 
-    def prime_buffer(self):
-        """After a restart, reload recent nearby radar so the first events can still be matched."""
-        folder = os.path.join(self.dir, "aircraft")
+    # --- radar for matching ---------------------------------------------------------------
+
+    def _load_aircraft_day(self, day, wanted=None, since=None):
+        """Read saved nearby radar for one local day into memory."""
+        path = os.path.join(self.dir, "aircraft", f"{day}.csv")
         try:
-            latest = sorted(n for n in os.listdir(folder) if n.endswith(".csv"))[-2:]
+            with open(path, newline="") as f:
+                rows = list(csv.DictReader(f))
         except OSError:
             return
-        cutoff = None
-        if self.last_handle is not None:
-            cutoff = parse.utc_for_handle(self.last_handle) - BUFFER_S
-        for name in latest:
-            with open(os.path.join(folder, name), newline="") as f:
-                for row in csv.DictReader(f):
-                    try:
-                        t = dt.datetime.strptime(row["time_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
-                            tzinfo=dt.timezone.utc).timestamp()
-                        if cutoff is not None and t < cutoff:
-                            continue
-                        self.buffer.append(parse.Position(
-                            utc=t, track=row["track"], direction=row["direction"], airport=row["airport"],
-                            aircraft_type=row["type"], callsign=row["callsign"], registration=row["registration"],
-                            squawk="", lat=float(row["lat"]), lon=float(row["lon"]),
-                            height_m=float(row["height_m"]) if row["height_m"] else None,
-                            altitude_m=float(row["altitude_m"]) if row["altitude_m"] else None,
-                            speed_ms=float(row["speed_ms"]) if row["speed_ms"] else None,
-                            origin=row["origin"], destination=row["destination"]))
-                    except (KeyError, ValueError):
-                        continue
+        for row in rows:
+            try:
+                p = _position_from_row(row)
+            except (KeyError, ValueError):
+                continue
+            h = parse.handle_for_utc(p.utc)
+            if h in self.loaded or (wanted is not None and h not in wanted) or (since is not None and p.utc < since):
+                continue
+            self.radar[h].append(p)
+
+    def prime_buffer(self):
+        """After a restart, reload recent nearby radar so waiting events can still be matched."""
+        if self.last_handle is None:
+            return
+        since = parse.utc_for_handle(self.last_handle) - KEEP_S
+        folder = os.path.join(self.dir, "aircraft")
+        try:
+            days = sorted(n[:-4] for n in os.listdir(folder) if n.endswith(".csv"))[-2:]
+        except OSError:
+            return
+        for day in days:
+            self._load_aircraft_day(day, since=since)
+        self.loaded.update(h for h in range(parse.handle_for_utc(since), self.last_handle + 1) if self.has(h))
+
+    def _positions_for(self, event):
+        handles = [h for h in match_handles(event) if self.has(h)]
+        missing = {h for h in handles if h not in self.loaded}
+        if missing:  # saved in an earlier run and no longer in memory: read them back
+            days = {local_day(parse.utc_for_handle(h) + dx, event.offset_s) for h in missing for dx in (0, 29)}
+            for day in sorted(days):
+                self._load_aircraft_day(day, wanted=missing)
+            self.loaded.update(missing)
+        return [p for h in handles for p in self.radar.get(h, ())]
+
+    def _prune(self, handle):
+        keep = KEEP_S // parse.WINDOW_S
+        needed = {h for e in self.pending for h in match_handles(e)}
+        for h in [h for h in self.loaded | set(self.radar) if abs(h - handle) > keep and h not in needed]:
+            self.radar.pop(h, None)
+            self.loaded.discard(h)
 
     def _load_event_keys(self):
         keys = set()
@@ -211,8 +307,40 @@ class MonitorStore:
                 writer.writeheader()
             writer.writerows(rows)
 
+    def _event_row(self, event):
+        off = event.offset_s
+        row = {"start_utc": iso_utc(event.start), "start_local": iso_local(event.start, off),
+               "lmax_time_local": iso_local(event.lmax_time, off), "end_local": iso_local(event.end, off),
+               "duration_s": event.duration, "lmax_db": event.lmax, "sel_db": event.sel, "leq_db": event.leq,
+               "epnl_db": event.epnl, "event_class": event.event_class}
+        row.update(match_event(event, self._positions_for(event), self.monitor))
+        return row
+
+    def _match(self, ready):
+        """Match and write the events for which ready(event) is true; return their rows."""
+        done = [e for e in self.pending if ready(e)]
+        if not done:
+            return []
+        self.pending = [e for e in self.pending if not ready(e)]
+        rows = [self._event_row(e) for e in sorted(done, key=lambda e: e.start)]
+        self._append(self.events_path, EVENT_FIELDS, rows)
+        return rows
+
+    def finish(self, up_to_handle):
+        """Match waiting events whose window starts by up_to_handle, with whatever radar is saved.
+
+        For the end of a historical fetch; events after it, such as ones from following, keep waiting.
+        """
+        rows = self._match(lambda e: match_handles(e)[0] <= up_to_handle)
+        if rows:
+            self._save_state()
+        return rows
+
     def save(self, chunk, text=None):
-        """Save one chunk and return a summary for the console, or None if it was saved before."""
+        """Save one chunk and return a summary for the console, or None if it was saved before.
+
+        The summary's events are the ones matched now, which may have come from earlier chunks.
+        """
         if self.has(chunk.handle):
             return None
         mid = self.monitor["id"]
@@ -231,13 +359,9 @@ class MonitorStore:
             d = ground_distance(self.monitor["lat"], self.monitor["lon"], p.lat, p.lon)
             if d <= self.radius_m:
                 near.append((p, d))
-        # Chunks normally arrive in order. If this one is from another period (a historical fetch
-        # after following, say), the buffered radar is no use for matching, so start afresh.
-        if self.buffer and not (chunk.start_utc - BUFFER_S <= self.buffer[-1].utc <= chunk.start_utc + parse.WINDOW_S):
-            self.buffer.clear()
         by_day = collections.defaultdict(list)
         for p, d in sorted(near, key=lambda item: item[0].utc):
-            self.buffer.append(p)
+            self.radar[parse.handle_for_utc(p.utc)].append(p)
             by_day[local_day(p.utc, off)].append({
                 "time_utc": iso_utc(p.utc), "time_local": iso_local(p.utc, off), "track": p.track,
                 "callsign": p.callsign, "type": p.aircraft_type, "registration": p.registration,
@@ -246,36 +370,22 @@ class MonitorStore:
                 "speed_ms": p.speed_ms, "distance_m": round(d), "slant_m": round(math.hypot(d, p.height_m or 0.0))})
         for day, rows in by_day.items():
             self._append(os.path.join(self.dir, "aircraft", f"{day}.csv"), AIRCRAFT_FIELDS, rows)
-        while self.buffer and self.buffer[0].utc < chunk.start_utc - BUFFER_S:
-            self.buffer.popleft()
+        self.loaded.add(chunk.handle)
+        self._mark_saved(chunk.handle)
 
-        new_events = []
         for event in chunk.events:
             if event.monitor != mid or event.key in self.seen_events:
                 continue
             self.seen_events.add(event.key)
-            event.offset_s = off
-            row = {"start_utc": iso_utc(event.start), "start_local": iso_local(event.start, off),
-                   "lmax_time_local": iso_local(event.lmax_time, off), "end_local": iso_local(event.end, off),
-                   "duration_s": event.duration, "lmax_db": event.lmax, "sel_db": event.sel, "leq_db": event.leq,
-                   "epnl_db": event.epnl, "event_class": event.event_class}
-            row.update(match_event(event, self.buffer, self.monitor))
-            new_events.append(row)
-        self._append(self.events_path, EVENT_FIELDS, new_events)
-
-        if self.keep_raw and text is not None:
-            day = local_day(chunk.start_utc, off)
-            raw_dir = os.path.join(self.dir, "raw", day)
-            os.makedirs(raw_dir, exist_ok=True)
-            with gzip.open(os.path.join(raw_dir, f"{chunk.handle}.txt.gz"), "wt") as f:
-                f.write(text)
-
-        self._mark_saved(chunk.handle)
-        self.state["monitor"] = self.monitor
+            self.pending.append(event)
+        chunk_end = chunk.start_utc + parse.WINDOW_S
+        matched = self._match(lambda e: all(self.has(h) for h in match_handles(e))
+                              or chunk_end >= e.lmax_time + MATCH_WINDOW_S + GIVE_UP_S)
         self._save_state()
+        self._prune(chunk.handle)
 
         values = [lv.level for lv in levels]
         leq = 10 * math.log10(sum(10 ** (v / 10) for v in values) / len(values)) if values else None
         return {"handle": chunk.handle, "start": iso_local(chunk.start_utc, off), "seconds": len(values),
-                "leq": leq, "max": max(values) if values else None, "events": new_events,
+                "leq": leq, "max": max(values) if values else None, "events": matched,
                 "aircraft": len({p.track for p, _ in near}), "radar_status": chunk.radar_status}

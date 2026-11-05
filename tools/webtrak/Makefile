@@ -8,6 +8,7 @@ help:
 	@echo "make monitors   list all LCY noise monitors"
 	@echo "make range      show available date range and live delay"
 	@echo "make follow     follow NMT6 live (~25 min delayed)"
+	@echo "python3 -m webtrak fetch --from 'YYYY-MM-DD HH:MM' --to 'YYYY-MM-DD HH:MM'   fetch a past period"
 
 test:
 	$(PYTHON) -m unittest discover tests

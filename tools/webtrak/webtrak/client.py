@@ -1,12 +1,14 @@
 """HTTP access to WebTrak, using only the standard library.
 
 Only public, unauthenticated endpoints are used: the same ones the WebTrak page calls in a browser.
-Requests are spaced out (one a second by default), and follow mode asks for one new chunk every
-30 s, which is what an open WebTrak tab does.
+Requests are spaced out (the gap is timed from the end of one reply to the start of the next
+request), replies are asked for gzipped, and a server's Retry-After is honoured. Follow mode asks
+for one new chunk every 30 s, which is what an open WebTrak tab does.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import time
@@ -20,6 +22,22 @@ SITES_URL = "https://eu.webtrak.aero/api/sites"
 CONFIG_URL = "https://focus-apis.emsbk.com/productinfo"
 FALLBACK_DATA_HOST = "webtrak-server-eu.emsbk.com"
 USER_AGENT = "thamesmead-noise-survey/0.1 (personal, non-commercial noise research)"
+MAX_RETRY_AFTER_S = 900
+
+
+def retry_after(error):
+    """Seconds a 429 or 503 reply asks us to wait, or 0."""
+    headers = getattr(error, "headers", None)
+    try:
+        return min(MAX_RETRY_AFTER_S, max(0, int((headers or {}).get("Retry-After", 0))))
+    except (TypeError, ValueError):
+        return 0  # an HTTP date, which WebTrak doesn't send; fall back to our own back-off
+
+
+def _decode(raw, encoding):
+    if "gzip" in (encoding or "").lower() or raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8", "replace")
 
 
 class Client:
@@ -37,27 +55,36 @@ class Client:
 
     # --- plumbing -------------------------------------------------------------------------
 
+    def _wait(self):
+        if self._last is not None:
+            wait = self.min_interval - (self._clock() - self._last)
+            if wait > 0:
+                self._sleep(wait)
+
     def _request(self, url, data=None):
-        headers = {"User-Agent": USER_AGENT, "Referer": f"https://eu.webtrak.aero/{self.site}"}
+        headers = {"User-Agent": USER_AGENT, "Referer": f"https://eu.webtrak.aero/{self.site}",
+                   "Accept-Encoding": "gzip"}
         body = urllib.parse.urlencode(data).encode() if data is not None else None
         delay = 5
         for attempt in range(self.retries + 1):
-            if self._last is not None:
-                wait = self.min_interval - (self._clock() - self._last)
-                if wait > 0:
-                    self._sleep(wait)
-            self._last = self._clock()
+            self._wait()
             try:
                 request = urllib.request.Request(url, data=body, headers=headers)
                 with self._open(request, timeout=self.timeout) as response:
-                    return response.read().decode("utf-8", "replace")
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
+                    raw = response.read()
+                    encoding = (getattr(response, "headers", None) or {}).get("Content-Encoding", "")
+                return _decode(raw, encoding)
+            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, EOFError) as error:
                 if isinstance(error, urllib.error.HTTPError) and 400 <= error.code < 500 and error.code != 429:
                     raise
                 if attempt == self.retries:
+                    if isinstance(error, EOFError):  # a truncated gzip reply
+                        raise OSError(f"truncated reply from {url}") from error
                     raise
-                self._sleep(delay)
+                self._sleep(max(delay, retry_after(error)))
                 delay *= 3
+            finally:
+                self._last = self._clock()
 
     def data_host(self):
         if self._data_host is None:
