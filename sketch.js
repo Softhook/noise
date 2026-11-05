@@ -74,11 +74,11 @@ const SOURCE_RANGES = {
 };
 // Estimated thrust difference relative to 3° reference data: ΔL_base(3°→5.5°) − ΔL_A320(3°→4.49°).
 // Floor: spoilers cancel all relief on the 5.5° type, leaving −0.45 (the A320's mid relief, 0.34–0.51 dB).
-// E190: NPD slopes give +0.7 to +1.2; the airport's AEDT example gives about +2.5 at most (noise scheme p.33).
+// E190: NPD slopes give +0.7 to +1.2; the airport's AEDT example gives about +2.5 at most (noise scheme p.33). The default is +0.4, a judgement.
 // Top of each new-generation band: the slope of the engine the airport uses as that type's proxy, scaled by its mass.
 // E190-E2 and E195-E2 use the EMB190's CF34-10E; the A220 uses the 737-500's CFM56-3. Neither is that type's real engine.
 const THRUST_RANGES = {
-  "E190":    { range: [-0.45, 2.5], text: "estimate: −0.45 if spoilers cancel relief, +0.7 to +1.2 NPD, up to +2.5 AEDT example" },
+  "E190":    { range: [-0.45, 2.5], text: "estimate: −0.45 if spoilers cancel relief, +0.4 default (judgement), +0.7 to +1.2 NPD, up to +2.5 AEDT example" },
   "E190-E2": { range: [-0.45, 1.4], text: "estimate: −0.45 if spoilers cancel relief, up to +1.4 with the E190's engine slope" },
   "E195-E2": { range: [-0.45, 1.6], text: "estimate: −0.45 if spoilers cancel relief, up to +1.6 with the E190's engine slope" },
   "A220":    { range: [-0.45, 2.7], text: "estimate: −0.45 if spoilers cancel relief, up to +2.7 with its 737-500 proxy's slope" }
@@ -86,7 +86,7 @@ const THRUST_RANGES = {
 // RWY 27 arrivals measured at London City's NMT6, which they overfly, 2 Sep to 8 Oct 2024 (BAP Thamesmead survey, Table 3, p.8).
 const E190_CERTIFICATE_DELTA = -0.15; // A320neo minus E190: certificate midpoint 92.35 vs 92.5 EPNdB
 const E190_MEASURED_DELTA = -2.0;     // A320neo minus E190: Reagan National arrivals (AEF Table 5, p.8)
-const E190_THRUST_DELTA = 0.9;        // Estimated thrust difference, A320neo minus E190
+const E190_THRUST_DELTA = 0.4;        // Judgement, below the +0.7 to +1.2 from NPD slopes; reasons in Documents/README.md
 const MONITOR_6 = {
   "E190":    { flights: 955, LAmax: 74.8, SEL: 83.8 },
   "E190-E2": { flights: 15,  LAmax: 72.7, SEL: 81.6 },
@@ -159,7 +159,7 @@ function slidersChangedNote() {
 }
 
 function thrustSource(thrustDelta, slopeBasis) {
-  return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It assumes constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data, which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the range extends down by ${Math.abs(LEVEL_VS_DESCENDING_DB)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
+  return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data, which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the range extends down by ${Math.abs(LEVEL_VS_DESCENDING_DB)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
 }
 
 // Approach certificates (measured at 3.0°) against one other type: A320neo at its lowest listed landing mass,
@@ -266,7 +266,7 @@ function thamesmeadGardenPreset() {
   };
 }
 
-const E190_SLOPES = "CF34-10E relief 3°→5.5° is about 1.2–1.55 dB; A320 CFM56-5A and V2527 relief 3°→4.49° is about 0.34–0.51 dB. The airport's AEDT E190 example implies more, up to about +2.5 dB net (noise scheme p.33).";
+const E190_SLOPES = "CF34-10E relief 3°→5.5° is about 1.2–1.55 dB; A320 CFM56-5A and V2527 relief 3°→4.49° is about 0.34–0.51 dB. Those slopes give +0.7 to +1.2 dB, and the airport's AEDT E190 example implies up to about +2.5 dB net (noise scheme p.33). The +0.4 dB default is a judgement, set lower because half the E190 range is below its table, the slopes ignore spoilers, a same-type A220 comparison shows little relief, and A321neo flight-recorder and 737 steep-approach tests show no clear thrust effect. No E190 has been measured at both angles.";
 const FLAT_SLOPES = "No NPD data exists here for this type's engine, so an A320-like slope is assumed, giving about −0.1 to +0.4 dB.";
 const E2_SLOPES = `${FLAT_SLOPES} The airport models the E2 family from the EMB190 (Annex C pp.10–11), and the E190's CF34-10E slope would give about +0.9 to +1.6 dB.`;
 const A220_SLOPES = `${FLAT_SLOPES} The airport models the A220-100 from the 737-500 (Annex C p.10), whose CFM56-3 slope would give about +2.3 to +2.7 dB, though that is not the A220's engine.`;

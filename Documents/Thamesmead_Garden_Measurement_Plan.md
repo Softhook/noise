@@ -4,9 +4,9 @@
 
 ## Purpose
 
-Measure arrivals in the garden now, then again once A320neos fly the proposed 4.49° approach, to test the model's estimate of about +1.5 dB LAmax against the E190.
+Measure arrivals in the garden now, then again once A320neos fly the proposed 4.49° approach, to test the model's estimate of about +1.0 dB LAmax against the E190.
 
-The measurements can show the real difference at the garden, and the combined effect of aircraft noise and thrust. From that we can estimate the difference directly under the path, currently +2.8 dB in the model. They can't separate aircraft noise from thrust, or confirm the under-the-path figure directly.
+The measurements can show the real difference at the garden, and the combined effect of aircraft noise and thrust. From that we can estimate the difference directly under the path, currently +2.3 dB in the model. They can't separate aircraft noise from thrust, or confirm the under-the-path figure directly.
 
 This plan assumes the garden is at the Thamesmead survey site in the [Bickerdike Allen report](https://assets.ctfassets.net/lmkdg513arga/1dAp1OIK1za3G7I6ogmvX5/cd18f1a9a3b47a9ae987239abdb153e2/London_City_Airport__Aircraft_Noise_Survey_-_Thamesmead.pdf): around 4 km from the RWY 27 threshold and around 500 m north of the arrival path.
 
@@ -43,11 +43,11 @@ This example uses an invented measurement of +2.0 dB LAmax:
 
 | Step | LAmax (dB) | Model today (dB) |
 | --- | ---: | ---: |
-| Difference at the garden | +2.0 (invented) | +1.5 |
+| Difference at the garden | +2.0 (invented) | +1.0 |
 | Subtract distance and air, 500 m to the side | −0.75 | −0.75 |
-| Aircraft and thrust combined | +1.25 | +0.75 |
+| Aircraft and thrust combined | +1.25 | +0.25 |
 | Add distance and air, directly under the path | +2.06 | +2.06 |
-| Estimated difference under the path | +3.3 | +2.8 |
+| Estimated difference under the path | +3.3 | +2.3 |
 
 Do the same for SEL, where distance and air are +0.48 dB at the garden and +1.26 dB under the path.
 
