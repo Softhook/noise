@@ -4,21 +4,21 @@
  */
 
 // Every way the notes name each document. A document missing from here gets no link of its own,
-// and any page after its name goes to the document named before it.
+// and any page after its name goes to the document named before it. The tests check citations against pages.
 const CITED_DOCUMENTS = [
-  { name: /LCY consultation|Consultation/, file: "01_LCY_Stage3_Consultation_Document_Issue1.1.pdf", title: "LCY Stage 3 consultation document" },
-  { name: /Annex C/, file: "02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf", title: "LCY Annex C, aircraft noise technical report" },
-  { name: /AEF\b/, file: "08_AEF_Noise_Lessons_for_London_City_Airport.pdf", title: "AEF, noise lessons for London City Airport" },
-  { name: /EASA A320 sheet/, file: "09_EASA_TCDSN_A.064.3_A320_Issue42.pdf", title: "EASA noise data sheet, A320 family" },
-  { name: /EASA ERJ 190 sheet/, file: "10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf", title: "EASA noise data sheet, ERJ 190 family" },
-  { name: /EASA A220 sheet/, file: "18_EASA_TCDSN_IM.A.570_BD500_A220_Issue14.pdf", title: "EASA noise data sheet, A220 family" },
-  { name: /EASA DHC-8 sheet/, file: "27_EASA_TCDSN_IM.A.191_DHC-8_Issue9.pdf", title: "EASA noise data sheet, DHC-8 family" },
-  { name: /noise scheme/, file: "12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf", title: "LCY aircraft noise categorisation scheme" },
-  { name: /Stage 4\b/, file: "16_LCY_Stage4_Airspace_Change_Proposal_Issue1.0.pdf", title: "LCY Stage 4 airspace change proposal" },
-  { name: /Stage 2\b/, file: "17_LCY_Stage2_Develop_and_Assess_V1.1.pdf", title: "LCY Stage 2 develop and assess" },
-  { name: /Directive(?: 2015\/996)?|Doc 29/, file: "19_EU_Directive_2015-996_Doc29_Noise_Method.pdf", title: "Directive (EU) 2015/996, Doc 29 noise method" },
-  { name: /NASA TM 83214/, file: "20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf", title: "NASA TM 83214" },
-  { name: /Bickerdike Allen(?: Thamesmead survey)?/, file: "21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf", title: "Bickerdike Allen Thamesmead survey" }
+  { name: /LCY consultation|Consultation/, file: "01_LCY_Stage3_Consultation_Document_Issue1.1.pdf", pages: 46, title: "LCY Stage 3 consultation document" },
+  { name: /Annex C/, file: "02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf", pages: 89, title: "LCY Annex C, aircraft noise technical report" },
+  { name: /AEF\b/, file: "08_AEF_Noise_Lessons_for_London_City_Airport.pdf", pages: 12, title: "AEF, noise lessons for London City Airport" },
+  { name: /EASA A320 sheet/, file: "09_EASA_TCDSN_A.064.3_A320_Issue42.pdf", pages: 373, title: "EASA noise data sheet, A320 family" },
+  { name: /EASA ERJ 190 sheet/, file: "10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf", pages: 201, title: "EASA noise data sheet, ERJ 190 family" },
+  { name: /EASA A220 sheet/, file: "18_EASA_TCDSN_IM.A.570_BD500_A220_Issue14.pdf", pages: 9, title: "EASA noise data sheet, A220 family" },
+  { name: /EASA DHC-8 sheet/, file: "27_EASA_TCDSN_IM.A.191_DHC-8_Issue9.pdf", pages: 54, title: "EASA noise data sheet, DHC-8 family" },
+  { name: /noise scheme/, file: "12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf", pages: 43, title: "LCY aircraft noise categorisation scheme" },
+  { name: /Stage 4\b/, file: "16_LCY_Stage4_Airspace_Change_Proposal_Issue1.0.pdf", pages: 36, title: "LCY Stage 4 airspace change proposal" },
+  { name: /Stage 2\b/, file: "17_LCY_Stage2_Develop_and_Assess_V1.1.pdf", pages: 205, title: "LCY Stage 2 develop and assess" },
+  { name: /Directive(?: 2015\/996)?|Doc 29/, file: "19_EU_Directive_2015-996_Doc29_Noise_Method.pdf", pages: 823, title: "Directive (EU) 2015/996, Doc 29 noise method" },
+  { name: /NASA TM 83214/, file: "20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf", pages: 16, title: "NASA TM 83214" },
+  { name: /Bickerdike Allen(?: Thamesmead survey)?/, file: "21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf", pages: 15, title: "Bickerdike Allen Thamesmead survey" }
 ];
 const PAGE_CITATION = /(?:(?:Figs?\.|Tables?) [\w–-]+,? )?\bpp?\.\d+(?:–\d+)?(?:, \d+(?:–\d+)?(?![\d ]*[a-zA-Z]))*/;
 const CITATION_PATTERN = new RegExp(`\\b(${CITED_DOCUMENTS.map(entry => entry.name.source).join("|")})|(${PAGE_CITATION.source})`, "g");

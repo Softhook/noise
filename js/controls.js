@@ -70,7 +70,7 @@ function applyScenario(index) {
   state.scenarioIndex = index;
   const scenario = currentScenario();
   if (scenario.site) state.runway = "27"; // The site is only near the RWY 27 arrival path
-  // The airport's single net figure ignores the sliders, so they keep their values for the next scenario
+  // The airport's single net figure ignores the sliders, so they're left alone until a model scenario sets them
   if (!scenario.usesAirportTable) {
     setSliders(adjustedSource[index] ?? scenario.sourceDelta, adjustedThrust[index] ?? scenario.thrustDelta);
   }
@@ -473,6 +473,7 @@ function rememberProbePress(event) {
 
 // Pins at the point clicked. Unpinning works anywhere on the canvas, and the line picks up at the pointer.
 function toggleProbePin(event) {
+  if (!probePress) return; // A click from an assistive tool or script can arrive with no press before it
   // Letting go after dragging across the charts is a click too, but not a request to pin
   if (Math.hypot(event.clientX - probePress.x, event.clientY - probePress.y) > CLICK_SLOP_PX) return;
   // Without hover the line already stays where it's put, so a tap only moves it. It can still unpin, on a device with both a mouse and touch.

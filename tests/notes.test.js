@@ -53,6 +53,19 @@ function allNotes() {
   return [...notes];
 }
 
+// Every linked page in the notes, with the note text that comes before it
+function allPageLinks() {
+  const links = [];
+  for (const note of allNotes()) {
+    let before = "";
+    for (const part of citationParts(note)) {
+      if (part.doc && part.page !== undefined) links.push({ ...part, before, note });
+      before += part.text;
+    }
+  }
+  return links;
+}
+
 function sliderStep(id) {
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const tag = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))[0];
@@ -65,11 +78,41 @@ test("every cited document is in the Documents folder", () => {
   }
 });
 
-test("the Dash 8 certificate pages link to the DHC-8 sheet", () => {
-  const links = Array.from(citationParts("EASA A320 sheet p.175; EASA DHC-8 sheet p.48 (94.9) and p.50."))
-    .filter(part => part.doc)
-    .map(part => [part.doc.file.slice(0, 2), part.page]);
-  assert.deepStrictEqual(links, [["09", 175], ["27", 48], ["27", 50]]);
+// Checked against the PDFs. Keyed by each document's number in the Documents folder.
+test("each type's certificate note links to its own certificate pages", () => {
+  const expected = {
+    "E190": [["10", 46]],
+    "E190-E2": [["10", 190]],
+    "E195-E2": [["10", 194]],
+    "A220": [["18", 3]],
+    "Dash 8-Q400": [["27", 48], ["27", 50]]
+  };
+  for (const [aircraft, pages] of Object.entries(expected)) {
+    const scenario = SCENARIOS.find(entry => entry.name === `EASA: ${aircraft}`);
+    const note = scenario.sources().find(line => line.startsWith("**Where the certificates are.**"));
+    const links = Array.from(citationParts(note))
+      .filter(part => part.doc && part.page !== undefined)
+      .map(part => [part.doc.file.slice(0, 2), part.page]);
+    assert.deepStrictEqual(links, [["09", 175], ["09", 226], ...pages], aircraft);
+  }
+});
+
+test("every linked page is within its document", () => {
+  for (const { text, doc, note } of allPageLinks()) {
+    const lastPage = Number(text.match(/\d+$/)[0]);
+    assert.ok(lastPage <= doc.pages, `"${text}" is past the end of ${doc.file} (${doc.pages} pages) in: ${note}`);
+  }
+});
+
+// A page takes the document last named, so a page after a source that isn't listed would link to the wrong one.
+// So a page must follow a listed name, open a bracket, or carry on from an earlier page with "and".
+test("every linked page follows a listed document", () => {
+  const names = inPage("CITED_DOCUMENTS").map(entry => entry.name.source).join("|");
+  const allowed = new RegExp(`(?:(?:${names})(?: report| Appendix \\w+)?,? |\\(|(?:\\bp\\.\\d+|\\)) and )$`);
+  for (const { text, before, note } of allPageLinks()) {
+    if (/^\d/.test(text)) continue; // A later number in a list such as pp.50, 61
+    assert.ok(allowed.test(before), `"${text}" doesn't follow a listed document in: ${note}`);
+  }
 });
 
 // An EASA sheet missing from CITED_DOCUMENTS would send its pages to the sheet named before it
