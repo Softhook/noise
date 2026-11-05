@@ -138,7 +138,7 @@ function airportPreset(aircraft, basis) {
     name: `Airport: ${aircraft}`,
     baseline: aircraft,
     usesAirportTable: true,
-    desc: () => `LCY consultation Figs. 17–18: A320neo at 4.49° vs ${aircraft} at 5.5° (SEL, net, modelled, published 0.5–5 km only).`,
+    desc: () => `LCY consultation Figs. 17–18, pp.30–31: A320neo at 4.49° vs ${aircraft} at 5.5° (SEL, net, modelled, published 0.5–5 km only).`,
     sources: () => [
       `AEDT 3g model, not measured. ${basis} A320neo: unadjusted AEDT data on LCY profile at 4.49° (Annex C pp.8, 12).`,
       "Published from 0.5 to 5.0 km (0.27–2.70 nm) only (Consultation pp.30–31). For level flight before descent, Consultation Fig. 22 (p.32) gives 80 vs 77–81 dB SEL at 2,000 ft and 75 vs 72–77 dB SEL at 3,000 ft (E190 vs new-generation types). Thrust and weight are estimated internally by AEDT, with no values, flap, gear or weather settings published (Annex C p.7)."
@@ -162,6 +162,14 @@ function thrustSource(thrustDelta, slopeBasis) {
   return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data, which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the low end of the thrust range becomes ${signed(LEVEL_VS_DESCENDING_DB, 0)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
 }
 
+// Where each type's approach certificate is listed
+const CERTIFICATE_SOURCES = {
+  "E190": "EASA ERJ 190 sheet p.46",
+  "E190-E2": "EASA ERJ 190 sheet p.190",
+  "E195-E2": "EASA ERJ 190 sheet p.194",
+  "A220": "EASA A220 sheet p.3"
+};
+
 // Approach certificates (measured at 3.0°) against one other type: A320neo at its lowest listed landing mass,
 // 66.3 t (92.0–92.7 across both engines, midpoint 92.35 EPNdB), minus the other type's 3.0° certificate,
 // plus the estimated thrust difference between 3°→5.5° (baseline) and 3°→4.49° (A320neo).
@@ -174,6 +182,7 @@ function easaPreset(aircraft, certificate, landingMass, sourceDelta, thrustDelta
     thrustDelta,
     sources: () => [
       modelSource(),
+      `Certificates listed in: A320neo, EASA A320 sheet p.175 (LEAP-1A) and p.226 (PW1100G); ${aircraft}, ${CERTIFICATE_SOURCES[aircraft]}.`,
       `Certificates are in EPNdB at 3° test conditions and certified landing masses, not London City's angles or weights. Using an EPNdB difference as a dB(A) difference is an assumption: EPNdB adds tone corrections and a different frequency weighting, and includes duration. 66.3 t is the lowest listed A320neo mass; no document gives typical London City landing weights. The midpoint is a simple choice for an unknown engine, not a sourced method, and the sources don't say which E190 modifications or A320neo engine would be used there. ${note}`.trim(),
       thrustSource(thrustDelta, slopeBasis)
     ]
@@ -260,7 +269,7 @@ function thamesmeadGardenPreset() {
     },
     sources: () => [
       modelSource(),
-      `Measured at the Thamesmead survey site, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread. The site is around 4 km from the RWY 27 threshold and around 500 m north of the arrival path, and RWY 09 arrivals don't fly near it (pp.4–5), so this scenario is RWY 27 only. The A320neo level is the E190's measured level plus the modelled difference, and hasn't been measured. Aircraft and thrust differences are the E190 scenario's, which aren't specific to a listener beside the path. Doc 29 lateral attenuation isn't included; it would lower the difference by about 0.1 dB, because the lower A320neo is seen at a shallower angle (Directive p.80). Departures fly over the site, measuring E190 74.8 dB LAmax and 84.5 dB SEL (Table 2, p.6), but aren't part of this model.`,
+      `Measured at the Thamesmead survey site, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread. The site is around 4 km from the RWY 27 threshold and around 500 m north of the arrival path, and RWY 09 arrivals don't fly near it (pp.4–5), so this scenario is RWY 27 only. The A320neo level is the E190's measured level plus the modelled difference, and hasn't been measured. Aircraft and thrust differences are the E190 scenario's, which aren't specific to a listener beside the path. Doc 29 lateral attenuation isn't included; it would lower the difference by about 0.1 dB, because the lower A320neo is seen at a shallower angle (Directive p.80). Departures fly over the site, measuring E190 74.8 dB LAmax and 84.5 dB SEL (Bickerdike Allen, Table 2, p.6), but aren't part of this model.`,
       thrustSource(E190_THRUST_DELTA, E190_SLOPES)
     ]
   };
@@ -349,7 +358,7 @@ function modelSource() {
 function customSources() {
   return [
     modelSource(),
-    "With both sliders at 0, this is height and air alone. If other types flew 4.49°, the airport estimates under 2 dB from height (LCY Annex C p.41); the Stage 4 draft rule limits it to authorised A320neo operators."
+    "With both sliders at 0, this is height and air alone. If other types flew 4.49°, the airport estimates under 2 dB from height (LCY Annex C p.41); the Stage 4 draft rule (p.33) limits it to authorised A320neo operators."
   ];
 }
 
@@ -487,6 +496,73 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+// ---------------------------------------------------------------------------
+// Links from the citations in the notes to the documents, at the cited page
+// ---------------------------------------------------------------------------
+
+// Page numbers in the notes are PDF page numbers, so they work directly with #page=
+const CITED_DOCUMENTS = [
+  { name: /Consultation|LCY consultation/, file: "01_LCY_Stage3_Consultation_Document_Issue1.1.pdf", title: "LCY Stage 3 consultation document" },
+  { name: /Annex C/, file: "02_LCY_Annex_C_Aircraft_Noise_Technical_Report.pdf", title: "LCY Annex C, aircraft noise technical report" },
+  { name: /AEF/, file: "08_AEF_Noise_Lessons_for_London_City_Airport.pdf", title: "AEF, noise lessons for London City Airport" },
+  { name: /EASA A320 sheet/, file: "09_EASA_TCDSN_A.064.3_A320_Issue42.pdf", title: "EASA noise data sheet, A320 family" },
+  { name: /EASA ERJ 190 sheet/, file: "10_EASA_TCDSN_IM.A.071_ERJ190_Issue24.pdf", title: "EASA noise data sheet, ERJ 190 family" },
+  { name: /EASA A220 sheet/, file: "18_EASA_TCDSN_IM.A.570_BD500_A220_Issue14.pdf", title: "EASA noise data sheet, A220 family" },
+  { name: /noise scheme/, file: "12_LCY_Aircraft_Noise_Categorisation_Scheme_March2022.pdf", title: "LCY aircraft noise categorisation scheme" },
+  { name: /Stage 4/, file: "16_LCY_Stage4_Airspace_Change_Proposal_Issue1.0.pdf", title: "LCY Stage 4 airspace change proposal" },
+  { name: /Stage 2/, file: "17_LCY_Stage2_Develop_and_Assess_V1.1.pdf", title: "LCY Stage 2 develop and assess" },
+  { name: /Directive|Doc 29/, file: "19_EU_Directive_2015-996_Doc29_Noise_Method.pdf", title: "Directive (EU) 2015/996, Doc 29 noise method" },
+  { name: /NASA TM 83214/, file: "20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf", title: "NASA TM 83214" },
+  { name: /Bickerdike Allen/, file: "21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf", title: "Bickerdike Allen Thamesmead survey" }
+];
+const CITATION_PATTERN = /\b(EASA (?:A320|ERJ 190|A220) sheet|Bickerdike Allen(?: Thamesmead survey)?|Directive(?: 2015\/996)?|Doc 29|Annex C|LCY consultation|Consultation|noise scheme|Stage [24]\b|AEF\b|NASA TM 83214)|((?:(?:Figs?\.|Tables?) [\w–-]+,? )?\bpp?\.\d+(?:–\d+)?(?:, \d+(?:–\d+)?(?![\d ]*[a-zA-Z]))*)/g;
+
+// Splits notes into plain text and links. A page without a document name belongs to the document last named.
+// A document name is only linked when no page follows it, because then the page is the link.
+function citationParts(text) {
+  const parts = [];
+  const addText = value => {
+    if (value) parts.push({ text: value });
+  };
+  let doc = null;
+  let last = 0;
+  for (const match of text.matchAll(CITATION_PATTERN)) {
+    addText(text.slice(last, match.index));
+    last = match.index + match[0].length;
+    if (match[1]) {
+      doc = CITED_DOCUMENTS.find(entry => entry.name.test(match[1]));
+      const pageFollows = /^.{0,24}\bpp?\.\d/.test(text.slice(last));
+      parts.push(pageFollows ? { text: match[0] } : { text: match[0], doc });
+    } else if (!doc) {
+      addText(match[0]);
+    } else {
+      // Each listed page is its own link, and a range opens at its first page
+      let at = 0;
+      for (const number of match[0].matchAll(/\d+(?:–\d+)?(?=$|, \d)/g)) {
+        const start = at === 0 ? 0 : number.index;
+        addText(match[0].slice(at, start));
+        at = number.index + number[0].length;
+        parts.push({ text: match[0].slice(start, at), doc, page: parseInt(number[0], 10) });
+      }
+    }
+  }
+  addText(text.slice(last));
+  return parts;
+}
+
+function setCitedText(element, text) {
+  element.replaceChildren(...citationParts(text).map(part => {
+    if (!part.doc) return document.createTextNode(part.text);
+    const link = document.createElement("a");
+    link.textContent = part.text;
+    link.href = `Documents/${part.doc.file}${part.page ? `#page=${part.page}` : ""}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = `${part.doc.title}${part.page ? `, page ${part.page}` : ""}`;
+    return link;
+  }));
+}
+
 function setup() {
   const box = byId("chart");
   const canvas = createCanvas(box.clientWidth, box.clientHeight);
@@ -613,7 +689,7 @@ function syncControls() {
     button.disabled = airport;
   });
 
-  byId("scenario-desc").textContent = preset.desc();
+  setCitedText(byId("scenario-desc"), preset.desc());
   byId("reset-sliders").hidden = airport || !slidersChanged();
   byId("metric-hint").textContent = airport
     ? "The airport's comparison tables give SEL only."
@@ -648,7 +724,7 @@ function syncControls() {
 
   byId("sources").replaceChildren(...(airport || hasAdjustments() ? preset.sources() : customSources()).map(line => {
     const paragraph = document.createElement("p");
-    paragraph.textContent = line;
+    setCitedText(paragraph, line);
     return paragraph;
   }));
 
@@ -1306,7 +1382,7 @@ function drawProbeDot(x, y, col) {
 
 function updateReadout() {
   // The monitor 6 description quotes results at the selected distance
-  if (PRESETS[activePreset].monitor6) byId("scenario-desc").textContent = PRESETS[activePreset].desc();
+  if (PRESETS[activePreset].monitor6) setCitedText(byId("scenario-desc"), PRESETS[activePreset].desc());
 
   const ac = getAcoustics(probeNM);
   const airport = probeAirportValues(probeNM);

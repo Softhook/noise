@@ -324,6 +324,13 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
 
 .sources p + p { margin-top: 6px; }
 
+.sources a,
+.description a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* Readout strip and chart */
 .workspace {
   display: flex;
