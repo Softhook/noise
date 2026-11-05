@@ -287,10 +287,10 @@ function thamesmeadGardenPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, 
   const level = delta => site.levels[aircraft][metricMode] + delta;
   const flights = site.levels[aircraft].flights;
   return {
-    name: `Thamesmead garden: ${aircraft}`,
-    kind: "Measured at Thamesmead + EASA certificates",
+    name: `Hybrid Thamesmead garden: ${aircraft}`,
+    kind: "LCY measured + EASA certificates",
     tone: "site",
-    tip: `Estimates an A320neo's level in a Thamesmead garden, 500 m beside the arrival path. It starts from the ${aircraft} level measured there${flights < 20 ? ` (only ${flights} arrivals)` : ""}, then adds the certificate difference between the aircraft. Height and air are then modelled, and thrust is estimated. No A320neo has been measured there.`,
+    tip: `Estimates an A320neo's level in a Thamesmead garden, 500 m beside the arrival path. It starts from the ${aircraft} level measured there in a survey for London City Airport${flights < 20 ? ` (only ${flights} arrivals)` : ""}, then adds the certificate difference between the aircraft. Height and air are then modelled, and thrust is estimated. No A320neo has been measured there.`,
     wide: true,
     baseline: aircraft,
     site: { nm, lateralM: site.lateralM },
@@ -303,11 +303,11 @@ function thamesmeadGardenPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, 
       const reagan = measuredDelta === null ? "" : `, or **${level(ac.geomDB + ac.atmDB + measuredDelta + thrustDelta).toFixed(1)}** using Reagan National`;
       const sample = flights < 20 ? ` **Small sample:** ${flights} ${aircraft} arrivals.` : "";
       const measured = ["E190", "A220", "E190-E2"].map(type => `${type} ${site.levels[type][metricMode].toFixed(1)}`).join(", ");
-      return `**Measured at Thamesmead + EASA certificates.** An A320neo arriving on RWY 27 would likely reach about **${level(ac.netDB).toFixed(1)} dB ${metricMode}** in the garden (range **${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}**)${reagan}. **That is an estimate**, built on the ${aircraft}'s level.${sample} Averages measured there: ${measured}. This is an **average flight**, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
+      return `**LCY measured + EASA certificates.** An A320neo arriving on RWY 27 would likely reach about **${level(ac.netDB).toFixed(1)} dB ${metricMode}** in the garden (range **${level(range.low).toFixed(1)} to ${level(range.high).toFixed(1)}**)${reagan}. **That is an estimate**, built on the ${aircraft}'s level.${sample} Averages measured there: ${measured}. This is an **average flight**, not the loudest. Departures are louder there and aren't estimated. The chart shows a listener 500 m beside the path; the marked point is the garden.${slidersChangedNote()}`;
     },
     sources: () => [
       ...modelSource(),
-      `**Measured at the site.** Thamesmead survey site, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): **E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL** from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread.`,
+      `**Measured at the site.** Thamesmead survey site, measured for London City Airport by Bickerdike Allen, 2 September to 8 October 2024 (Bickerdike Allen Thamesmead survey, Table 1, p.6): **E190 ${site.levels.E190.LAmax.toFixed(1)} dB LAmax and ${site.levels.E190.SEL.toFixed(1)} dB SEL** from ${site.levels.E190.flights} arrivals; A220-100 ${site.levels.A220.LAmax.toFixed(1)} and ${site.levels.A220.SEL.toFixed(1)} from ${site.levels.A220.flights}; E190-E2 ${site.levels["E190-E2"].LAmax.toFixed(1)} and ${site.levels["E190-E2"].SEL.toFixed(1)} from ${site.levels["E190-E2"].flights}. The report gives no spread.`,
       "**Where it is.** Around **4 km** from the RWY 27 threshold and around **500 m** north of the arrival path, and RWY 09 arrivals don't fly near it (Bickerdike Allen, pp.4–5), so this scenario is RWY 27 only.",
       `**How the estimate works.** The A320neo level is the ${aircraft}'s measured level plus the modelled difference, and **hasn't been measured**. Aircraft and thrust differences are the EASA: ${aircraft} scenario's, which aren't specific to a listener beside the path.`,
       "**Left out.** Doc 29 lateral attenuation isn't included; it would lower the difference by about 0.1 dB, because the lower A320neo is seen at a shallower angle (Directive p.80). Departures fly over the site, measuring E190 74.8 dB LAmax and 84.5 dB SEL (Bickerdike Allen, Table 2, p.6), but aren't part of this model.",
