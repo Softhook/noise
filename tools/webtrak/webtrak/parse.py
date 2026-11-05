@@ -20,8 +20,9 @@ against real data on 5 Nov 2026:
   WebTrak doesn't say which.
 - ``event``: start, monitor id, monitor id, class, LAmax, LAmax time, SEL, Leq, EPNL, duration in
   s, end. SEL = Leq + 10 log10(duration). Class 1 looks like an aircraft-correlated event and 5 a
-  non-aircraft one (an inference). An event is listed once, complete, in the chunk where it
-  starts, so its end and the radar after its LAmax may only arrive in the next chunks.
+  non-aircraft one (an inference). An event is listed, complete, in one or two chunks around
+  its time: sometimes the one where it starts, sometimes the one where it ends, or both. The
+  radar for the minute after its LAmax may only arrive in later chunks.
 - ``radar``: time, track id, direction (A arrival, D departure, O other), airport, ICAO type,
   callsign, icon type, longitude, latitude, height above the aerodrome in metres, ground speed in
   m/s, registration, squawk, origin, destination, scheduled time, tag group, altitude in metres.

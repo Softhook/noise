@@ -65,7 +65,7 @@ Each chunk holds every monitor and all radar, so the raw cache lets you add moni
 
 ### Event matching (`events.csv`)
 
-For each noise event reported by NMT6, the scraper correlates nearby radar tracks within ±60 seconds of the `LAmax` peak time. An event is listed once, in the chunk where it starts, so the radar for the minute after its LAmax is still to come: the event waits (in `state.json`, so a restart doesn't lose it) until those chunks are saved, and is matched then. If they never arrive it is matched with what there is once the data is 10 minutes further on, or at the end of a `fetch`. The match identifies:
+For each noise event reported by NMT6, the scraper correlates nearby radar tracks within ±60 seconds of the `LAmax` peak time. An event is listed in one or two chunks around its time (the one where it starts, the one where it ends, or both), so the radar for the minute after its LAmax may still be to come: the event waits (in `state.json`, so a restart doesn't lose it) until those chunks are saved, and is matched then. If they never arrive it is matched with what there is once the data is 10 minutes further on, or at the end of a `fetch`. The match identifies:
 - Matched aircraft callsign, aircraft type, direction (`A`/`D`/`O`), origin/destination.
 - Closest approach: ground distance (m), height (m), slant distance (m), and timing difference relative to `LAmax`.
 

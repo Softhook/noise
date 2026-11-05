@@ -11,8 +11,8 @@ Layout, under OUT/<site>/nmt<id>/:
 and, shared by every monitor, OUT/<site>/raw/YYYY-MM-DD/<handle>.txt.gz: each chunk as received
 (the folder is the UTC day), so that a chunk is downloaded only once whichever monitors are wanted.
 
-An event is listed once, in the chunk where it starts, but the radar for the minute after its
-LAmax can be in the next chunks. So events wait in state.json until every chunk in their
+An event is listed in one or two chunks around its time, but the radar for the minute after its
+LAmax can be in later chunks. So events wait in state.json until every chunk in their
 matching window is saved (or the data has moved GIVE_UP_S past it), and are matched then.
 
 Folders under levels/ and aircraft/ use local (Europe/London) days. Times in the files are ISO 8601, UTC with a Z, and local
