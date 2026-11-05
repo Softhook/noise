@@ -3,7 +3,7 @@
 This tests the analysis against a simple model of reality, not reality: the simulated aircraft fly
 straight, perfect paths. Real data will be messier.
 
-Run from the project folder with: python3 -m unittest discover tools/adsb
+Run from tools/adsb with: make test (or python3 -m unittest)
 """
 
 import csv
@@ -15,8 +15,10 @@ import shutil
 import tempfile
 import unittest
 
-import adsb_analyse as aa
-import adsb_simulate as sim
+from adsb import simulate as sim
+from adsb.analyse import run
+from adsb.common import parse_utc
+from adsb.weather import Weather
 
 HOUR = 3600
 SHORT = {
@@ -42,7 +44,7 @@ class SimulatedMorning(unittest.TestCase):
         with open(os.path.join(cls.dir, "site.json")) as f:
             cls.config = json.load(f)
         cls.out = os.path.join(cls.dir, "results")
-        cls.flights, cls.summary = aa.run(
+        cls.flights, cls.summary = run(
             cls.config, os.path.join(cls.dir, "logs"), cls.out, os.path.join(cls.dir, "eglc_metars.csv")
         )
 
@@ -56,7 +58,7 @@ class SimulatedMorning(unittest.TestCase):
         found = [
             f for f in self.flights
             if f["hex"] == truth["hex"] and f["closest_ground_time_utc"]
-            and abs(aa.parse_utc(f["closest_ground_time_utc"][:19]) - when) < 120
+            and abs(parse_utc(f["closest_ground_time_utc"][:19]) - when) < 120
         ]
         self.assertEqual(len(found), 1, f"{truth['callsign']} matched {len(found)} flights")
         return found[0]
@@ -77,7 +79,7 @@ class SimulatedMorning(unittest.TestCase):
         labelled = [f for f in self.flights if f["label"] != "other"]
         self.assertGreater(len(labelled), 10)
         for flight in labelled:
-            when = aa.parse_utc(flight["closest_ground_time_utc"][:19])
+            when = parse_utc(flight["closest_ground_time_utc"][:19])
             kinds = [
                 t["kind"] for t in self.truth
                 if t["hex"] == flight["hex"] and abs(float(t["true_closest_ground_time"]) - when) < 120
@@ -154,8 +156,8 @@ class SimulatedMorning(unittest.TestCase):
         end = start + SHORT["clock_sync_seconds"]
         flagged = 0
         for flight in self.flights:
-            first = aa.parse_utc(flight["first_seen_utc"][:19])
-            last = aa.parse_utc(flight["last_seen_utc"][:19]) + 1
+            first = parse_utc(flight["first_seen_utc"][:19])
+            last = parse_utc(flight["last_seen_utc"][:19]) + 1
             overlapping = first <= end and last >= start
             with self.subTest(flight["callsign"]):
                 self.assertEqual("clock_not_synchronised" in flight["flags"], overlapping)
@@ -210,13 +212,13 @@ class Folders(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(os.path.join(folder, "logs", "adsb"))), first)
 
 
-class Weather(unittest.TestCase):
+class SimulatedWeather(unittest.TestCase):
     def test_metars_parse_back(self):
         folder = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, folder)
         path = os.path.join(folder, "w.csv")
         sim.write_weather(path, SHORT)
-        weather = aa.Weather.load(path)
+        weather = Weather.load(path)
         report_time = max(t for t in weather.times if t <= SHORT["start"])
         qnh, temp = weather.at(SHORT["start"])
         # Reported rounded down, then half a hPa added back by the analysis.

@@ -1,6 +1,6 @@
-"""Tests for adsb_logger, using a made-up stream on a local socket. No radio is involved.
+"""Tests for adsb.logger, using a made-up stream on a local socket. No radio is involved.
 
-Run from the project folder with: python3 -m unittest discover tools/adsb
+Run from tools/adsb with: make test (or python3 -m unittest)
 """
 
 import glob
@@ -9,13 +9,18 @@ import json
 import os
 import shutil
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from unittest import mock
 
-import adsb_logger as al
+from adsb import logger as al
+from adsb.geometry import distance_km
+
+TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tools/adsb
 
 SITE_LAT, SITE_LON = 51.5, 0.1
 NEAR = {"now": 1.5, "hex": "abc123", "lat": 51.51, "lon": 0.1, "alt_baro": 1000}
@@ -33,7 +38,7 @@ def read_gz(path):
 
 class Geometry(unittest.TestCase):
     def test_distance_of_a_tenth_of_a_degree_of_latitude(self):
-        self.assertAlmostEqual(al.distance_km(51.5, 0.1, 51.6, 0.1), 11.12, places=1)
+        self.assertAlmostEqual(distance_km(51.5, 0.1, 51.6, 0.1), 11.12, places=1)
 
 
 class ClassifyLine(unittest.TestCase):
@@ -268,6 +273,29 @@ class ClockAndErrors(unittest.TestCase):
         os.chmod(self.dir, 0o500)
         self.addCleanup(os.chmod, self.dir, 0o700)
         logger.health("test")  # Can't write, but mustn't raise
+
+
+class PiImports(unittest.TestCase):
+    """The Pi runs logger and status, which must load only the standard library and the Pi modules."""
+
+    PI_MODULES = {"adsb", "adsb.__main__", "adsb.logger", "adsb.status", "adsb.health", "adsb.geometry"}
+
+    def test_pi_commands_load_only_the_pi_modules(self):
+        script = (
+            "import sys; before = set(sys.modules)\n"
+            "import adsb.__main__, adsb.logger, adsb.status\n"
+            "new = sorted(set(sys.modules) - before)\n"
+            "print('\\n'.join(new))\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", script], cwd=TOOL_DIR, capture_output=True, text=True, check=True
+        )
+        loaded = set(done.stdout.split())
+        ours = {name for name in loaded if name == "adsb" or name.startswith("adsb.")}
+        self.assertEqual(ours - self.PI_MODULES, set())
+        stdlib = getattr(sys, "stdlib_module_names", None)  # Python 3.10 and later
+        if stdlib is not None:
+            self.assertEqual({name.split(".")[0] for name in loaded - ours} - set(stdlib), set())
 
 
 if __name__ == "__main__":

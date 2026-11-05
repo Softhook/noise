@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Save readsb's JSON position stream to hourly gzip files, and log the health of the Pi.
 
-  adsb_logger.py --config /etc/adsb-logger/site.json
+  python3 -m adsb log --config /etc/adsb-logger/site.json
 
 Lines are stored exactly as readsb sent them, so a mistake in analysis can't damage the record.
 Each restart starts a new file, because data added after a damaged gzip section couldn't be read.
-Uses only the Python standard library. See README.md and PLAN.md.
+Runs on the Pi, so it imports only the standard library and the package's
+Pi-side modules (health, geometry). See docs/pi-setup.md and docs/PLAN.md.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
-import glob
 import gzip
 import json
 import math
@@ -25,10 +25,13 @@ import sys
 import time
 import zlib
 
+from .geometry import distance_km
+from .health import DEFAULT_LOG_DIR
+
 DEFAULTS = {
     "host": "127.0.0.1",
     "port": 30154,
-    "log_dir": "/var/lib/adsb-logger",
+    "log_dir": DEFAULT_LOG_DIR,
     "max_km": 30.0,
     "flush_seconds": 30.0,
     "health_seconds": 300.0,
@@ -46,32 +49,9 @@ MAX_FLUSH_SECONDS = 60.0  # The plan allows at most 60 s of data lost in a power
 
 def log(message):
     """Write to stderr, which systemd sends to the journal."""
-    print(f"adsb_logger: {message}", file=sys.stderr, flush=True)
+    print(f"adsb log: {message}", file=sys.stderr, flush=True)
 
 
-def read_health_log(log_dir, since=-math.inf):
-    """Every readable health record from `since` on, in time order. Also used by adsb_status and adsb_analyse."""
-    entries = []
-    for path in sorted(glob.glob(os.path.join(log_dir, "health", "*.jsonl"))):
-        with open(path) as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    entry["time"] = float(entry["time"])
-                except (ValueError, KeyError, TypeError):
-                    continue
-                if entry["time"] >= since:
-                    entries.append(entry)
-    entries.sort(key=lambda e: e["time"])
-    return entries
-
-
-def distance_km(lat1, lon1, lat2, lon2):
-    """Great-circle distance, which is accurate enough for choosing what to keep."""
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = p2 - p1, math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * 6371.0088 * math.asin(math.sqrt(a))
 
 
 def classify_line(line, site_lat, site_lon, max_km):
@@ -401,8 +381,8 @@ class Logger:
         self.stopping = True
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv=None, prog=None):
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     parser.add_argument("--config", required=True, help="JSON file; see site.example.json")
     args = parser.parse_args(argv)
     with open(args.config) as f:

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ADS-B flight viewer</title>
-<!-- Template for adsb_analyse.py, which writes a copy with the data filled in as viewer.html.
+<!-- Template for adsb analyse (adsb/viewer.py), which writes a copy with the data filled in as viewer.html.
      Works offline and loads nothing from the network. -->
 <style>
 :root {
@@ -513,7 +513,7 @@ function render() {
 
 function start() {
   if (!DATA) {
-    document.querySelector("main").innerHTML = "<h1>ADS-B flight viewer</h1><p class='sub'>No data. Open the viewer.html that adsb_analyse.py writes into its results folder.</p>";
+    document.querySelector("main").innerHTML = "<h1>ADS-B flight viewer</h1><p class='sub'>No data. Open the viewer.html that adsb analyse writes into its results folder.</p>";
     return;
   }
   for (const f of DATA.flights) byId.set(f.flight_id, f);

@@ -1,6 +1,6 @@
-"""Tests for adsb_status, using made-up health logs.
+"""Tests for adsb.status, using made-up health logs.
 
-Run from the project folder with: python3 -m unittest discover tools/adsb
+Run from tools/adsb with: make test (or python3 -m unittest)
 """
 
 import contextlib
@@ -11,7 +11,7 @@ import shutil
 import tempfile
 import unittest
 
-import adsb_status as st
+from adsb import status as st
 
 NOW = 1_793_000_000.0
 

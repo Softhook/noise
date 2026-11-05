@@ -1,9 +1,10 @@
-"""Tests for adsb_analyse, using made-up flights with known geometry. They aren't real ADS-B data.
+"""Tests for adsb.analyse, using made-up flights with known geometry. They aren't real ADS-B data.
 
-Run from the project folder with: python3 -m unittest discover tools/adsb
+Run from tools/adsb with: make test (or python3 -m unittest)
 """
 
 import csv
+import datetime as dt
 import gzip
 import json
 import math
@@ -12,7 +13,14 @@ import shutil
 import tempfile
 import unittest
 
-import adsb_analyse as aa
+from adsb.analyse import DEFAULTS, run
+from adsb.atmosphere import geometric_altitude_m, qnh_altitude_m, sound_speed
+from adsb.common import FEET, format_utc, parse_utc
+from adsb.flight import analyse_flight
+from adsb.geometry import Site, closest_approach, garden_side
+from adsb.logs import log_paths
+from adsb.tracks import FlightBuilder, parse_point
+from adsb.weather import Weather
 
 SITE_LAT, SITE_LON = 51.5, 0.1
 GROUND_M, MIC_M = 3.0, 3.0
@@ -22,12 +30,12 @@ CONFIG = {
     "site": {"lat": SITE_LAT, "lon": SITE_LON, "ground_elevation_m": GROUND_M, "mic_height_m": MIC_M},
     "geoid_height_m": GEOID_M,
 }
-SITE = aa.Site(CONFIG)
-SETTINGS = dict(aa.DEFAULTS)
+SITE = Site(CONFIG)
+SETTINGS = dict(DEFAULTS)
 
 
 def pressure_altitude_ft(height_m, qnh):
-    return height_m / aa.FEET + 145366.45 * (1 - (qnh / 1013.25) ** 0.190284)
+    return height_m / FEET + 145366.45 * (1 - (qnh / 1013.25) ** 0.190284)
 
 
 def make_records(angle=5.5, offset_north=-500.0, heading_west=True, qnh=1031.0, geoid=GEOID_M,
@@ -45,7 +53,7 @@ def make_records(angle=5.5, offset_north=-500.0, heading_west=True, qnh=1031.0, 
         slope = math.tan(math.radians(angle))
         height = height_at_site + (-travelled * slope if heading_west else travelled * slope)
         baro = pressure_altitude_ft(height, qnh)
-        geom = (height + geoid) / aa.FEET
+        geom = (height + geoid) / FEET
         if round_altitudes:
             baro, geom = 25 * round(baro / 25), 25 * round(geom / 25)
         lat = SITE_LAT + math.degrees(offset_north / SITE.metres_per_rad_north)
@@ -60,35 +68,35 @@ def make_records(angle=5.5, offset_north=-500.0, heading_west=True, qnh=1031.0, 
 
 
 def weather(qnh=1031.0, temp=15.0, t=START - 600):
-    return aa.Weather([(t, qnh, temp)])
+    return Weather([(t, qnh, temp)])
 
 
 def flight_from(records, wx=None, unsynced=()):
-    parsed = [aa.parse_point(r, SITE, SETTINGS) for r in records]
+    parsed = [parse_point(r, SITE, SETTINGS) for r in records]
     points = [p[1] for p in parsed if p]
-    return aa.analyse_flight(1, records[0]["hex"], points, SITE, wx or weather(), SETTINGS, unsynced)
+    return analyse_flight(1, records[0]["hex"], points, SITE, wx or weather(), SETTINGS, unsynced)
 
 
 class Heights(unittest.TestCase):
     def test_no_correction_at_standard_pressure(self):
-        self.assertAlmostEqual(aa.qnh_altitude_m(1000, 1013.25), 304.8, places=3)
+        self.assertAlmostEqual(qnh_altitude_m(1000, 1013.25), 304.8, places=3)
 
     def test_about_27_feet_per_hpa(self):
-        change_ft = (aa.qnh_altitude_m(1000, 1023.25) - aa.qnh_altitude_m(1000, 1013.25)) / aa.FEET
+        change_ft = (qnh_altitude_m(1000, 1023.25) - qnh_altitude_m(1000, 1013.25)) / FEET
         self.assertAlmostEqual(change_ft / 10, 27.3, delta=0.5)
 
     def test_low_pressure_lowers_true_height(self):
-        self.assertLess(aa.qnh_altitude_m(1000, 990), 304.8)
+        self.assertLess(qnh_altitude_m(1000, 990), 304.8)
 
     def test_geometric_removes_the_geoid(self):
-        self.assertAlmostEqual(aa.geometric_altitude_m(1000, 45), 304.8 - 45, places=6)
+        self.assertAlmostEqual(geometric_altitude_m(1000, 45), 304.8 - 45, places=6)
 
 
 class Corrections(unittest.TestCase):
     def test_temperature_correction_lowers_heights_on_a_cold_day(self):
-        standard = aa.qnh_altitude_m(1300, 1013.25)
-        cold = aa.qnh_altitude_m(1300, 1013.25, temp_c=0)
-        self.assertAlmostEqual(aa.qnh_altitude_m(1300, 1013.25, temp_c=15), standard, places=6)
+        standard = qnh_altitude_m(1300, 1013.25)
+        cold = qnh_altitude_m(1300, 1013.25, temp_c=0)
+        self.assertAlmostEqual(qnh_altitude_m(1300, 1013.25, temp_c=15), standard, places=6)
         # About 4% lower for 15 °C below standard.
         self.assertAlmostEqual(cold / standard, 1 - 15 / 288, delta=0.005)
 
@@ -102,13 +110,13 @@ class Corrections(unittest.TestCase):
         )
 
     def test_geometric_kept_when_there_is_no_qnh_to_compare(self):
-        flight, _ = flight_from(make_records(geoid=0.0), wx=aa.Weather())
+        flight, _ = flight_from(make_records(geoid=0.0), wx=Weather())
         self.assertEqual(flight["height_source"], "geometric")
 
     def test_garden_side_suits_the_track_direction(self):
-        self.assertEqual(aa.garden_side(270, 0, -500), "north")
-        self.assertEqual(aa.garden_side(5, 400, 0), "west")
-        self.assertEqual(aa.garden_side(185, -400, 0), "east")
+        self.assertEqual(garden_side(270, 0, -500), "north")
+        self.assertEqual(garden_side(5, 400, 0), "west")
+        self.assertEqual(garden_side(185, -400, 0), "east")
 
 
 class Streaming(unittest.TestCase):
@@ -117,17 +125,17 @@ class Streaming(unittest.TestCase):
         self.addCleanup(shutil.rmtree, folder)
         for name in ("2026-11-05T12.1.jsonl.gz", "2026-11-05T12.jsonl.gz", "2026-11-05T11.jsonl.gz", "2026-11-05T12.10.jsonl.gz", "2026-11-05T12.2.jsonl.gz"):
             open(os.path.join(folder, name), "wb").close()
-        names = [os.path.basename(p) for p in aa.log_paths(folder)]
+        names = [os.path.basename(p) for p in log_paths(folder)]
         self.assertEqual(names, [
             "2026-11-05T11.jsonl.gz", "2026-11-05T12.jsonl.gz", "2026-11-05T12.1.jsonl.gz",
             "2026-11-05T12.2.jsonl.gz", "2026-11-05T12.10.jsonl.gz",
         ])
-        start = aa.parse_utc("2026-11-05 15:00")  # More than an hour after the last file ends
-        self.assertEqual(aa.log_paths(folder, start=start), [])
+        start = parse_utc("2026-11-05 15:00")  # More than an hour after the last file ends
+        self.assertEqual(log_paths(folder, start=start), [])
 
     def test_builder_finishes_flights_after_a_gap_either_way(self):
-        points = [aa.parse_point(r, SITE, SETTINGS)[1] for r in make_records(span=500)]
-        builder = aa.FlightBuilder(600)
+        points = [parse_point(r, SITE, SETTINGS)[1] for r in make_records(span=500)]
+        builder = FlightBuilder(600)
         for p in points:
             self.assertIsNone(builder.add("abc", p))
         self.assertEqual(builder.finish_quiet(points[-1].t + 599), [])
@@ -143,11 +151,11 @@ class Geometry(unittest.TestCase):
         self.assertAlmostEqual(east, 693.5, delta=1.5)
 
     def test_sound_speed(self):
-        self.assertAlmostEqual(aa.sound_speed(15), 340.3, places=1)
-        self.assertAlmostEqual(aa.sound_speed(0), 331.3, places=1)
+        self.assertAlmostEqual(sound_speed(15), 340.3, places=1)
+        self.assertAlmostEqual(sound_speed(0), 331.3, places=1)
 
     def test_closest_point_between_samples(self):
-        i, u, distance = aa.closest_approach([(-100.0, 50.0), (100.0, 50.0)])
+        i, u, distance = closest_approach([(-100.0, 50.0), (100.0, 50.0)])
         self.assertEqual(i, 0)
         self.assertAlmostEqual(u, 0.5)
         self.assertAlmostEqual(distance, 50.0)
@@ -179,17 +187,17 @@ class Arrival(unittest.TestCase):
         at_side = math.hypot(500, above_mic)
         self.assertLess(self.flight["closest_slant_m"], at_side)
         self.assertGreater(self.flight["closest_slant_m"], at_side - 15)
-        self.assertAlmostEqual(self.flight["sound_speed_m_s"], aa.sound_speed(15))
+        self.assertAlmostEqual(self.flight["sound_speed_m_s"], sound_speed(15))
         self.assertAlmostEqual(
-            self.flight["sound_delay_s"], self.flight["closest_slant_m"] / aa.sound_speed(15), places=6
+            self.flight["sound_delay_s"], self.flight["closest_slant_m"] / sound_speed(15), places=6
         )
         self.assertAlmostEqual(self.flight["angle_from_vertical_deg"], 52.5, delta=2.0)
 
     def test_arrival_time_is_emission_plus_delay(self):
         row = self.rows[len(self.rows) // 2]
-        emitted, arrived = aa.parse_utc(row["emission_time_utc"][:19]), aa.parse_utc(row["arrival_time_utc"][:19])
+        emitted, arrived = parse_utc(row["emission_time_utc"][:19]), parse_utc(row["arrival_time_utc"][:19])
         self.assertAlmostEqual(arrived - emitted, row["sound_delay_s"], delta=1.01)
-        self.assertAlmostEqual(row["slant_m"] / row["sound_delay_s"], aa.sound_speed(15))
+        self.assertAlmostEqual(row["slant_m"] / row["sound_delay_s"], sound_speed(15))
 
     def test_both_heights_agree_when_weather_is_right(self):
         self.assertEqual(self.flight["height_source"], "geometric")
@@ -250,9 +258,9 @@ class HeightSources(unittest.TestCase):
         )
 
     def test_uses_qnh_when_geoid_is_unknown(self):
-        site = aa.Site({"site": CONFIG["site"]})
-        points = [aa.parse_point(r, site, SETTINGS)[1] for r in make_records()]
-        flight, _ = aa.analyse_flight(1, "abc123", points, site, weather(), SETTINGS)
+        site = Site({"site": CONFIG["site"]})
+        points = [parse_point(r, site, SETTINGS)[1] for r in make_records()]
+        flight, _ = analyse_flight(1, "abc123", points, site, weather(), SETTINGS)
         self.assertEqual(flight["height_source"], "qnh")
 
     def test_wrong_pressure_makes_heights_disagree(self):
@@ -267,7 +275,7 @@ class HeightSources(unittest.TestCase):
         records = make_records()
         for r in records:
             del r["alt_geom"]
-        flight, rows = flight_from(records, wx=aa.Weather())
+        flight, rows = flight_from(records, wx=Weather())
         self.assertEqual(flight["height_source"], "none")
         for flag in ("no_qnh", "no_height", "assumed_sound_speed"):
             self.assertIn(flag, flight["flags"])
@@ -295,22 +303,22 @@ class Records(unittest.TestCase):
         }
         for name, record in cases.items():
             with self.subTest(name):
-                self.assertIsNone(aa.parse_point(record, SITE, SETTINGS))
+                self.assertIsNone(parse_point(record, SITE, SETTINGS))
 
     def test_missing_fields_are_tolerated(self):
         record = {"now": START, "hex": "abc123", "lat": SITE_LAT, "lon": SITE_LON}
-        _, point = aa.parse_point(record, SITE, SETTINGS)
+        _, point = parse_point(record, SITE, SETTINGS)
         self.assertIsNone(point.baro_ft)
         self.assertIsNone(point.callsign)
 
     def test_position_time_allows_for_its_age(self):
-        _, point = aa.parse_point(dict(self.good(), seen_pos=1.5), SITE, SETTINGS)
+        _, point = parse_point(dict(self.good(), seen_pos=1.5), SITE, SETTINGS)
         self.assertAlmostEqual(point.t, START - 1.5)
 
     def test_flights_split_on_a_long_gap_and_drop_duplicates(self):
-        points = [aa.parse_point(r, SITE, SETTINGS)[1] for r in make_records(span=500)]
+        points = [parse_point(r, SITE, SETTINGS)[1] for r in make_records(span=500)]
         later = [p._replace(t=p.t + 7200) for p in points]
-        builder = aa.FlightBuilder(600)
+        builder = FlightBuilder(600)
         flights = [f for p in sorted(later + points + points[:3]) if (f := builder.add("x", p))]
         flights += builder.finish_all()
         self.assertEqual([len(f[2]) for f in flights], [len(points), len(points)])
@@ -325,7 +333,7 @@ class WeatherFile(unittest.TestCase):
         path = os.path.join(self.dir, "w.csv")
         with open(path, "w") as f:
             f.write(text)
-        return aa.Weather.load(path)
+        return Weather.load(path)
 
     def test_reads_metar_archive_format(self):
         wx = self.load(
@@ -334,14 +342,14 @@ class WeatherFile(unittest.TestCase):
             "EGLC,2026-11-04 00:50,EGLC 040050Z AUTO 06007KT 9999 M02/M05 Q0998\n"
             "EGLC,2026-11-04 01:20,EGLC 040120Z NIL\n"
         )
-        first = aa.parse_utc("2026-11-04 00:20")
+        first = parse_utc("2026-11-04 00:20")
         # METAR QNH is rounded down, so half a hPa is added back.
         self.assertEqual(wx.at(first + 60), (1031.5, 10.0))
         self.assertEqual(wx.at(first + 1860), (998.5, -2.0))
 
     def test_too_early_or_too_old_gives_nothing(self):
         wx = self.load("time,qnh_hpa,temp_c\n2026-11-04T00:00:00Z,1020,8\n")
-        start = aa.parse_utc("2026-11-04 00:00")
+        start = parse_utc("2026-11-04 00:00")
         self.assertEqual(wx.at(start - 1), (None, None))
         self.assertEqual(wx.at(start + 3 * 3600), (1020.0, 8.0))
         self.assertEqual(wx.at(start + 3 * 3600 + 1), (None, None))
@@ -357,7 +365,7 @@ class WholeRun(unittest.TestCase):
         self.out = os.path.join(self.dir, "out")
         self.weather = os.path.join(self.dir, "w.csv")
         with open(self.weather, "w") as f:
-            f.write(f"time,qnh_hpa,temp_c\n{aa.format_utc(START - 600)[:19]},1031,15\n")
+            f.write(f"time,qnh_hpa,temp_c\n{format_utc(START - 600)[:19]},1031,15\n")
 
     def write_log(self, name, records, extra=b""):
         with gzip.open(os.path.join(self.logs, "adsb", name), "wb") as f:
@@ -379,7 +387,7 @@ class WholeRun(unittest.TestCase):
         with open(full, "wb") as f:
             f.write(data[: len(data) // 2])
 
-        flights, summary = aa.run(CONFIG, self.logs, self.out, self.weather)
+        flights, summary = run(CONFIG, self.logs, self.out, self.weather)
         with open(os.path.join(self.out, "positions.csv"), newline="") as f:
             positions = list(csv.DictReader(f))
 
@@ -401,7 +409,7 @@ class WholeRun(unittest.TestCase):
         with open(os.path.join(self.logs, "health", "d.jsonl"), "w") as f:
             f.write(json.dumps({"time": START, "clock": {"synchronised": False}}) + "\nnot json\n")
         config = {"site": CONFIG["site"]}
-        flights, summary = aa.run(config, self.logs, self.out)
+        flights, summary = run(config, self.logs, self.out)
         self.assertIn("no weather file", summary)
         self.assertIn("geoid_height_m not set", summary)
         self.assertIn("Health records: 1", summary)
@@ -410,9 +418,9 @@ class WholeRun(unittest.TestCase):
 
     def test_reports_long_gaps_and_handles_no_data(self):
         self.write_log("a.jsonl.gz", make_records() + make_records(start=START + 7200))
-        _, summary = aa.run(CONFIG, self.logs, self.out, self.weather)
+        _, summary = run(CONFIG, self.logs, self.out, self.weather)
         self.assertIn("GAP over 30 minutes", summary)
-        flights, summary = aa.run(CONFIG, os.path.join(self.dir, "empty"), self.out)
+        flights, summary = run(CONFIG, os.path.join(self.dir, "empty"), self.out)
         self.assertEqual(flights, [])
         self.assertIn("Flights: 0", summary)
 
@@ -424,7 +432,7 @@ class WholeRun(unittest.TestCase):
         self.write_log("a.jsonl.gz", make_records() + make_records(start=START + 7200))
         healthy = [{"time": START + t, "connected": True, "lines": 50} for t in range(0, 7500, 300)]
         self.write_health(healthy)
-        _, summary = aa.run(CONFIG, self.logs, self.out, self.weather)
+        _, summary = run(CONFIG, self.logs, self.out, self.weather)
         self.assertIn("QUIET over 30 minutes", summary)
         self.assertNotIn("GAP", summary)
         # A disconnection, or a stretch with no health records, means data may have been lost.
@@ -434,7 +442,7 @@ class WholeRun(unittest.TestCase):
         ):
             with self.subTest(len(broken)):
                 self.write_health(broken)
-                _, summary = aa.run(CONFIG, self.logs, self.out, self.weather)
+                _, summary = run(CONFIG, self.logs, self.out, self.weather)
                 self.assertIn("GAP over 30 minutes", summary)
 
     def test_lines_stamped_by_an_unsynchronised_clock_are_counted(self):
@@ -445,21 +453,41 @@ class WholeRun(unittest.TestCase):
             {"time": middle, "clock": {"synchronised": False}},
             {"time": middle + 10, "clock": {"synchronised": True}},
         ])
-        _, summary = aa.run(CONFIG, self.logs, self.out, self.weather)
+        _, summary = run(CONFIG, self.logs, self.out, self.weather)
         expected = sum(middle <= r["now"] <= middle + 10 for r in records)
         self.assertIn(f"WARNING: {expected} lines were stamped while the clock wasn't synchronised", summary)
 
+    def test_a_line_far_outside_its_files_hour_is_skipped(self):
+        name = dt.datetime.fromtimestamp(START, dt.timezone.utc).strftime("%Y-%m-%dT%H.jsonl.gz")
+        records = make_records()
+        bogus = dict(records[5], now=4_102_444_800.0)  # 2100-01-01
+        self.write_log(name, records[:10] + [bogus] + records[10:])
+        flights, summary = run(CONFIG, self.logs, self.out, self.weather)
+        self.assertEqual(len(flights), 1)
+        self.assertIn("WARNING: 1 lines skipped because their time was far outside their file's hour", summary)
+        self.assertNotIn("2100", summary)
+
+    def test_one_bad_time_does_not_split_the_flights_after_it(self):
+        # Enough positions for the periodic check for quiet flights to run, in a file whose name
+        # has no hour, so the bad time isn't skipped.
+        records = make_records(rate=40.0, speed=30.0)
+        self.assertGreater(len(records), 20000)
+        bogus = dict(records[5], hex="zzz999", now=4_102_444_800.0)
+        self.write_log("a.jsonl.gz", records[:10] + [bogus] + records[10:])
+        flights, _ = run(CONFIG, self.logs, self.out, self.weather)
+        self.assertEqual(sorted(f["hex"] for f in flights), ["abc123", "zzz999"])
+
     def test_date_range_keeps_only_that_period(self):
         self.write_log("a.jsonl.gz", make_records() + make_records(start=START + 86400, code="def456"))
-        flights, _ = aa.run(CONFIG, self.logs, self.out, self.weather, start=START + 43200)
+        flights, _ = run(CONFIG, self.logs, self.out, self.weather, start=START + 43200)
         self.assertEqual([f["hex"] for f in flights], ["def456"])
-        flights, _ = aa.run(CONFIG, self.logs, self.out, self.weather, end=START + 43200)
+        flights, _ = run(CONFIG, self.logs, self.out, self.weather, end=START + 43200)
         self.assertEqual([f["hex"] for f in flights], ["abc123"])
 
     def test_viewer_data_cannot_end_its_script_block(self):
         records = make_records(callsign="<b>X</b>")
         self.write_log("a.jsonl.gz", records)
-        aa.run(CONFIG, self.logs, self.out, self.weather)
+        run(CONFIG, self.logs, self.out, self.weather)
         with open(os.path.join(self.out, "viewer.html")) as f:
             html = f.read()
         self.assertNotIn("<b>X</b>", html.split('<script id="data"')[1].split("</script>")[0])
@@ -469,13 +497,13 @@ class WholeRun(unittest.TestCase):
         path = os.path.join(self.logs, "adsb", "a.jsonl.gz")
         with open(path, "rb") as f:
             before = f.read()
-        aa.run(CONFIG, self.logs, self.out, self.weather)
+        run(CONFIG, self.logs, self.out, self.weather)
         with open(path, "rb") as f:
             self.assertEqual(f.read(), before)
 
     def test_site_config_is_checked(self):
         with self.assertRaisesRegex(ValueError, "ground_elevation_m"):
-            aa.Site({"site": {"lat": 51.5, "lon": 0.1}})
+            Site({"site": {"lat": 51.5, "lon": 0.1}})
 
 
 if __name__ == "__main__":

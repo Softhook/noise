@@ -9,3 +9,6 @@ tools/adsb/site.json
 tools/adsb/logs/
 tools/adsb/results/
 tools/adsb/data/
+
+# WebTrak scraper: scraped monitor data stays local
+tools/webtrak/data/

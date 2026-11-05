@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the logger on a site visit: is it running, is the clock right, and is data being kept?
 
-  adsb_status.py [--log-dir /var/lib/adsb-logger] [--hours 24]
+  python3 -m adsb status [--log-dir /var/lib/adsb-logger] [--hours 24]
 
 Reads the health log and lists the data files. It changes nothing. Exits with 1 if there are
 warnings, so it can also be used in scripts.
@@ -17,7 +17,7 @@ import os
 import sys
 import time
 
-from adsb_logger import read_health_log
+from .health import DEFAULT_LOG_DIR, read_health_log
 
 THRESHOLDS = {
     "stale_health_s": 900,  # The logger writes at least every 5 minutes
@@ -122,9 +122,9 @@ def check(log_dir, hours, now=None):
     return lines, warnings
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--log-dir", default="/var/lib/adsb-logger")
+def main(argv=None, prog=None):
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
+    parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     parser.add_argument("--hours", type=float, default=24)
     args = parser.parse_args(argv)
     lines, warnings = check(args.log_dir, args.hours)

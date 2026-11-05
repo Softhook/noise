@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Make a simulated day of logger output, with the answers, so the analysis and viewer can be tested.
 
-  adsb_simulate.py demo  [--out tools/adsb/data/demo] [--seed 1]   logs, weather, truth, results and viewer
-  adsb_simulate.py logs  --out DIR [--seed 1]                      logs, weather and truth only
-  adsb_simulate.py serve [--port 30154] [--speed 10]               replay as a fake readsb, to test the logger
+  python3 -m adsb simulate demo  [--out data/demo] [--seed 1]    logs, weather, truth, results and viewer
+  python3 -m adsb simulate logs  --out DIR [--seed 1]             logs, weather and truth only
+  python3 -m adsb simulate serve [--port 30154] [--speed 10]      replay as a fake readsb, to test the logger
 
 All of it is invented. The garden is placed at the example config's location, 500 m north of a
 straight RWY 27 centreline and 4 km from the threshold, as the measurement plan assumes; nothing
@@ -31,10 +31,11 @@ import socket
 import sys
 import time
 
-import adsb_analyse as aa
-from adsb_logger import HourlyWriter
+from . import analyse
+from .common import FEET, format_utc
+from .geometry import Site
+from .logger import HourlyWriter
 
-FEET = aa.FEET
 SITE = {"lat": 51.5, "lon": 0.1, "ground_elevation_m": 3.0, "mic_height_m": 3.0}
 GEOID_M = 45.0
 RUNWAY_ELEVATION_M = 20 * FEET
@@ -436,7 +437,7 @@ def write_truth(path, flights, site, times):
         (ground, ground_t, height, y), (slant, _) = true_closest(flight, site.mic_amsl)
         rows.append({
             "hex": flight.code, "callsign": flight.callsign, "type": flight.type, "kind": flight.kind,
-            "quirk": flight.quirk, "start_utc": aa.format_utc(flight.t0), "true_lateral_m": round(ground, 2),
+            "quirk": flight.quirk, "start_utc": format_utc(flight.t0), "true_lateral_m": round(ground, 2),
             "true_garden_side": "north" if y < 0 else "south",
             "true_height_at_closest_ground_amsl_m": round(height, 2), "true_closest_ground_time": round(ground_t, 2),
             "true_closest_slant_m": round(slant, 2),
@@ -466,7 +467,7 @@ def prepare_folder(out_dir):
             shutil.rmtree(os.path.join(out_dir, name), ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, MARKER), "w") as f:
-        f.write("Made by adsb_simulate.py. Everything in this folder is invented.\n")
+        f.write("Made by the ADS-B simulator (python3 -m adsb simulate). Everything in this folder is invented.\n")
 
 
 def simulate(out_dir, seed=1, times=None):
@@ -475,7 +476,7 @@ def simulate(out_dir, seed=1, times=None):
     prepare_folder(out_dir)
     rng = random.Random(seed)
     config = site_config()
-    site = aa.Site(config)
+    site = Site(config)
     flights = build_flights(rng, times)
     records = make_records(flights, rng, site)
     write_logs(records, out_dir, times)
@@ -489,7 +490,7 @@ def simulate(out_dir, seed=1, times=None):
 def serve(port, speed, seed):
     """Act as readsb's JSON port, replaying a simulated day faster than real time."""
     rng = random.Random(seed)
-    site = aa.Site(site_config())
+    site = Site(site_config())
     records = make_records(build_flights(rng, DEFAULT_TIMES), rng, site)
     server = socket.create_server(("127.0.0.1", port))
     print(f"Simulated readsb on port {port}, {len(records)} lines at {speed}x. Ctrl-C to stop.", flush=True)
@@ -509,13 +510,15 @@ def serve(port, speed, seed):
             connection.close()
 
 
-def main(argv=None):
-    here = os.path.dirname(os.path.abspath(__file__))
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tools/adsb
+
+
+def main(argv=None, prog=None):
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("demo", "logs"):
         p = sub.add_parser(name)
-        p.add_argument("--out", default=os.path.join(here, "data", "demo"))
+        p.add_argument("--out", default=os.path.join(TOOL_DIR, "data", "demo"))
         p.add_argument("--seed", type=int, default=1)
     p = sub.add_parser("serve")
     p.add_argument("--port", type=int, default=30154)
@@ -532,7 +535,7 @@ def main(argv=None):
         with open(os.path.join(args.out, "site.json")) as f:
             config = json.load(f)
         results = os.path.join(args.out, "results")
-        _, summary = aa.run(config, os.path.join(args.out, "logs"), results, os.path.join(args.out, "eglc_metars.csv"))
+        _, summary = analyse.run(config, os.path.join(args.out, "logs"), results, os.path.join(args.out, "eglc_metars.csv"))
         print(summary, end="")
         print(f"Open {os.path.join(results, 'viewer.html')} in a browser.")
     return 0

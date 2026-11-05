@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Record the aircraft type, time, track and height of each flight near the Thamesmead garden, so that each noise event can be matched to an aircraft. This could fill these rows of the [measurement plan](../../Documents/Thamesmead_Garden_Measurement_Plan.md):
+Record the aircraft type, time, track and height of each flight near the Thamesmead garden, so that each noise event can be matched to an aircraft. This could fill these rows of the [measurement plan](../../../Documents/Thamesmead_Garden_Measurement_Plan.md):
 
 | Measurement plan needs | From ADS-B? |
 |---|---|
@@ -24,7 +24,7 @@ These targets are our proposals, to be tested in the trial.
 | Requirement | Target | Why |
 |---|---|---|
 | Flights captured | At least 99% of RWY 27 arrivals have a position within 2 km of their closest point to the garden | Each lost flight is a noise event without an aircraft |
-| Timing | Pi clock within about 1 s of UTC, and any larger error detected | Enough to match events to flights; height, distance and levels don't depend on the clock. A 0.25 s target is only needed for directivity or Doppler work, which isn't planned. See the measurement plan's [Timing](../../Documents/Thamesmead_Garden_Measurement_Plan.md#timing) |
+| Timing | Pi clock within about 1 s of UTC, and any larger error detected | Enough to match events to flights; height, distance and levels don't depend on the clock. A 0.25 s target is only needed for directivity or Doppler work, which isn't planned. See the measurement plan's [Timing](../../../Documents/Thamesmead_Garden_Measurement_Plan.md#timing) |
 | Height | QNH-corrected and geometric heights agree within about 30 m | Against an expected height of about 385 m |
 | Data loss from a power cut | No more than 60 s | Keeps gaps small and easy to identify |
 | Unattended running | 37 days, restarting by itself after a fault or power cut | Matches the survey length |
@@ -49,7 +49,7 @@ These targets are our proposals, to be tested in the trial.
 
 ### 2. Receiver
 
-- Use readsb and tar1090, set up as in the [README](README.md).
+- Use readsb and tar1090, set up as in [Setting up the Pi](pi-setup.md).
 - Start with automatic gain. Aircraft pass close to the garden, so check signal strength and [aim for a low share of strong signals](https://github.com/wiedehopf/adsb-wiki/wiki/Optimizing-gain).
 - Use a tuned 1090 MHz antenna. The stick's amplifier comes before its filter, and [strong FM and TV signals can overload it](https://www.rtl-sdr.com/flightaware-prostick-vs-flightaware-prostick-plus-review/). If that happens, try an external filter before the stick.
 - Save a dated copy of the aircraft database and keep it for the whole stage, so results can be reproduced.
@@ -58,7 +58,7 @@ These targets are our proposals, to be tested in the trial.
 
 A Pi 4 has no battery-backed clock, so after a power cut it starts with the wrong time until it finds a time source. readsb timestamps use the Pi's clock, so this directly affects matching.
 
-**Decision:** a USB GPS receiver, read by `gpsd` and `chrony`. The setup is in the [README](README.md#gps-clock).
+**Decision:** a USB GPS receiver, read by `gpsd` and `chrony`. The setup is in [Setting up the Pi](pi-setup.md#gps-clock).
 
 - The GPS's main job is to set the right time after a power cut. The Pi has no battery-backed clock, so without it the clock could be minutes or days wrong.
 - USB GPS receivers send no pulse-per-second signal, and they commonly lag by a few hundred milliseconds. That's within our 1 s target, so measuring the lag is optional. Measure it and set chrony's offset only if we take on directivity or Doppler work, which needs 0.25 s; if it then varies too much, switch to a GPS module with pulse-per-second.
@@ -67,9 +67,9 @@ A Pi 4 has no battery-backed clock, so after a power cut it starts with the wron
 
 The logger will record clock status regularly and keep logging when the clock isn't synchronised, so that the data can be flagged and possibly corrected later.
 
-The Fusion is set to UTC with GPS synchronisation, and drifts by at most 0.5 s a day between its midnight corrections, which is within our target. The measurement plan's [Timing](../../Documents/Thamesmead_Garden_Measurement_Plan.md#timing) section covers both clocks. The real risk is a large error, such as a clock wrong after a power cut or an hour out from a time zone. The results give an independent check: LASmax should come at a steady delay after each arrival's closest approach, so a jump would show a clock problem.
+The Fusion is set to UTC with GPS synchronisation, and drifts by at most 0.5 s a day between its midnight corrections, which is within our target. The measurement plan's [Timing](../../../Documents/Thamesmead_Garden_Measurement_Plan.md#timing) section covers both clocks. The real risk is a large error, such as a clock wrong after a power cut or an hour out from a time zone. The results give an independent check: LASmax should come at a steady delay after each arrival's closest approach, so a jump would show a clock problem.
 
-### 4. Logger (`adsb_logger.py`)
+### 4. Logger (`adsb log`)
 
 Connects to readsb's JSON stream and writes it to disk.
 
@@ -96,7 +96,7 @@ Every 5 minutes, write a line to a separate file with:
 - CPU temperature and any low-power or overheating flags from `vcgencmd get_throttled`
 - time since boot
 
-`adsb_status.py` summarises this log for site visits, and warns about the problems most likely to lose data unnoticed. The clock is checked every 10 seconds until it's synchronised, so short unsynchronised periods after a power cut are caught. We'll decide whether a simple status light is also worth adding.
+`adsb status` summarises this log for site visits, and warns about the problems most likely to lose data unnoticed. The clock is checked every 10 seconds until it's synchronised, so short unsynchronised periods after a power cut are caught. We'll decide whether a simple status light is also worth adding.
 
 ### 6. Storage
 
@@ -119,7 +119,7 @@ A 256 GB SSD leaves plenty of margin, and could hold both stages if needed.
 
 ### 8. Collecting data
 
-- Visit about once a week during the trial and early in the survey, as there are no remote alerts. Check `adsb_status.py` on each visit.
+- Visit about once a week during the trial and early in the survey, as there are no remote alerts. Run `adsb status` on each visit.
 - Connect a laptop by cable, copy the files with `rsync`, and record SHA-256 checksums, as the measurement plan asks for the Fusion data.
 - Keep the data on the Pi until a copy has been checked, then keep a second copy off site.
 
@@ -137,12 +137,12 @@ Scripts run on a laptop, and they never change the original logs.
 5. **Calculate geometry.** For each position, calculate distance, angle and height relative to the microphone, then each flight's closest approach. Filter out poor positions using `nic`, `rc` and `seen_pos`.
 6. **Classify flights.** Identify RWY 27 arrivals, RWY 09 departures and other traffic from track, height and vertical rate. Estimate the approach angle, to confirm 5.5° or 4.49° for each flight.
 7. **Allow for sound delay.** Sound reaching the garden left the aircraft earlier, by about 1.9 s at 5.5° (631 m) and 1.7 s at 4.49° (590 m). These are nominal values at 4 km from the threshold; use each flight's real distance. Work out where the aircraft was when the sound left it.
-8. **Match noise events.** Match each Fusion event to the flight that fits its time and position. Fusion times must be in UTC; stop if a file's time zone is unknown. Report the median of LASmax time minus `sound_arrival_time_utc` for each day's RWY 27 arrivals, and flag a day where it jumps by more than about 0.5 s, as the clock check. Flag events with no flight, or with more than one aircraft close enough to affect the level. Fusion CSV exports should be enough at 1 s, and the [data format plan](../../Documents/Fusion_Data_Format_Reverse_Engineering.md) covers the 100 ms data.
-9. **Export one table.** One row per event, with the fields in the measurement plan's [What to record](../../Documents/Thamesmead_Garden_Measurement_Plan.md#what-to-record) section, plus quality flags.
+8. **Match noise events.** Match each Fusion event to the flight that fits its time and position. Fusion times must be in UTC; stop if a file's time zone is unknown. Report the median of LASmax time minus `sound_arrival_time_utc` for each day's RWY 27 arrivals, and flag a day where it jumps by more than about 0.5 s, as the clock check. Flag events with no flight, or with more than one aircraft close enough to affect the level. Fusion CSV exports should be enough at 1 s, and the [data format plan](../../../Documents/Fusion_Data_Format_Reverse_Engineering.md) covers the 100 ms data.
+9. **Export one table.** One row per event, with the fields in the measurement plan's [What to record](../../../Documents/Thamesmead_Garden_Measurement_Plan.md#what-to-record) section, plus quality flags.
 
 ### 10. Testing
 
-- **Automated tests** in `tools/adsb`, in the style of `tools/fusion`. These should cover missing fields, `"ground"` altitudes, invalid lines, reconnecting, file changeover, reading damaged files, height correction, flight grouping and sound delay.
+- **Automated tests** in `tools/adsb/tests`, in the style of `tools/fusion`. These should cover missing fields, `"ground"` altitudes, invalid lines, reconnecting, file changeover, reading damaged files, height correction, flight grouping and sound delay.
 - **Test data**, made up at first, then real lines from the Pi. Any committed sample must have its location data replaced with coordinates that don't reveal the garden.
 - **Hardware tests**: pull the power, restart readsb, unplug the stick, fill a small test disk and start without a time source. Confirm the recovery and the record each one leaves.
 
@@ -153,7 +153,7 @@ Scripts run on a laptop, and they never change the original logs.
 | 1 | Install the receiver on a desk or at a window | Aircraft appear on tar1090 and in the JSON stream | To do |
 | 2 | Save 24 hours of real stream data | We have real fields, line sizes and aircraft counts | To do |
 | 3 | Write the logger and tests | The logger survives the hardware tests | Written, with tests passing on made-up data. Hardware tests to do |
-| 4 | Set up the GPS clock and health log | Clock status is logged and recovers after a power cut | Health log and `adsb_status.py` written. GPS to do |
+| 4 | Set up the GPS clock and health log | Clock status is logged and recovers after a power cut | Health log and `adsb status` written. GPS to do |
 | 5 | Write analysis steps 1–7 | Flights, heights and classifications look right against tar1090 | Written, with tests passing on made-up data. Real data to do |
 | 5a | Simulator and viewer | The analysis recovers a simulated day's known values, and results can be explored in a browser | Done. On simulated data only, with about 8 m of position noise, 95% of arrivals come back within about 1.5 m of offset, 0.6 m of height and 0.01° of path angle. This shows the method works, not the accuracy we'll get from real data |
 | 6 | Install on site | The Pi meets the capture and noise targets alongside the Fusion | To do |
@@ -161,17 +161,23 @@ Scripts run on a laptop, and they never change the original logs.
 | 8 | Write analysis steps 8–9 and review the targets | Each aircraft type's events match, and the clock check holds | To do; needs the Fusion export format |
 | 9 | Run Stage 1 | Regular visits, with data copied and checked | To do |
 
-Steps 1–4 don't need the Fusion. Step 7 is the [trial already in the measurement plan](../../Documents/Thamesmead_Garden_Measurement_Plan.md#running-the-campaign).
+Steps 1–4 don't need the Fusion. Step 7 is the [trial already in the measurement plan](../../../Documents/Thamesmead_Garden_Measurement_Plan.md#running-the-campaign).
 
 ## NMT6 data from the airport
 
-The measurement plan asks for NMT6 levels for the same flights, to compare the two sites. London City's public flight and noise tracker is WebTrak, at [eu.webtrak.aero/lcy](https://eu.webtrak.aero/lcy). It's a JavaScript app, and the page we downloaded showed no terms of use. We haven't checked whether it shows NMT6, how long its delay is, or whether its terms allow automated collection.
+The measurement plan asks for NMT6 levels for the same flights, to compare the two sites. London City's public flight and noise tracker is WebTrak, at [eu.webtrak.aero/lcy](https://eu.webtrak.aero/lcy).
 
-The analysis is done afterwards, so we don't need the data in real time. The options, in order of preference:
+We investigated WebTrak's public client and confirmed:
+- Monitor ID **`106`** is NMT6 (*"St Pauls Church, Thamesmead"*, 51.50535° N, 0.11075° E).
+- WebTrak publishes 30 s data blocks (`.mobile` chunks) running approximately **25 minutes behind real time**.
+- Chunks include 1 s sound levels (dB), event summaries (`LAmax`, `SEL`, `Leq`, `EPNL`, duration), and 4 s radar positions.
+- A standalone Python tool in [`tools/webtrak`](../../webtrak/README.md) scrapes and stores this data locally, and matches events to flights.
 
-1. **Ask the airport for NMT6 event data** for the survey periods: LAmax, SEL, event times and the matched flight, ideally with the 1 s levels. The Bickerdike Allen report used the airport's own system data, so the data exists. Ask through the airport's noise team or the consultative committee.
-2. **Record what WebTrak shows**, but only if its terms allow it and the airport agrees. First check whether it shows NMT6 and what the levels are, such as a 1 s Leq. WebTrak levels elsewhere include non-aircraft noise. This would be a separate script and wouldn't run on the Pi, which has no internet.
-3. **Read WebTrak by hand** for a sample of flights, as a check on option 1.
+The options for obtaining NMT6 data, in order of preference:
+
+1. **Ask the airport for official NMT6 event records** for the survey periods (through the noise team or consultative committee).
+2. **Collect NMT6 data from WebTrak** using the scraper in `tools/webtrak` for non-commercial research comparison.
+3. **Read WebTrak manually** for a sample of flights as a spot check.
 
 Our own ADS-B log would make matching their events to flights straightforward.
 
@@ -196,7 +202,7 @@ Our own ADS-B log would make matching their events to flights straightforward.
 - [x] Clock source: USB GPS.
 - [ ] How large and how steady is our USB GPS receiver's lag? Only needed if we take on directivity or Doppler work.
 - [ ] Can the Pi go indoors with a view of the sky for the GPS, and is there mains power near it and near the Fusion?
-- [ ] Will the airport supply NMT6 event data for the survey periods? What do WebTrak's terms allow?
+- [x] NMT6 access from WebTrak: monitor identified (id 106), ~25 min delay determined, and scraper built in `tools/webtrak`. Official airport event records can still be requested as a primary source.
 - [ ] Who will visit the site, and how often?
 - [ ] Is an antenna included with our Pro Stick Plus?
 - [ ] Do we have the Fusion's WXT536 weather station for a local pressure reading?

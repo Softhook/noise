@@ -215,7 +215,7 @@ Each flight needs its noise event matched to its aircraft type and position, oth
 | Aircraft weight, if available | Explaining differences between aircraft | To be confirmed |
 | Wind, temperature and rain | Removing or explaining weather effects | To be confirmed |
 | Other noise during events | Removing events that aren't only the aircraft | Our monitor or site notes |
-| NMT6 levels for the same flights, if available | Comparing the two sites | To be confirmed; the report used airport system data |
+| NMT6 levels for the same flights, if available | Comparing the two sites | Scraper in `tools/webtrak` or airport records |
 
 Report each average with its number of flights and its spread. Calculate both a simple average and an energy average, because the report doesn't say which it used. Keep departures as a separate set, since they fly over the site and the model doesn't estimate them.
 
@@ -230,7 +230,7 @@ The under-the-path figure will remain an estimate, because it assumes the aircra
 - [ ] Which microphone (40CD or 40CE) and firmware version does our Fusion have?
 - [ ] What Fast or Slow setting, event trigger, SEL method and microphone direction did Bickerdike Allen use?
 - [ ] Can we get flight type, track and height data, and from whom?
-- [ ] Can we get NMT6 levels for the same flights?
+- [x] Can we get NMT6 levels for the same flights? Yes, WebTrak provides 1 s levels, event metrics, and radar tracks for NMT6 (locid 106, Thamesmead), accessible via `tools/webtrak`.
 - [ ] Where will weather data come from?
 - [ ] Does the meter's event log record the size of each clock correction?
 - [ ] Can the meter get a GPS fix where it stands in the garden?

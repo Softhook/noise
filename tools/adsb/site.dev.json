@@ -1,0 +1,18 @@
+{
+  "_comment": "For running the logger on a laptop against the simulator (make dev-serve, then make dev-log). The location is the simulator's placeholder, not the garden.",
+  "site": {
+    "lat": 51.5,
+    "lon": 0.1,
+    "ground_elevation_m": 3.0,
+    "mic_height_m": 3.0
+  },
+  "geoid_height_m": 45.0,
+  "simulated": true,
+  "logger": {
+    "host": "127.0.0.1",
+    "port": 30154,
+    "log_dir": "data/dev-logs",
+    "health_seconds": 30,
+    "min_free_gb": 0.5
+  }
+}

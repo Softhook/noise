@@ -1,0 +1,22 @@
+# WebTrak scraper tasks. Run from tools/webtrak. Uses only Python standard library.
+PYTHON ?= python3
+
+.PHONY: help test monitors range follow fetch
+
+help:
+	@echo "make test       run unit tests (no network calls)"
+	@echo "make monitors   list all LCY noise monitors"
+	@echo "make range      show available date range and live delay"
+	@echo "make follow     follow NMT6 live (~25 min delayed)"
+
+test:
+	$(PYTHON) -m unittest discover tests
+
+monitors:
+	$(PYTHON) -m webtrak monitors
+
+range:
+	$(PYTHON) -m webtrak range
+
+follow:
+	$(PYTHON) -m webtrak follow

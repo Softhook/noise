@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs the ADS-B tools installed in /opt/adsb-logger, for example: adsb status
+# Install with: sudo install -m 755 deploy/adsb /usr/local/bin/adsb
+PYTHONPATH=/opt/adsb-logger exec /usr/bin/python3 -m adsb "$@"

@@ -6,7 +6,9 @@ Wants=readsb.service
 RequiresMountsFor=/var/lib/adsb-logger
 
 [Service]
-ExecStart=/usr/bin/python3 /opt/adsb-logger/adsb_logger.py --config /etc/adsb-logger/site.json
+# The adsb package is copied to /opt/adsb-logger/adsb; see docs/pi-setup.md
+Environment=PYTHONPATH=/opt/adsb-logger
+ExecStart=/usr/bin/python3 -m adsb log --config /etc/adsb-logger/site.json
 User=adsb-logger
 Restart=always
 RestartSec=5
