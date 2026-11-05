@@ -159,7 +159,7 @@ function slidersChangedNote() {
 }
 
 function thrustSource(thrustDelta, slopeBasis) {
-  return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data, which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the low end of the thrust range becomes ${signed(LEVEL_VS_DESCENDING_DB, 0)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
+  return `Thrust ${signed(thrustDelta, 1)} dB is an estimate, not a measurement. It starts from constant speed and drag, and Doc 29 approach NPD slopes from the 2015 ANP data (Directive pp.747, 753, 793), which has no neo, PW1500G or PW1900G tables. ${slopeBasis} Spoiler drag on the 5.5° approach would lower it: if spoilers cancelled all of that aircraft's relief, it would be about −0.45 dB. It is only estimated up to ${THRUST_ESTIMATE_END_NM} nm, or the 5.5° top of descent if nearer, because Doc 29 default profiles put the A320 on landing flap from about 1,820 ft and the E190 from 1,500 ft (Directive pp.198, 221). From 2.5 to 3.7 nm the E190 may still be at idle, so the difference could be larger. Further out, the hatched area has no thrust estimate: the thin line leaves thrust out, and the range keeps the full thrust band. Where the E190 is level and the A320neo still descending, the low end of the thrust range becomes ${signed(LEVEL_VS_DESCENDING_DB, 0)} dB (73 vs 71 dB SEL at 4,000 ft, Consultation Fig. 22, p.32). London City's profiles are custom (Annex C p.8) and may differ from these defaults.`;
 }
 
 // Where each type's approach certificate is listed
@@ -195,7 +195,7 @@ function measuredPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, note, de
     name: `Measured: ${aircraft}`,
     wide: true,
     baseline: aircraft,
-    desc: () => modelDesc(aircraft, `Arrivals measured at Reagan National (AEF report): A320neo minus ${aircraft} in LAmax is`, sourceDelta, thrustDelta, descNote),
+    desc: () => modelDesc(aircraft, `Arrivals measured at Reagan National (AEF report, p.${aircraft === "A220" ? 9 : 8}): A320neo minus ${aircraft} in LAmax is`, sourceDelta, thrustDelta, descNote),
     sourceDelta,
     thrustDelta,
     sources: () => [
@@ -518,7 +518,7 @@ const CITED_DOCUMENTS = [
 const CITATION_PATTERN = /\b(EASA (?:A320|ERJ 190|A220) sheet|Bickerdike Allen(?: Thamesmead survey)?|Directive(?: 2015\/996)?|Doc 29|Annex C|LCY consultation|Consultation|noise scheme|Stage [24]\b|AEF\b|NASA TM 83214)|((?:(?:Figs?\.|Tables?) [\w–-]+,? )?\bpp?\.\d+(?:–\d+)?(?:, \d+(?:–\d+)?(?![\d ]*[a-zA-Z]))*)/g;
 
 // Splits notes into plain text and links. A page without a document name belongs to the document last named.
-// A document name is only linked when no page follows it, because then the page is the link.
+// A document name is only linked when no page follows it in the sentence, because then the page is the link.
 function citationParts(text) {
   const parts = [];
   const addText = value => {
@@ -531,7 +531,7 @@ function citationParts(text) {
     last = match.index + match[0].length;
     if (match[1]) {
       doc = CITED_DOCUMENTS.find(entry => entry.name.test(match[1]));
-      const pageFollows = /^.{0,24}\bpp?\.\d/.test(text.slice(last));
+      const pageFollows = /^(?:[^.]|\d\.\d|Figs?\.)*\bpp?\.\d/.test(text.slice(last));
       parts.push(pageFollows ? { text: match[0] } : { text: match[0], doc });
     } else if (!doc) {
       addText(match[0]);
