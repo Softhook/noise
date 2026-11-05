@@ -1,6 +1,6 @@
 # Source documents for the London City approach noise model
 
-Downloaded 4 November 2026, except `file 27`, downloaded 5 November 2026. Page numbers are PDF page numbers, not the numbers printed on the page.
+Downloaded 4 November 2026, except `files 27` to `36`, downloaded 5 November 2026. Page numbers are PDF page numbers, not the numbers printed on the page.
 
 ## Documents the model's figures or the analysis rely on
 
@@ -33,6 +33,16 @@ Downloaded 4 November 2026, except `file 27`, downloaded 5 November 2026. Page n
 | `20_NASA_TM83214_SEL_EPNL_Duration_Coefficients.pdf` | Lateral-attenuation duration coefficients: contouring programs assumed 10 (`10 log` SEL); measured 8.4 for a Boeing 747 (`11.6 log` before air) and 5.5 for a T-38 | pp.3–6; Table 1, p.8 |
 | `21_BAP_Aircraft_Noise_Survey_Thamesmead_Nov2024.pdf` | Arrivals measured by aircraft type at London City's NMT6, 2 September to 8 October 2024 ("Monitor 6" scenarios), and at the Thamesmead survey site ("Thamesmead garden" scenarios). The report also has departures, which the model doesn't use. | Table 3, p.8; NMT6 overflown by RWY 27 arrivals, p.9; Table 1, p.6; site position, pp.4–5 |
 | `27_EASA_TCDSN_IM.A.191_DHC-8_Issue9.pdf` | Dash 8-Q400 (DHC-8-402) certified approach levels, 93.0 and 94.9 EPNdB at 27,442 kg | Chapter 14 records B1053, p.48, and B1054 with the 850 rpm approach, p.50 |
+| `28_Torija_Aircraft_Noise_Complex_Tones_CEAS_2018.pdf` | Measurement plan only, not the model: EPNL's tone correction uses 1/3-octave bands and only the strongest tone; Aures tonality uses narrowband FFT analysis. Slides from take-off recordings at Heathrow, including A320ceo and A320neo variants | pp.4–5, 7 |
+| `29_Acoem_Fusion_Datasheet.pdf` | Measurement plan only, not the model: Fusion 4G options, logging, spectra, audio, power, storage and weatherproofing specifications (November 2022). Manufacturer's figures; some lines still describe an older modem | pp.3, 8, 10, 13, 15, 17, 19–28 |
+| `30_Acoem_Fusion_Datasheet_Nov2024.pdf` | Measurement plan only: shorter, more recent Fusion datasheet; accessories, including the CAL31 calibrator | pp.3, 7 |
+| `31_LNE_Type_Certificate_27092_Fusion_rev5_2024.pdf` | Measurement plan only: certified microphone and windscreen configurations, measurement ranges, firmware versions, manual reference and revision history. In French; the weatherproof kit isn't named in the configuration list | pp.1–7 |
+| `32_Acoem_DUO_Datasheet_May2018.pdf` | Measurement plan only: the model of meter used in `file 21`; states that statutory aircraft noise measurements require the 0° configuration | p.5 |
+| `33_dBTrait_Version_Sheet_Nov2018_EN.pdf` | Data format plan only: session folders, `.cmg.lock`, `.ini` settings, WAV export gain and firmware-specific fixes in dBTrait up to 6.1 | pp.1–4, 6–9 |
+| `34_dBTrait_Version_Sheet_Apr2019_FR.pdf` | Data format plan only: as `file 33`, up to dBTrait 6.2. In French | pp.1, 5 |
+| `35_Acoem_CUBE_Datasheet_Feb2018.pdf` | Data format plan only: sibling meter with the same push and HTTP options | Options section |
+| `36_Acoem_Fusion_Datasheet_May2018.pdf` | Data format plan only: older, longer Fusion datasheet, including stored data structure and audio post-processing | Stored data and post-processing sections |
+| `37_Acoem_Fusion_User_Manual_DOC1130_Mar2024_FR.pdf` | Measurement and data format plans only, not the model: Fusion user manual, DOC1130 rev. V, March 2024, FWa 3.01 / FWm 3.00, written against LNE-27092 rev. 5. Session files, push, storage, triggers, windscreen corrections and integrator commands. In French; third-party copy, not supplied by Acoem | pp.1, 11, 24–25, 100–106, 149–150, 157–161, 210–212, 217–227, 232–235, 253–254, 256–258, 263–264 |
 
 ## Certified approach levels extracted from the EASA sheets
 
@@ -301,6 +311,21 @@ The UK CAA noise sheet originally noted for E190-E2 was not obtained; the same `
 
 ECAC Doc 29 4th edition itself was not downloaded from ECAC; `file 19` (Commission Directive (EU) 2015/996, including the 2015 ANP database in Appendix I) is used instead. Later Commission Delegated Directive amendments and proprietary AEDT 3g neo-engine NPD tables (`PW1100G` / `LEAP-1A`) were not obtained. ISO 9613-2 and SAE ARP 866A are paid standards and were not obtained.
 
+These sources are cited in the [garden measurement plan](Thamesmead_Garden_Measurement_Plan.md), not used in the model. Their PDFs couldn't be downloaded, and only their abstracts or search excerpts have been read, so check the full texts before relying on them:
+
+- **Merino-Martinez, Besnea, von den Hoff and Snellen (2024), AIAA 2024-3398:** a nose landing gear tone around 1,700 Hz across the A320 family, with its level following speed, and A320neos less tonal than A320ceos from few A320neo flights. https://research.tudelft.nl/en/publications/psychoacoustic-analysis-of-the-noise-emissions-from-the-airbus-a3/
+- **Alves Vieira, Mehmood, Merino-Martinez, Snellen and Simons (2019), AIAA 2019-2512:** LAmax doesn't capture tonal components, and listening tests show tonality matters for annoyance. https://research.tudelft.nl/en/publications/variability-of-sound-quality-metrics-for-different-aircraft-types/
+- **Flindell, Institute of Acoustics proceedings:** a 1/3-octave band more than 5 dB above its neighbours counts as a prominent tone from 500 Hz to 10 kHz. https://www.ioa.org.uk/system/files/proceedings/ih_flindell_sounds_with_tonal_features_-_research_methods_and_assessment.pdf
+
+These sources are cited in the [Fusion data format plan](Fusion_Data_Format_Reverse_Engineering.md), not used in the model. They have no saved PDF:
+
+- **dBTRAIT32 user manual:** older software, read online; its CMG, BID and export details may not apply to the Fusion. https://manualzilla.com/doc/6901230/user-manual
+- **Acoem Congrego notes on 01dB instruments:** HTTP polling limits. https://public.docs.acoemcloud.com/congrego/01db
+- **Acoem Airodis supported instruments:** lists CSV ingest for the Fusion. https://public.docs.acoemcloud.com/airodis/supported-instruments-and-protocols
+- **FileExt CMG entry:** unverified `CAMPAIGN` signature and strings. https://filext.com/file-extension/CMG
+
+These manuals couldn't be opened and haven't been read: dBTrait manual (https://www.scribd.com/document/617622094/Dbtrait-Manual) and CUBE manual (https://www.manualslib.com/manual/3649016/Acoem-Cube.html).
+
 ## Where each file came from
 
 - **01–07:** London City Airport, RNP-AR consultation: https://consultations.airspacechange.co.uk/london-city-airport/rnp-ar-approaches/
@@ -322,3 +347,13 @@ ECAC Doc 29 4th edition itself was not downloaded from ECAC; `file 19` (Commissi
 - **25:** London Luton Airport: https://eu-assets.contentstack.com/v3/assets/blt4d5e17844b60f82b/blt97a26ba4421d0361/66ec3f77bb8d16a557eb70bb/Kensworth_Apr_to_Jun_2019.pdf
 - **26:** London Luton Airport: https://eu-assets.contentstack.com/v3/assets/blt4d5e17844b60f82b/blte6f5590601ac9d17/66ec3f77456ca33f43498ba6/Dagnall_May_to_July_2019.pdf
 - **27:** EASA: https://www.easa.europa.eu/en/downloads/8173/en
+- **28:** Zenodo: https://zenodo.org/records/1502431/files/CEAS-p17_Torija-Impact-assessment-of-aircraft-noise-with-high-content-in-complex-tones.pdf
+- **29:** Acoem datasheet, distributor's copy: https://vanguardtech.com.au/wp-content/uploads/2024/07/Fusion_-_Resource_-_Datasheet.pdf
+- **30:** Acoem: https://cdn.bfldr.com/Q3Z2TZY7/at/b54jmn57s28wfp45h97cjxn/Fusion_-_Resource_-_Datasheet.pdf
+- **31:** Acoem, linked from the Fusion 4G product page: https://cdn.bfldr.com/Q3Z2TZY7/at/cn7jqf9mg3xrhvnr6zx4smnv/Fusion_-_Resource_-_Certificate_LNE_MTG1024_Juin_2021_-_FR.pdf
+- **32:** Acoem US: https://acoem.us/wp-content/uploads/2021/04/NOT1507-May-2018-H-DUO-Technical-datasheet-EN.pdf
+- **33:** 01dB: https://01db.acoem.ovh/wp-content/uploads/2018/12/TDS1022-November-2018-L-dBTrait-dBMaestro-Version-sheet-EN.pdf
+- **34:** HelloPro: https://www.hellopro.fr/documentation/pdf_prod/4/7/7/1719_9eaf55782e0ca7f494a7e1b27b3d939a_6688774.pdf
+- **35:** 01dB: https://01db.acoem.ovh/wp-content/uploads/2018/02/NOT1554-February-2018-D-CUBE-Technical-Data-Sheet-EN.pdf
+- **36:** Distributor's copy: https://mit-tec.com/wp-content/uploads/2025/02/Fusion-Full-Datasheet.pdf
+- **37:** Third-party copy, not from Acoem. Same title as the Scribd upload (https://www.scribd.com/document/883499994/FW-3-00-FUSION-Manuel-Utilisation-FR); the downloaded file's name began `ilide.info`. Acoem's copyright notice on the cover prohibits reproduction, so it's kept locally, excluded by `.gitignore` and not published in this repository.
