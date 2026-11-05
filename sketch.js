@@ -144,6 +144,7 @@ function airportPreset(aircraft, basis, howBuilt = `The ${aircraft} is adjusted 
   return {
     name: `Airport: ${aircraft}`,
     kind: "LCY modelled",
+    tone: "airport",
     tip: `The airport's own computer model (AEDT), not a measurement. ${howBuilt}; the A320neo, which can't yet land there, isn't adjusted to any measurement. SEL only, 0.5–5 km.`,
     baseline: aircraft,
     usesAirportTable: true,
@@ -196,6 +197,7 @@ function easaPreset(aircraft, certificate, landingMass, sourceDelta, thrustDelta
   return {
     name: `EASA: ${aircraft}`,
     kind: "Certificates",
+    tone: "certificates",
     tip: `Compares the official noise certificates of the A320neo and the ${aircraft}: test flights on a 3° approach at certified weights, in EPNdB, not flights at London City. ${MODELLED_ON_TOP}`,
     baseline: aircraft,
     desc: () => modelDesc(aircraft, "Certificates", `From EASA noise certificates, on a 3° test approach: A320neo 92.0–92.7 EPNdB (midpoint 92.35) at 66.3 t vs ${certificate} EPNdB at ${landingMass}. That makes the aircraft difference`, sourceDelta, thrustDelta),
@@ -216,6 +218,7 @@ function measuredPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, note, de
   return {
     name: `Measured: ${aircraft}`,
     kind: "Measured at Reagan National, US",
+    tone: "measured",
     tip: `Real arrivals of both the A320neo and the ${aircraft}, measured at a US airport on typical approach angles, not at London City.${tipNote} The LAmax difference is used for SEL too. ${MODELLED_ON_TOP}`,
     wide: true,
     baseline: aircraft,
@@ -248,6 +251,7 @@ function monitor6Preset(aircraft) {
   const preset = {
     name: `Hybrid Monitor 6: ${aircraft}`,
     kind: "Measured at London City + EASA certificates",
+    tone: "hybrid",
     tip: `Two steps. The E190 vs ${aircraft} gap is measured at London City's monitor 6, with both on the 5.5° approach (${flights} ${aircraft} arrivals). No A320neo has been measured there, so A320neo vs E190 comes from certificates. Height and air are then modelled, and the E190's thrust is estimated.`,
     wide: true,
     baseline: aircraft,
@@ -285,6 +289,7 @@ function thamesmeadGardenPreset(aircraft, sourceDelta, thrustDelta, slopeBasis, 
   return {
     name: `Thamesmead garden: ${aircraft}`,
     kind: "Measured at Thamesmead + EASA certificates",
+    tone: "site",
     tip: `Estimates an A320neo's level in a Thamesmead garden, 500 m beside the arrival path. It starts from the ${aircraft} level measured there${flights < 20 ? ` (only ${flights} arrivals)` : ""}, then adds the certificate difference between the aircraft. Height and air are then modelled, and thrust is estimated. No A320neo has been measured there.`,
     wide: true,
     baseline: aircraft,
@@ -728,23 +733,26 @@ function setup() {
     refresh();
   });
 
+  let group;
   PRESETS.forEach((preset, i) => {
+    if (preset.baseline !== PRESETS[i - 1]?.baseline) group = addScenarioGroup(preset.baseline);
     const button = document.createElement("button");
     button.type = "button";
     const name = document.createElement("span");
     name.className = "scenario-name";
-    name.textContent = preset.name;
+    name.textContent = preset.name.replace(`: ${preset.baseline}`, ""); // The heading above names the aircraft
     const kind = document.createElement("span");
     kind.className = "scenario-kind";
     kind.textContent = preset.kind;
     button.append(name, kind);
     button.classList.toggle("is-wide", preset.wide === true);
+    button.classList.add(`tone-${preset.tone}`);
     addScenarioTip(button, preset, i);
     button.addEventListener("click", () => {
       if (preset.site && !probePinned) probeNM = preset.site.nm; // A pinned line stays put, to compare scenarios at one distance
       applyPreset(i);
     });
-    byId("scenarios").appendChild(button);
+    group.appendChild(button);
   });
 
   document.querySelectorAll("[data-runway]").forEach(button => {
@@ -789,6 +797,19 @@ function setup() {
   }).observe(box);
 
   applyPreset(activePreset);
+}
+
+// An aircraft's heading in the scenario list, returning the grid its buttons go in
+function addScenarioGroup(aircraft) {
+  const heading = document.createElement("h3");
+  heading.id = `scenario-group-${aircraft}`;
+  heading.textContent = `A320neo vs ${aircraft}`;
+  const grid = document.createElement("div");
+  grid.className = "scenario-grid";
+  grid.setAttribute("role", "group");
+  grid.setAttribute("aria-labelledby", heading.id);
+  byId("scenarios").append(heading, grid);
+  return grid;
 }
 
 // The hover note on a scenario button. Screen readers get the same text through a hidden description.
@@ -877,7 +898,7 @@ function syncControls() {
   const airport = usingAirportTable();
   const preset = PRESETS[activePreset];
 
-  [...byId("scenarios").children].forEach((button, i) => setPressed(button, i === activePreset));
+  byId("scenarios").querySelectorAll("button").forEach((button, i) => setPressed(button, i === activePreset));
   document.querySelectorAll("[data-runway]").forEach(button => {
     setPressed(button, button.dataset.runway === activeRunway);
     button.disabled = Boolean(preset.site) && button.dataset.runway !== "27";

@@ -33,7 +33,7 @@ body {
   line-height: 1.4;
 }
 
-h1, h2, p, dl, dd, ul { margin: 0; padding: 0; }
+h1, h2, h3, p, dl, dd, ul { margin: 0; padding: 0; }
 
 button {
   font: inherit;
@@ -201,17 +201,33 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* Scenarios */
+.scenario-groups h3 {
+  margin: 12px 0 6px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scenario-groups h3:first-child { margin-top: 0; }
+
 .scenario-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
+/* One colour per evidence type. --tone carries white text when selected. */
+.tone-airport { --tone: #5f6470; --tone-tint: #f0f1f3; }
+.tone-certificates { --tone: var(--accent); --tone-tint: #e8f1fb; }
+.tone-measured { --tone: #1f7a4d; --tone-tint: #e6f4ec; }
+.tone-hybrid { --tone: #6a4fc4; --tone-tint: #efecfa; }
+.tone-site { --tone: #a8590f; --tone-tint: #fbf0e3; }
+
 .scenario-grid button {
   min-height: 36px;
   padding: 6px 8px;
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
+  background: var(--tone-tint);
+  border: 1px solid var(--tone);
   border-radius: 8px;
   font-size: 13px;
 }
@@ -251,16 +267,16 @@ button:disabled { cursor: not-allowed; }
   font-weight: 600;
 }
 
-.scenario-grid button:hover { background: var(--surface-muted); }
+.scenario-grid button:hover { background: color-mix(in srgb, var(--tone-tint), var(--tone) 12%); }
 
 .scenario-grid button[aria-pressed="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--tone);
+  border-color: var(--tone);
   color: #ffffff;
   font-weight: 600;
 }
 
-.scenario-grid + .hint { margin-top: 8px; }
+.scenario-groups + .hint { margin-top: 8px; }
 
 .description {
   margin-top: 10px;
