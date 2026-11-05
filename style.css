@@ -181,8 +181,7 @@ button:disabled { cursor: not-allowed; }
 }
 
 .sidebar-resizer:hover::before,
-.sidebar-resizer:active::before { background: var(--accent); }
-
+.sidebar-resizer:active::before,
 .sidebar-resizer:hover::after,
 .sidebar-resizer:active::after { background: var(--accent); }
 
@@ -245,6 +244,15 @@ button:disabled { cursor: not-allowed; }
 
 .scenario-grid button[aria-pressed="true"] .scenario-kind { color: #ffffff; }
 
+.scenario-grid button:hover { background: color-mix(in srgb, var(--tone-tint), var(--tone) 12%); }
+
+.scenario-grid button[aria-pressed="true"] {
+  background: var(--tone);
+  border-color: var(--tone);
+  color: #ffffff;
+  font-weight: 600;
+}
+
 .scenario-tip {
   position: fixed;
   z-index: 10;
@@ -264,15 +272,6 @@ button:disabled { cursor: not-allowed; }
 .scenario-tip strong {
   display: block;
   margin-bottom: 2px;
-  font-weight: 600;
-}
-
-.scenario-grid button:hover { background: color-mix(in srgb, var(--tone-tint), var(--tone) 12%); }
-
-.scenario-grid button[aria-pressed="true"] {
-  background: var(--tone);
-  border-color: var(--tone);
-  color: #ffffff;
   font-weight: 600;
 }
 
@@ -536,7 +535,6 @@ input[type="range"]:disabled::-moz-range-thumb { border-color: var(--line-strong
   .controls {
     overflow: visible;
     padding: 0 16px 16px;
-    border-right: 0;
     border-top: 1px solid var(--line);
   }
 

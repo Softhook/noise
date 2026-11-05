@@ -164,11 +164,11 @@ Combining geometric spreading (`20 log` for `LAmax`, `10 log` lossless line-inte
 
 ## Altitude waypoints and place names
 
-The RWY 27 and RWY 09 altitudes in `sketch.js` are in **feet AMSL** (`file 01`, Figure 8 p.22 and Figure 9 p.23). Runway elevation is `20 ft` AMSL (`file 01`, section 3.7.8, p.11), and threshold crossing heights are `35 ft` on the `5.5°` ILS and `50 ft` on the `4.49°` RNP-AR above threshold (`file 17`, pp.50, 61), giving `55 ft` and `70 ft` AMSL at `0.0 nm`.
+The RWY 27 and RWY 09 altitudes in `js/data.js` are in **feet AMSL** (`file 01`, Figure 8 p.22 and Figure 9 p.23). Runway elevation is `20 ft` AMSL (`file 01`, section 3.7.8, p.11), and threshold crossing heights are `35 ft` on the `5.5°` ILS and `50 ft` on the `4.49°` RNP-AR above threshold (`file 17`, pp.50, 61), giving `55 ft` and `70 ft` AMSL at `0.0 nm`.
 
 Two misprinted chart labels in `file 01` (repeated in `file 16`, Figures 7–8, p.15) are corrected to match the `4.49°` slope and `file 17`:
-- **RWY 27 at 1 nm:** Figure 9 prints `574 ft` (a digit transposition of `547 ft`); `sketch.js` uses `547 ft`, matching Figure 8 and `file 17` (pp.49, 60).
-- **RWY 09 at 3.32 nm (`Curr TOD`):** Figure 8 prints `1,692 ft`; `sketch.js` uses `1,656 ft`, matching the `4.49°` slope and `file 17` p.49 ("circa 340ft" below 2,000 ft).
+- **RWY 27 at 1 nm:** Figure 9 prints `574 ft` (a digit transposition of `547 ft`); `js/data.js` uses `547 ft`, matching Figure 8 and `file 17` (pp.49, 60).
+- **RWY 09 at 3.32 nm (`Curr TOD`):** Figure 8 prints `1,692 ft`; `js/data.js` uses `1,656 ft`, matching the `4.49°` slope and `file 17` p.49 ("circa 340ft" below 2,000 ft).
 - Note also a compass typo in `file 01` section 5.3.9 (p.23), which describes RWY 27's `Prop TOD` at the A13/A1306 junction as `"west of"` `Curr TOD` at Rainham Marshes when it lies `1.1 nm` **east** of `Curr TOD` (copied from RWY 09's section 5.3.5).
 
 RWY 27 place names (`file 01`, Figure 9 p.23):
