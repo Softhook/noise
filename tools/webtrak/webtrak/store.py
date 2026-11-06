@@ -164,13 +164,39 @@ def count_saved(ranges, first, last):
     return sum(max(0, min(b, last) - max(a, first) + 1) for a, b in ranges)
 
 
+def on_disk(monitor_dir, ranges):
+    """The saved ranges whose day of levels is still on disk. state.json only says what was saved;
+    a levels/<day>.csv deleted by hand means that day's chunks are no longer saved (and will be
+    downloaded again)."""
+    zone = parse.site_zone()
+    kept, exists = [], {}
+    for a, b in ranges:
+        h = a
+        while h <= b:
+            day = dt.datetime.fromtimestamp(parse.utc_for_handle(h), zone).date()
+            next_day = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=zone).timestamp()
+            end = min(b, parse.handle_for_utc(next_day) - 1)
+            if day not in exists:
+                exists[day] = os.path.exists(os.path.join(monitor_dir, "levels", f"{day.isoformat()}.csv"))
+            if exists[day]:
+                if kept and kept[-1][1] + 1 >= h:
+                    kept[-1][1] = end
+                else:
+                    kept.append([h, end])
+            h = end + 1
+    return kept
+
+
 def read_state(monitor_dir):
-    """A monitor folder's state.json, or {} (read-only: for watching another process's progress)."""
+    """A monitor folder's state.json, or {} (read-only: for watching another process's progress),
+    with "saved" cut to what is still on disk."""
     try:
         with open(os.path.join(monitor_dir, "state.json")) as f:
-            return json.load(f)
+            state = json.load(f)
     except (OSError, ValueError):
         return {}
+    state["saved"] = on_disk(monitor_dir, state.get("saved", []))
+    return state
 
 
 def is_locked(monitor_dir):
@@ -249,11 +275,7 @@ class MonitorStore:
     # --- state ----------------------------------------------------------------------------
 
     def _load_state(self):
-        try:
-            with open(self.state_path) as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
+        return read_state(self.dir)
 
     def _save_state(self):
         self.state["monitor"] = self.monitor

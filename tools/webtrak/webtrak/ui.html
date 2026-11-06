@@ -49,6 +49,8 @@ input[type=datetime-local], input[type=date], input[type=number], select {
 .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
 .row > div { flex: 1 1 160px; min-width: 0; }
 .row > div.narrow { flex: 0 1 110px; }
+.row > div.mon-pick { flex-basis: 180px; }
+.row > div.go { flex: 0 0 auto; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .checks label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink); margin: 0; }
 button { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--axis); background: var(--surface); cursor: pointer; }
@@ -75,7 +77,7 @@ th { text-align: left; font-weight: 600; color: var(--ink-2); font-size: 12px; b
 td { border-bottom: 1px solid var(--grid); padding: 5px 8px; font-variant-numeric: tabular-nums; }
 td.num, th.num { text-align: right; }
 .scroll { overflow-x: auto; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
 .tile .v { font-size: 24px; font-weight: 650; }
 .tile .v small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
@@ -83,16 +85,37 @@ td.num, th.num { text-align: right; }
 .tile .n { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.chart { position: relative; }
+.chart { position: relative; touch-action: pan-y; }
 .chart svg { display: block; width: 100%; }
+.chart .hit { cursor: crosshair; }
+.chart .hit:focus:not(:focus-visible) { outline: none; }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 12px; margin-bottom: 8px; }
+.chart-head h2 { margin: 0; }
+.zoom { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.zoom button { padding: 3px 10px; font-size: 12px; }
+.zoom .muted { font-size: 12px; }
 .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
   box-shadow: 0 2px 10px rgba(0,0,0,.12); border-radius: 8px; padding: 8px 10px; font-size: 12px; min-width: 160px; display: none; z-index: 2; }
 .tip b { font-size: 14px; }
 .tip .t { color: var(--ink-2); margin-bottom: 4px; }
-.tip .r { display: flex; align-items: center; gap: 6px; }
+.tip .r { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .cov { margin-bottom: 10px; }
 .cov canvas { width: 100%; height: 18px; display: block; border-radius: 3px; }
-.cov .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cov .axis { position: relative; height: 15px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cov .axis span { position: absolute; transform: translateX(-50%); }
+.cov .axis span:first-child { transform: none; }
+.cov .axis span:last-child { transform: translateX(-100%); }
+.cov-title { font-size: 12px; margin-bottom: 3px; }
+.section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 8px 12px; margin-bottom: 12px; }
+.section-head h2 { margin: 0; }
+.section-head > div { flex: 0 1 180px; }
+.job-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin-top: 4px; }
+.job-foot details { min-width: 0; max-width: 100%; }
+.job-foot details[open] { flex-basis: 100%; order: 1; }
+#start-error:empty, #jobs-error:empty, #s-note:empty { display: none; }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.cov-note { margin: -4px 0 12px; }
+#coverage { margin-top: 14px; }
 .loading { opacity: .5; transition: opacity .2s; }
 .empty { color: var(--muted); padding: 8px 0; }
 </style>
@@ -132,27 +155,28 @@ td.num, th.num { text-align: right; }
 
     <section class="card" aria-labelledby="jobs-h">
       <h2 id="jobs-h">Downloads</h2>
+      <div class="plan warn" id="jobs-error" role="alert"></div>
       <div id="jobs"><div class="empty">No downloads started from here yet.</div></div>
     </section>
   </div>
 
   <section class="card" aria-labelledby="mon-h">
-    <div class="row" style="justify-content: space-between; align-items: baseline;">
-      <h2 id="mon-h" style="margin:0">Saved data</h2>
-      <div style="flex:0 1 180px"><label for="cov-day">Coverage for day</label><input type="date" id="cov-day"></div>
+    <div class="section-head">
+      <h2 id="mon-h">Saved data</h2>
+      <div><label for="cov-day">Coverage for day</label><input type="date" id="cov-day"></div>
     </div>
-    <div class="scroll" style="margin-top:12px"><table id="monitors"></table></div>
-    <div id="coverage" style="margin-top:14px"></div>
+    <div class="scroll"><table id="monitors"></table></div>
+    <div id="coverage"></div>
   </section>
 
   <section aria-labelledby="stats-h">
     <div class="card">
       <h2 id="stats-h">Statistics</h2>
       <div class="row">
-        <div class="narrow" style="flex-basis:180px"><label for="s-mon">Monitor</label><select id="s-mon"></select></div>
-        <div><label for="s-from">From</label><input type="datetime-local" id="s-from"></div>
-        <div><label for="s-to">To</label><input type="datetime-local" id="s-to"></div>
-        <div class="narrow" style="flex:0 0 auto"><button class="primary" id="s-go" type="button">Show</button></div>
+        <div class="narrow mon-pick"><label for="s-mon">Monitor</label><select id="s-mon"></select></div>
+        <div><label for="s-from">From</label><input type="datetime-local" id="s-from" step="1"></div>
+        <div><label for="s-to">To</label><input type="datetime-local" id="s-to" step="1"></div>
+        <div class="narrow go"><button class="primary" id="s-go" type="button">Show</button></div>
       </div>
       <div class="plan" id="s-note"></div>
     </div>
@@ -163,12 +187,15 @@ td.num, th.num { text-align: right; }
 <script>
 "use strict";
 const ZONE = "Europe/London";
+
+// --- small helpers ------------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
     if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
-    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v === true ? "" : v);
   }
   for (const kid of kids) if (kid != null) n.append(kid);
   return n;
@@ -178,22 +205,62 @@ const svg = (tag, attrs = {}) => {
   for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
   return n;
 };
+const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 const fmt = (v, d = 1) => (v == null || Number.isNaN(v)) ? "—" : Number(v).toFixed(d);
+const orDash = (v) => v == null ? "—" : String(v);
+const nmtList = (ids) => `NMT${ids.join(", NMT")}`;
 
-// Times: the server takes and gives London local times; the browser may be elsewhere.
+// Each call to a turn() returns a check that is true only while no newer turn has started,
+// so a slow reply can't overwrite the answer to a later request.
+const turns = () => { let n = 0; return () => { const mine = ++n; return () => mine === n; }; };
+
+// Poll fn every ms (not while the tab is hidden, never two at once). Calling the returned
+// function refreshes now; if a refresh is already running, another follows straight after it.
+function every(ms, fn) {
+  let timer = null, running = null, again = false;
+  const run = () => {
+    if (running) { again = true; return running; }
+    clearTimeout(timer);
+    running = (document.hidden ? Promise.resolve() : Promise.resolve().then(fn).catch(() => {})).finally(() => {
+      running = null;
+      if (again) { again = false; run(); } else timer = setTimeout(run, ms);
+    });
+    return running;
+  };
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); });
+  return run;
+}
+
+// Index of the item nearest t in a list sorted by key, or -1 if it is empty.
+function nearest(list, t, key) {
+  let lo = 0, hi = list.length - 1;
+  if (hi < 0) return -1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (key(list[mid]) < t) lo = mid + 1; else hi = mid; }
+  return lo > 0 && Math.abs(key(list[lo - 1]) - t) <= Math.abs(key(list[lo]) - t) ? lo - 1 : lo;
+}
+
+// --- times: the server takes and gives London local times; the browser may be elsewhere ----
+const partsFmt = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+const dayFmt = new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, day: "numeric", month: "short" });
 const parts = (utc) => {
   const p = {};
-  for (const x of new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(utc * 1000))) p[x.type] = x.value;
+  for (const x of partsFmt.formatToParts(new Date(utc * 1000))) p[x.type] = x.value;
   return p;
 };
 const localInput = (utc) => { const p = parts(utc); return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`; };
+const localInputS = (utc) => { const p = parts(utc); return `${localInput(utc)}${p.second === "00" ? "" : ":" + p.second}`; };
 const localDay = (utc) => localInput(utc).slice(0, 10);
 const hm = (utc) => { const p = parts(utc); return `${p.hour}:${p.minute}`; };
 const hms = (utc) => { const p = parts(utc); return `${p.hour}:${p.minute}:${p.second}`; };
-const dayLabel = (utc) => new Intl.DateTimeFormat("en-GB", { timeZone: ZONE, day: "numeric", month: "short" }).format(new Date(utc * 1000));
-const span = (a, b) => localDay(a) === localDay(b - 1) ? `${dayLabel(a)} ${hm(a)}–${hm(b)}` : `${dayLabel(a)} ${hm(a)} – ${dayLabel(b)} ${hm(b)}`;
-const inputLabel = (s) => s ? s.replace("T", " ") : "";
+const dayLabel = (utc) => dayFmt.format(new Date(utc * 1000));
+const dayTime = (utc) => `${dayLabel(utc)} ${hm(utc)}`;
+const span = (a, b) => localDay(a) === localDay(b - 1) ? `${dayLabel(a)} ${hm(a)}–${hm(b)}` : `${dayTime(a)} – ${dayTime(b)}`;
+// A period given as two input values ("2026-11-05T08:00"), the end's date only when it differs.
+const inputPeriod = (from, to) => {
+  const a = (from || "").replace("T", " "), b = (to || "").replace("T", " ");
+  return `${a} → ${a.slice(0, 10) === b.slice(0, 10) ? b.slice(11) : b}`;
+};
 
 async function api(path, body) {
   const opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -203,66 +270,68 @@ async function api(path, body) {
   return data;
 }
 
-let monitors = [], latestUtc = null, lastStatus = null;
+let latestUtc = null, lastStatus = null;
 
 // --- header: WebTrak's range ------------------------------------------------------------
 async function loadRange() {
   try {
     const r = await api("/api/range");
-    if (r.error) { $("range").textContent = `WebTrak not reachable: ${r.error}`; return; }
+    if (r.error) throw new Error(r.error);
     latestUtc = r.latest_utc;
     $("range").textContent = `WebTrak holds ${r.first.slice(0, 10)} to ${r.last.slice(0, 16)} · newest data ${r.lag_min} min behind`;
   } catch (e) { $("range").textContent = `WebTrak not reachable: ${e.message}`; }
 }
 
 // --- new download -----------------------------------------------------------------------
-function chosen() { return [...document.querySelectorAll("#monitor-checks input:checked")].map((c) => c.value); }
+const chosen = () => [...document.querySelectorAll("#monitor-checks input:checked")].map((c) => c.value);
 
 function setPreset(name) {
   const now = latestUtc || Date.now() / 1000 - 30 * 60;
-  const floorMin = (t) => Math.floor(t / 60) * 60;
-  let a, b;
-  if (name === "last2") { b = floorMin(now); a = b - 7200; }
-  if (name === "today") { $("from").value = `${localDay(now)}T00:00`; $("to").value = localInput(floorMin(now)); return planSoon(); }
-  if (name === "yesterday") {
-    const y = localDay(now - 86400);
-    $("from").value = `${y}T00:00`; $("to").value = `${localDay(now)}T00:00`; return planSoon();
-  }
-  $("from").value = localInput(a); $("to").value = localInput(b); planSoon();
+  const minute = Math.floor(now / 60) * 60;
+  const [from, to] = {
+    last2: [localInput(minute - 7200), localInput(minute)],
+    today: [`${localDay(now)}T00:00`, localInput(minute)],
+    yesterday: [`${localDay(now - 86400)}T00:00`, `${localDay(now)}T00:00`],
+  }[name];
+  $("from").value = from; $("to").value = to;
+  planSoon();
 }
 
 let planTimer = null;
+const planTurn = turns();
 function planSoon() { clearTimeout(planTimer); planTimer = setTimeout(plan, 250); }
 async function plan() {
-  const ids = chosen(), f = $("from").value, t = $("to").value;
+  const current = planTurn();
+  const ids = chosen(), from = $("from").value, to = $("to").value, out = $("plan");
+  const say = (text, warn = false) => { out.textContent = text; out.classList.toggle("warn", warn); };
   $("fetch-btn").disabled = true; $("follow-btn").disabled = !ids.length;
-  if (!ids.length) { $("plan").textContent = "Choose at least one monitor."; return; }
-  if (!f || !t) { $("plan").textContent = "Choose a period."; return; }
+  if (!ids.length) return say("Choose at least one monitor.");
+  if (!from || !to) return say("Choose a period.");
   try {
-    const p = await api(`/api/plan?${new URLSearchParams({ nmt: ids.join(","), from: f, to: t, delay: $("delay").value })}`);
+    const p = await api(`/api/plan?${new URLSearchParams({ nmt: ids.join(","), from, to, delay: $("delay").value })}`);
+    if (!current()) return;
     const txt = p.to_save === 0 ? `All ${p.chunks} chunks are already saved.`
       : `${p.chunks} chunks · ${p.to_save} to save · ${p.to_download} to download · about ${p.minutes < 1 ? "<1" : Math.round(p.minutes)} min`;
-    $("plan").textContent = txt;
-    $("plan").classList.remove("warn");
-    if (p.busy.length) {
-      $("plan").textContent = `${txt}. NMT${p.busy.join(", NMT")} is being written by another download; wait for it or stop it.`;
-      $("plan").classList.add("warn");
-    }
+    if (p.busy.length) say(`${txt}. ${nmtList(p.busy)} is being written by another download; wait for it or stop it.`, true);
+    else say(txt);
     $("fetch-btn").disabled = p.to_save === 0 || p.busy.length > 0;
     $("follow-btn").disabled = p.busy.length > 0;
-  } catch (e) { $("plan").textContent = e.message; $("plan").classList.add("warn"); }
+  } catch (e) { if (current()) say(e.message, true); }
 }
 
 async function start(kind) {
   $("start-error").textContent = "";
-  const body = { kind, nmt: chosen().join(","), delay: Number($("delay").value) || 2 };
-  if (kind === "fetch") Object.assign(body, { from: $("from").value, to: $("to").value });
-  else Object.assign(body, { backfill: 1, delay: Math.max(1, Number($("delay").value) || 1) });
-  try { await api("/api/jobs", body); await refreshStatus(); planSoon(); }
+  const delay = Number($("delay").value);
+  const body = kind === "fetch"
+    ? { kind, nmt: chosen().join(","), delay: delay || 2, from: $("from").value, to: $("to").value }
+    : { kind, nmt: chosen().join(","), delay: Math.max(1, delay || 1), backfill: 1 };
+  try { await api("/api/jobs", body); refreshStatus(); planSoon(); }
   catch (e) { $("start-error").textContent = e.message; }
 }
 
-// --- downloads and saved data --------------------------------------------------------------
+// --- downloads ------------------------------------------------------------------------------
+// Each job keeps its own elements and is updated in place, so an open log, a button under the
+// pointer or keyboard focus survive the refresh every 2 s.
 function jobState(j) {
   if (j.running) return ["run", j.kind === "follow" ? "following" : "downloading"];
   if (j.exit === 0) return ["", "finished"];
@@ -271,134 +340,258 @@ function jobState(j) {
   return ["bad", `failed (exit ${j.exit})`];
 }
 
+const jobViews = new Map();
+
+function jobAction(text, cls, fn) {
+  const button = el("button", { type: "button", class: cls, text, onclick: async () => {
+    button.disabled = true;
+    $("jobs-error").textContent = "";
+    try { await fn(); } catch (err) { $("jobs-error").textContent = `${text}: ${err.message}`; button.disabled = false; }
+    refreshStatus();
+  } });
+  return button;
+}
+
+function makeJobView(j) {
+  const v = { title: el("strong"), nmts: el("span", { class: "muted" }), dot: el("span", { class: "dot" }), state: el("span"),
+    fill: el("div"), info: el("div", { class: "sub" }), log: el("pre"), actions: el("div"), running: null };
+  v.bar = el("div", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-label": "Download progress" }, v.fill);
+  v.node = el("div", { class: "job" },
+    el("div", { class: "job-head" }, el("div", {}, v.title, " ", v.nmts), el("span", { class: "badge" }, v.dot, v.state)),
+    j.kind === "fetch" ? v.bar : null, v.info,
+    el("div", { class: "job-foot" }, el("details", {}, el("summary", { text: "Log" }), v.log), v.actions));
+  return v;
+}
+
+function updateJobView(v, j) {
+  const [dotCls, label] = jobState(j);
+  setText(v.title, j.kind === "fetch" ? inputPeriod(j.from, j.to) : `Follow live (backfill ${j.backfill} h)`);
+  setText(v.nmts, nmtList(j.nmt));
+  v.dot.className = `dot ${dotCls}`;
+  setText(v.state, label);
+  if (j.kind === "fetch") {
+    const pct = j.total ? Math.min(100, 100 * j.done / j.total) : 0;
+    v.fill.style.width = `${pct}%`;
+    v.bar.setAttribute("aria-valuemax", j.total); v.bar.setAttribute("aria-valuenow", j.done);
+    const bits = [`${j.done} of ${j.total} chunks (${Math.floor(pct)}%)`];
+    if (j.running && j.per_minute) bits.push(`${fmt(j.per_minute, 0)} a minute`);
+    if (j.running && j.eta_min != null) bits.push(`about ${j.eta_min < 1 ? "<1" : Math.ceil(j.eta_min)} min left`);
+    setText(v.info, bits.join(" · "));
+  } else {
+    setText(v.info, j.last_utc ? `Newest saved data ${dayTime(j.last_utc)}, ${Math.round((Date.now() / 1000 - j.last_utc) / 60)} min ago` : "");
+  }
+  setText(v.log, (j.log || []).join("\n") || "(nothing yet)");
+  if (v.running !== j.running) {  // the buttons only change when the job starts or ends
+    v.running = j.running;
+    v.actions.replaceChildren(...[
+      j.kind === "fetch" ? el("button", { type: "button", class: "link", text: "Statistics", onclick: () => {
+        showStats({ nmt: j.nmt[0], from: j.from, to: j.to }); $("stats-h").scrollIntoView({ behavior: "smooth" }); } }) : null,
+      j.running ? jobAction("Stop", "", () => api("/api/jobs/stop", { id: j.id }))
+        : jobAction("Remove", "link", () => api("/api/jobs/forget", { id: j.id }))].filter(Boolean));
+  }
+}
+
 function renderJobs(jobs) {
-  const box = $("jobs");
-  box.replaceChildren();
-  if (!jobs.length) { box.append(el("div", { class: "empty", text: "No downloads started from here yet." })); return; }
-  for (const j of jobs.slice(0, 8)) {
-    const [dotCls, label] = jobState(j);
-    const title = j.kind === "fetch" ? `${inputLabel(j.from)} → ${inputLabel(j.to).slice(11)}` : `Follow live (backfill ${j.backfill} h)`;
-    const actions = el("div");
-    if (j.running) actions.append(el("button", { type: "button", text: "Stop", onclick: () => api("/api/jobs/stop", { id: j.id }).then(refreshStatus) }));
-    else actions.append(el("button", { class: "link", type: "button", text: "Remove", onclick: () => api("/api/jobs/forget", { id: j.id }).then(refreshStatus) }));
-    if (j.kind === "fetch") actions.prepend(el("button", { class: "link", type: "button", text: "Statistics", onclick: () => {
-      $("s-mon").value = j.nmt[0]; $("s-from").value = j.from; $("s-to").value = j.to; loadStats(); $("stats-h").scrollIntoView({ behavior: "smooth" }); } }));
-    const node = el("div", { class: "job" },
-      el("div", { class: "job-head" },
-        el("div", {}, el("strong", { text: title }), el("span", { class: "muted", text: `  NMT${j.nmt.join(", NMT")}` })),
-        el("span", { class: "badge" }, el("span", { class: `dot ${dotCls}` }), label)));
-    if (j.kind === "fetch") {
-      const pct = j.total ? Math.min(100, 100 * j.done / j.total) : 0;
-      node.append(el("div", { class: "bar", role: "progressbar", "aria-valuemin": 0, "aria-valuemax": j.total, "aria-valuenow": j.done },
-        el("div", { style: `width:${pct}%` })));
-      const bits = [`${j.done} of ${j.total} chunks (${Math.floor(pct)}%)`];
-      if (j.running && j.per_minute) bits.push(`${fmt(j.per_minute, 0)} a minute`);
-      if (j.running && j.eta_min != null) bits.push(`about ${j.eta_min < 1 ? "<1" : Math.ceil(j.eta_min)} min left`);
-      node.append(el("div", { class: "sub", text: bits.join(" · ") }));
-    } else if (j.last_utc) {
-      node.append(el("div", { class: "sub", text: `Newest saved data ${dayLabel(j.last_utc)} ${hm(j.last_utc)}, ${Math.round((Date.now() / 1000 - j.last_utc) / 60)} min ago` }));
-    }
-    const row = el("div", { class: "row", style: "justify-content:space-between;align-items:center;margin-top:4px" });
-    const det = el("details", {}, el("summary", { text: "Log" }), el("pre", { text: (j.log || []).join("\n") || "(nothing yet)" }));
-    row.append(det, actions);
-    node.append(row);
-    box.append(node);
+  const box = $("jobs"), shown = jobs.slice(0, 8);
+  if (!shown.length) {
+    jobViews.clear();
+    if (!box.querySelector(".empty")) box.replaceChildren(el("div", { class: "empty", text: "No downloads started from here yet." }));
+    return;
   }
+  const ids = new Set(shown.map((j) => j.id));
+  for (const id of jobViews.keys()) if (!ids.has(id)) jobViews.delete(id);
+  const nodes = shown.map((j) => {
+    if (!jobViews.has(j.id)) jobViews.set(j.id, makeJobView(j));
+    const v = jobViews.get(j.id);
+    updateJobView(v, j);
+    return v.node;
+  });
+  // Only move nodes when the list really changed: moving a node drops its focus.
+  if (nodes.length !== box.children.length || nodes.some((n, i) => box.children[i] !== n)) box.replaceChildren(...nodes);
 }
 
+// --- saved data ---------------------------------------------------------------------------
+let monitorsKey = "";
 function renderMonitors(list, jobs) {
-  const t = $("monitors");
-  t.replaceChildren();
-  if (!list.length) { t.append(el("tr", {}, el("td", { class: "empty", text: "Nothing saved yet." }))); return; }
-  t.append(el("tr", {}, ...["Monitor", "Saved", "From", "To", "Separate periods", "Events waiting", "Status"].map((h, i) =>
-    el("th", { class: i && i < 6 && i !== 2 && i !== 3 ? "num" : "", text: h }))));
   const appWriting = new Set(jobs.filter((j) => j.running).flatMap((j) => j.nmt));
-  for (const m of list) {
-    const hours = m.chunks * 30 / 3600;
-    const status = m.writing ? (appWriting.has(m.id) ? "being written" : "being written (started outside the app)") : "idle";
-    t.append(el("tr", {},
-      el("td", {}, el("strong", { text: `NMT${m.id}` }), document.createTextNode(` ${m.name}`)),
-      el("td", { class: "num", text: hours >= 1 ? `${fmt(hours)} h` : `${m.chunks * 30 / 60} min` }),
-      el("td", { text: m.first_utc ? `${dayLabel(m.first_utc)} ${hm(m.first_utc)}` : "—" }),
-      el("td", { text: m.last_utc ? `${dayLabel(m.last_utc)} ${hm(m.last_utc)}` : "—" }),
-      el("td", { class: "num", text: m.ranges }),
-      el("td", { class: "num", text: m.pending_events }),
-      el("td", {}, el("span", { class: "badge" }, el("span", { class: `dot ${m.writing ? "run" : ""}` }), status))));
-  }
+  const key = JSON.stringify([list, [...appWriting]]);
+  if (key === monitorsKey) return;
+  monitorsKey = key;
+  const t = $("monitors");
+  if (!list.length) { t.replaceChildren(el("tr", {}, el("td", { class: "empty", text: "Nothing saved yet." }))); return; }
+  const head = [["Monitor"], ["Saved", true], ["From"], ["To"], ["Separate periods", true], ["Events waiting", true], ["Status"]];
+  t.replaceChildren(
+    el("thead", {}, el("tr", {}, ...head.map(([h, num]) => el("th", { class: num ? "num" : "", text: h })))),
+    el("tbody", {}, ...list.map((m) => {
+      const hours = m.chunks * 30 / 3600;
+      const status = !m.writing ? "idle" : appWriting.has(m.id) ? "being written" : "being written (started outside the app)";
+      return el("tr", {},
+        el("td", {}, el("strong", { text: `NMT${m.id}` }), ` ${m.name}`),
+        el("td", { class: "num", text: hours >= 1 ? `${fmt(hours)} h` : `${m.chunks / 2} min` }),
+        el("td", { text: m.first_utc ? dayTime(m.first_utc) : "—" }),
+        el("td", { text: m.last_utc ? dayTime(m.last_utc) : "—" }),
+        el("td", { class: "num", text: String(m.ranges) }),
+        el("td", { class: "num", text: String(m.pending_events) }),
+        el("td", {}, el("span", { class: "badge" }, el("span", { class: `dot ${m.writing ? "run" : ""}` }), status)));
+    })));
 }
 
-async function refreshStatus() {
+let statusDown = false;
+const refreshStatus = every(2000, async () => {
   try {
-    const s = await api("/api/status");
-    lastStatus = s;
-    renderJobs(s.jobs);
-    renderMonitors(s.monitors, s.jobs);
-    syncStatsMonitors(s.monitors);
-  } catch (e) { $("jobs").replaceChildren(el("div", { class: "warn", text: `The app isn't answering: ${e.message}` })); }
+    lastStatus = await api("/api/status");
+    if (statusDown) { statusDown = false; $("jobs-error").textContent = ""; }
+  } catch (e) {
+    statusDown = true;
+    $("jobs-error").textContent = `The app isn't answering: ${e.message}`;
+    return;
+  }
+  renderJobs(lastStatus.jobs);
+  renderMonitors(lastStatus.monitors, lastStatus.jobs);
+  syncStatsMonitors(lastStatus.monitors);
+  // Reload the statistics when what is saved for their monitor changes (data deleted, or a
+  // download from the command line), not only while the app is writing to it.
+  if (!view) return;
+  if (statsSavedKey === null) statsSavedKey = savedKeyFor(view.nmt);  // statistics loaded before the first status
+  else if (savedKeyFor(view.nmt) !== statsSavedKey) loadStats();
+});
+// What was saved for a monitor, as of the latest status, when the statistics were last asked for.
+let statsSavedKey = null;
+function savedKeyFor(nmt) {
+  if (!lastStatus) return null;
+  const m = lastStatus.monitors.find((x) => x.id === nmt);
+  return m ? `${m.chunks}|${m.ranges}|${m.first_utc}|${m.last_utc}` : "none";
 }
 
-async function refreshCoverage() {
-  const day = $("cov-day").value;
+// One bar per monitor of which half-minutes of the chosen day are saved.
+let coverage = null, coverageKey = "";
+const coverageTurn = turns();
+const refreshCoverage = every(10000, async () => {
+  const day = $("cov-day").value, current = coverageTurn();
   if (!day) return;
-  let c;
-  try { c = await api(`/api/coverage?day=${day}`); } catch (e) { return; }
-  const box = $("coverage");
-  box.replaceChildren();
-  const css = getComputedStyle(document.documentElement);
-  for (const [id, bits] of Object.entries(c.monitors)) {
-    const saved = [...bits].filter((b) => b === "1").length;
-    const canvas = el("canvas", { role: "img", "aria-label": `NMT${id}: ${saved} of ${bits.length} half-minute chunks saved on ${day}` });
-    const wrap = el("div", { class: "cov" },
-      el("div", { class: "sub", style: "font-size:12px;margin-bottom:3px", text: `NMT${id} · ${fmt(saved * 30 / 3600)} h of ${fmt(bits.length * 30 / 3600, 0)} h saved` }),
-      canvas, el("div", { class: "axis" }, ...[0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => el("span", { text: String(h).padStart(2, "0") }))));
-    box.append(wrap);
-    requestAnimationFrame(() => {
-      const w = canvas.clientWidth, h = 18, dpr = window.devicePixelRatio || 1;
-      canvas.width = w * dpr; canvas.height = h * dpr;
-      const g = canvas.getContext("2d");
-      g.scale(dpr, dpr);
-      g.fillStyle = css.getPropertyValue("--grid"); g.fillRect(0, 0, w, h);
-      g.fillStyle = css.getPropertyValue("--s1");
-      const n = bits.length;
-      let i = 0;
-      while (i < n) {
-        if (bits[i] !== "1") { i++; continue; }
-        let j = i; while (j < n && bits[j] === "1") j++;
-        g.fillRect(i / n * w, 0, Math.max(1, (j - i) / n * w), h);
-        i = j;
-      }
-    });
+  const c = await api(`/api/coverage?day=${day}`);
+  if (!current()) return;
+  const key = JSON.stringify(c);
+  if (key === coverageKey) return;
+  coverageKey = key; coverage = c;
+  renderCoverage();
+});
+
+function renderCoverage() {
+  const c = coverage, box = $("coverage");
+  if (!c) return;
+  const ids = Object.keys(c.monitors);
+  if (!ids.length) { box.replaceChildren(el("div", { class: "empty", text: "No monitors saved yet." })); return; }
+  // Hour marks placed by the real clock, so the 23 and 25 hour clock-change days come out right.
+  const length = c.end_utc - c.start_utc, marks = [];
+  for (let t = c.start_utc; t <= c.end_utc; t += 3600) {
+    const h = t === c.end_utc ? 24 : Number(parts(t).hour);
+    if (h % 3 === 0 && !marks.some((m) => m.h === h)) marks.push({ h, left: (t - c.start_utc) / length * 100 });
   }
-  if (!Object.keys(c.monitors).length) box.append(el("div", { class: "empty", text: "No monitors saved yet." }));
+  box.replaceChildren(...ids.map((id) => {
+    const bits = c.monitors[id], saved = bits.split("1").length - 1;
+    const canvas = el("canvas", { role: "img", "aria-label": `NMT${id}: ${saved} of ${bits.length} half-minute chunks saved on ${c.day}` });
+    canvas.dataset.bits = bits;
+    return el("div", { class: "cov" },
+      el("div", { class: "sub cov-title", text: `NMT${id} · ${fmt(saved / 120)} h of ${fmt(bits.length / 120, 0)} h saved` }),
+      canvas,
+      el("div", { class: "axis", "aria-hidden": "true" }, ...marks.map((m) => el("span", { style: `left:${m.left}%`, text: String(m.h).padStart(2, "0") }))));
+  }));
+  paintCoverage();
+}
+
+function paintCoverage() {
+  const css = getComputedStyle(document.documentElement), dpr = window.devicePixelRatio || 1;
+  for (const canvas of $("coverage").querySelectorAll("canvas")) {
+    const bits = canvas.dataset.bits, n = bits.length, w = canvas.clientWidth, h = 18;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const g = canvas.getContext("2d");
+    g.scale(dpr, dpr);
+    g.fillStyle = css.getPropertyValue("--grid"); g.fillRect(0, 0, w, h);
+    g.fillStyle = css.getPropertyValue("--s1");
+    for (let i = bits.indexOf("1"); i !== -1;) {
+      let j = bits.indexOf("0", i); if (j === -1) j = n;
+      g.fillRect(i / n * w, 0, Math.max(1, (j - i) / n * w), h);
+      i = bits.indexOf("1", j);
+    }
+  }
 }
 
 // --- statistics ---------------------------------------------------------------------------
+// The period shown is `view`; the From/To boxes are only where a new one is typed. Every change
+// of view (Show, a zoom, a job's Statistics link) is remembered so Back can return to it.
+const MIN_SPAN = 60, MAX_SPAN = 31 * 86400;
+const CHART = { H: 280, m: { l: 40, r: 12, t: 10, b: 26 } };
+const BUCKETS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600];
+const TICKS = [5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
+let view = null, viewHistory = [], shown = null, shownKey = "";
+const chart = { holder: null, s: null, width: 0, dragging: false, refocus: false };
+const sameView = (a, b) => a && b && a.nmt === b.nmt && a.from === b.from && a.to === b.to;
+
 function syncStatsMonitors(list) {
-  const sel = $("s-mon");
-  const ids = list.map((m) => m.id).join(",");
+  const sel = $("s-mon"), ids = list.map((m) => m.id).join(",");
   if (sel.dataset.ids === ids) return;
-  const keep = sel.value;
   sel.replaceChildren(...list.map((m) => el("option", { value: m.id, text: `NMT${m.id} ${m.name}` })));
   sel.dataset.ids = ids;
-  if (keep && ids.split(",").includes(keep)) sel.value = keep;
+  if (view) sel.value = view.nmt;
 }
 
+function showStats(next, remember = true) {
+  if (remember && view && !sameView(view, next)) viewHistory.push(view);
+  view = next;
+  $("s-mon").value = next.nmt; $("s-from").value = next.from; $("s-to").value = next.to;
+  shownKey = "";  // always draw the new view, even if its numbers match the old one
+  loadStats();
+}
+
+function zoomTo(a, b) {
+  a = Math.round(a); b = Math.round(b);
+  const len = Math.min(MAX_SPAN, Math.max(MIN_SPAN, b - a)), mid = (a + b) / 2;
+  a = Math.round(mid - len / 2); b = a + len;
+  if (len >= 3600) { a = Math.floor(a / 60) * 60; b = Math.ceil(b / 60) * 60; }  // whole minutes for long spans
+  showStats({ ...view, from: localInputS(a), to: localInputS(b) });
+}
+
+function goBack() {
+  const prev = viewHistory.pop();
+  if (prev) showStats(prev, false);
+}
+
+// About one chart point every 6 px, so zooming in shows finer detail.
+function bucketFor(seconds) {
+  const width = (chart.holder && chart.holder.isConnected ? chart.holder.clientWidth : $("stats-body").clientWidth - 34)
+    - CHART.m.l - CHART.m.r;
+  return BUCKETS.find((b) => seconds / b <= Math.max(240, width) / 6) || BUCKETS[BUCKETS.length - 1];
+}
+const bucketLabel = (b) => b < 60 ? `${b}-second` : b < 3600 ? `${b / 60}-minute` : `${b / 3600}-hour`;
+
 let statsTimer = null;
+const statsTurn = turns();
 async function loadStats() {
-  const q = { nmt: $("s-mon").value, from: $("s-from").value, to: $("s-to").value };
-  if (!q.nmt || !q.from || !q.to) { $("s-note").textContent = "Choose a monitor and a period."; return; }
-  const body = $("stats-body");
-  body.classList.add("loading");
-  try {
-    const s = await api(`/api/stats?${new URLSearchParams(q)}`);
-    renderStats(s, q);
-    $("s-note").textContent = "";
-  } catch (e) { $("s-note").textContent = e.message; }
-  body.classList.remove("loading");
   clearTimeout(statsTimer);
-  // Keep it current while a download is writing to this monitor.
-  const busy = lastStatus && lastStatus.monitors.some((m) => m.id === q.nmt && m.writing);
-  if (busy) statsTimer = setTimeout(loadStats, 15000);
+  if (!view) return;
+  const current = statsTurn(), q = view, body = $("stats-body");
+  statsSavedKey = savedKeyFor(q.nmt);
+  body.classList.add("loading");
+  const seconds = (new Date(q.to) - new Date(q.from)) / 1000;  // the browser's zone, near enough to pick a bucket
+  try {
+    const s = await api(`/api/stats?${new URLSearchParams({ ...q, bucket: bucketFor(seconds > 0 ? seconds : 3600) })}`);
+    if (!current()) return;
+    $("s-note").textContent = "";
+    history.replaceState(null, "", `?${new URLSearchParams(q)}`);
+    const key = JSON.stringify(s);
+    if (key !== shownKey) { shownKey = key; shown = s; renderStats(s, q); }
+  } catch (e) {
+    if (!current()) return;
+    $("s-note").textContent = e.message;
+  }
+  body.classList.remove("loading");
+  // Keep it current while a download is writing to this monitor (but not under a drag).
+  if (lastStatus && lastStatus.monitors.some((m) => m.id === q.nmt && m.writing)) {
+    statsTimer = setTimeout(function again() {
+      if (chart.dragging) statsTimer = setTimeout(again, 2000); else loadStats();
+    }, 15000);
+  }
 }
 
 function tile(k, v, unit, note) {
@@ -406,23 +599,28 @@ function tile(k, v, unit, note) {
     el("div", { class: "v" }, v, unit ? el("small", { text: unit }) : null), note ? el("div", { class: "n", text: note }) : null);
 }
 
-function table(head, rows, numeric) {
+// columns: [[heading, numeric?], ...]
+function table(columns, rows) {
+  const cls = (i) => columns[i][1] ? "num" : "";
   return el("div", { class: "scroll" }, el("table", {},
-    el("tr", {}, ...head.map((h, i) => el("th", { class: numeric[i] ? "num" : "", text: h }))),
-    ...rows.map((r) => el("tr", {}, ...r.map((v, i) => el("td", { class: numeric[i] ? "num" : "", text: v }))))));
+    el("thead", {}, el("tr", {}, ...columns.map(([h], i) => el("th", { class: cls(i), text: h })))),
+    el("tbody", {}, ...rows.map((r) => el("tr", {}, ...r.map((v, i) => el("td", { class: cls(i), text: v })))))));
 }
 
+const card = (title, ...kids) => el("div", { class: "card" }, title ? el("h2", { text: title }) : null, ...kids);
+
 function renderStats(s, q) {
-  const body = $("stats-body");
-  body.replaceChildren();
-  const cov = s.coverage;
-  const pct = cov.chunks ? Math.round(100 * cov.saved / cov.chunks) : 0;
+  const body = $("stats-body"), cov = s.coverage;
   if (!cov.seconds) {
-    body.append(el("div", { class: "card empty", text: "Nothing saved for this monitor in that period yet." }));
+    body.replaceChildren(el("div", { class: "card empty" }, "Nothing saved for this monitor in that period yet. ",
+      viewHistory.length ? el("button", { class: "link", type: "button", text: "Back", onclick: goBack }) : null));
+    chart.holder = null;
     return;
   }
-  const covNote = `${pct}% of the period saved` + (cov.no_measurement_seconds ? ` · ${cov.no_measurement_seconds} s without a measurement` : "")
-    + (cov.pending_events ? ` · ${cov.pending_events} events waiting for radar` : "");
+  const pct = cov.chunks ? Math.round(100 * cov.saved / cov.chunks) : 0;
+  const covNote = [`${pct}% of the period saved`,
+    cov.no_measurement_seconds ? `${cov.no_measurement_seconds} s without a measurement` : null,
+    cov.pending_events ? `${cov.pending_events} events waiting for radar` : null].filter(Boolean).join(" · ");
   const tiles = el("div", { class: "tiles" },
     tile("LAeq", fmt(s.laeq), "dB", span(s.start, s.end)),
     tile("Background L90", fmt(s.l90), "dB", "exceeded 90% of the time"),
@@ -430,108 +628,118 @@ function renderStats(s, q) {
     tile("L10", fmt(s.l10), "dB", "exceeded 10% of the time"),
     tile("Highest 1 s level", fmt(s.lmax), "dB"),
     tile("Noise events", String(s.events), "", `${s.aircraft_events} aircraft (class 1)`),
-    tile("Aircraft share", s.aircraft_share == null ? "—" : String(s.aircraft_share), s.aircraft_share == null ? "" : "%",
+    tile("Aircraft share", orDash(s.aircraft_share), s.aircraft_share == null ? "" : "%",
       s.laeq_aircraft == null ? "of the sound energy" : `of the sound energy · ${fmt(s.laeq_aircraft)} dB from aircraft alone`),
     tile("LAeq outside events", fmt(s.laeq_outside_events), "dB", "the seconds not in a noise event"));
-  body.append(el("div", { class: "sub", style: "margin:-4px 0 12px", text: covNote }), tiles);
 
-  const chartCard = el("div", { class: "card" }, el("h2", { text: `Sound level, NMT${q.nmt}` }));
-  const legend = el("div", { class: "legend" });
-  const key = (draw, label) => { const k = svg("svg", { width: 22, height: 12 }); draw(k); return el("span", {}, k, label); };
-  legend.append(
-    key((k) => k.append(svg("line", { x1: 1, x2: 21, y1: 6, y2: 6, stroke: "var(--s1)", "stroke-width": 2 })), `${s.bucket_s / 60}-minute LAeq`),
-    key((k) => k.append(svg("circle", { cx: 11, cy: 6, r: 4.5, fill: "var(--s2)" })), "Aircraft event, at its LAmax"),
-    key((k) => k.append(svg("circle", { cx: 11, cy: 6, r: 3.8, fill: "none", stroke: "var(--s3)", "stroke-width": 2 })), "Other noise event"));
+  const len = s.end - s.start;
+  const zoomButton = (text, title, onclick, disabled) => el("button", { type: "button", text, title, onclick, disabled });
+  const zoomBar = el("div", { class: "zoom" },
+    el("span", { class: "muted", text: "Drag across the chart to zoom in" }),
+    zoomButton("Back", "Return to the period shown before", goBack, !viewHistory.length),
+    zoomButton("← Earlier", "Move back by half the period", () => zoomTo(s.start - len / 2, s.end - len / 2)),
+    zoomButton("Zoom out", "Show twice the period, centred on this one", () => zoomTo(s.start - len / 2, s.end + len / 2), len >= MAX_SPAN),
+    zoomButton("Later →", "Move on by half the period", () => zoomTo(s.start + len / 2, s.end + len / 2)));
+  const key = (draw, label) => { const k = svg("svg", { width: 22, height: 12, "aria-hidden": "true" }); k.append(draw); return el("span", {}, k, label); };
+  const legend = el("div", { class: "legend" },
+    key(svg("line", { x1: 1, x2: 21, y1: 6, y2: 6, stroke: "var(--s1)", "stroke-width": 2 }), `${bucketLabel(s.bucket_s)} LAeq`),
+    key(svg("circle", { cx: 11, cy: 6, r: 4.5, fill: "var(--s2)" }), "Aircraft event, at its LAmax"),
+    key(svg("circle", { cx: 11, cy: 6, r: 3.8, fill: "none", stroke: "var(--s3)", "stroke-width": 2 }), "Other noise event"));
   const holder = el("div", { class: "chart" });
-  chartCard.append(legend, holder);
-  body.append(chartCard);
-  drawChart(holder, s);
-  new ResizeObserver(() => drawChart(holder, s)).observe(holder);
 
-  const twoCol = el("div", { class: "grid2" });
-  const qCard = el("div", { class: "card" }, el("h2", { text: "Every 15 minutes" }),
-    table(["Start", "LAeq", "L90", "Max", "Events", "Aircraft"],
-      s.quarters.map((x) => [hm(x.t), fmt(x.laeq), fmt(x.l90), fmt(x.max), String(x.events), String(x.aircraft)]),
-      [false, true, true, true, true, true]));
-  const tCard = el("div", { class: "card" }, el("h2", { text: "Aircraft events by type" }),
-    s.types.length ? table(["Type", "Events", "LAmax median", "SEL median", "Slant median (m)"],
-      s.types.map((x) => [x.type, String(x.count), fmt(x.lmax), fmt(x.sel), x.slant == null ? "—" : String(x.slant)]),
-      [false, true, true, true, true]) : el("div", { class: "empty", text: "No aircraft events in this period." }),
-    el("div", { class: "muted", style: "font-size:12px;margin-top:8px", text: "Slant: straight-line distance from the monitor at the aircraft's closest point." }));
-  twoCol.append(qCard, tCard);
-  body.append(twoCol);
-
-  const evCard = el("div", { class: "card" }, el("h2", { text: `Noise events (${s.event_list.length})` }),
-    table(["LAmax at", "LAmax", "SEL", "Length (s)", "Class", "Aircraft", "Type", "Dir", "Slant (m)", "Height (m)"],
+  const quarters = card("Every 15 minutes",
+    table([["Start"], ["LAeq", 1], ["L90", 1], ["Max", 1], ["Events", 1], ["Aircraft", 1]],
+      s.quarters.map((x) => [hm(x.t), fmt(x.laeq), fmt(x.l90), fmt(x.max), String(x.events), String(x.aircraft)])));
+  const types = card("Aircraft events by type",
+    s.types.length ? table([["Type"], ["Events", 1], ["LAmax median", 1], ["SEL median", 1], ["Slant median (m)", 1]],
+      s.types.map((x) => [x.type, String(x.count), fmt(x.lmax), fmt(x.sel), orDash(x.slant)]))
+      : el("div", { class: "empty", text: "No aircraft events in this period." }),
+    el("div", { class: "note", text: "Slant: straight-line distance from the monitor at the aircraft's closest point." }));
+  const events = card(`Noise events (${s.event_list.length})`,
+    table([["LAmax at"], ["LAmax", 1], ["SEL", 1], ["Length (s)", 1], ["Class"], ["Aircraft"], ["Type"], ["Dir"], ["Slant (m)", 1], ["Height (m)", 1]],
       s.event_list.map((e) => [hms(e.t), fmt(e.lmax), fmt(e.sel), fmt(e.duration, 0), e.event_class,
-        e.track ? (e.callsign || `track ${e.track}`) : "none in range", e.type || "", e.direction || "",
-        e.slant == null ? "—" : String(e.slant), e.height == null ? "—" : String(e.height)]),
-      [false, true, true, true, false, false, false, false, true, true]),
-    el("div", { class: "muted", style: "font-size:12px;margin-top:8px", text: "Class 1 looks like WebTrak's aircraft-correlated events, 5 other noise (an inference). Dir: A arrival, D departure, O other." }));
-  body.append(evCard);
+        e.track ? (e.callsign || `track ${e.track}`) : "none in range", e.type || "", e.direction || "", orDash(e.slant), orDash(e.height)])),
+    el("div", { class: "note", text: "Class 1 looks like WebTrak's aircraft-correlated events, 5 other noise (an inference). Dir: A arrival, D departure, O other." }));
+
+  body.replaceChildren(
+    el("div", { class: "sub cov-note", text: covNote }), tiles,
+    el("div", { class: "card" }, el("div", { class: "chart-head" }, el("h2", { text: `Sound level, NMT${q.nmt}` }), zoomBar), legend, holder),
+    el("div", { class: "grid2" }, quarters, types), events);
+  chart.holder = holder; chart.s = s;
+  chartResize.disconnect(); chartResize.observe(holder);
+  drawChart();
 }
 
-function drawChart(holder, s) {
-  const W = Math.max(320, holder.clientWidth), H = 280, m = { l: 40, r: 12, t: 10, b: 26 };
-  const pts = s.series, evs = s.event_list;
-  const vals = pts.map((p) => p.laeq).concat(evs.map((e) => e.lmax));
+const chartResize = new ResizeObserver(() => { if (chart.holder && chart.holder.clientWidth !== chart.width) drawChart(); });
+
+function tipRow(mark, value, label) {
+  const k = svg("svg", { width: 14, height: 10, "aria-hidden": "true" });
+  k.append(mark);
+  return el("div", { class: "r" }, k, el("b", { text: value }), el("span", { class: "muted", text: label }));
+}
+
+function drawChart() {
+  const { holder, s } = chart, { H, m } = CHART;
+  chart.width = holder.clientWidth;
+  const W = Math.max(320, chart.width), plotW = W - m.l - m.r, len = s.end - s.start;
+  const pts = s.series, evs = s.event_list, mid = (p) => p.t + s.bucket_s / 2;
+  const vals = pts.map((p) => p.laeq).concat(evs.map((e) => e.lmax)).filter((v) => v != null);
+  if (!vals.length) { holder.replaceChildren(el("div", { class: "empty", text: "No measurements in this period." })); return; }
   const lo = Math.max(0, Math.floor((Math.min(...vals) - 3) / 10) * 10), hi = Math.ceil((Math.max(...vals) + 2) / 10) * 10;
-  const x = (t) => m.l + (t - s.start) / (s.end - s.start) * (W - m.l - m.r);
+  const x = (t) => m.l + (t - s.start) / len * plotW;
   const y = (v) => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const text = (attrs, content) => { const t = svg("text", { "font-size": 11, fill: "var(--muted)", ...attrs }); t.textContent = content; return t; };
   const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
     "aria-label": `Sound level from ${span(s.start, s.end)}: LAeq ${fmt(s.laeq)} dB, ${s.events} events. The tables below have the values.` });
+
   for (let v = lo; v <= hi; v += 10) {
-    root.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: v === lo ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }));
-    const t = svg("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }); t.textContent = v; root.append(t);
+    root.append(svg("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: v === lo ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }),
+      text({ x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, v));
   }
-  const hours = (s.end - s.start) / 3600;
-  const step = [60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].find((st) => (s.end - s.start) / st <= Math.max(3, W / 90)) || 86400;
+  const step = TICKS.find((st) => len / st <= Math.max(3, W / (st < 60 ? 110 : 90))) || TICKS[TICKS.length - 1];
+  const tickLabel = (t) => step < 60 ? hms(t) : len > 30 * 3600 && hm(t) === "00:00" ? dayLabel(t) : hm(t);
   for (let t = Math.ceil(s.start / step) * step; t <= s.end; t += step) {
-    const anchor = x(t) < m.l + 20 ? "start" : x(t) > W - m.r - 20 ? "end" : "middle";
-    const lab = svg("text", { x: x(t), y: H - 8, "text-anchor": anchor, "font-size": 11, fill: "var(--muted)" });
-    lab.textContent = hours > 30 && hm(t) === "00:00" ? dayLabel(t) : hm(t);
-    root.append(lab);
+    root.append(text({ x: x(t), y: H - 8, "text-anchor": x(t) < m.l + 20 ? "start" : x(t) > W - m.r - 20 ? "end" : "middle" }, tickLabel(t)));
   }
   // The line, broken where data is missing.
   let d = "", prev = null;
   for (const p of pts) {
     if (p.laeq == null) { prev = null; continue; }
-    d += `${prev == null || p.t - prev > s.bucket_s * 1.5 ? "M" : "L"}${x(p.t + s.bucket_s / 2).toFixed(1)},${y(p.laeq).toFixed(1)}`;
+    d += `${prev == null || p.t - prev > s.bucket_s * 1.5 ? "M" : "L"}${x(mid(p)).toFixed(1)},${y(p.laeq).toFixed(1)}`;
     prev = p.t;
   }
   root.append(svg("path", { d, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }));
   for (const e of evs) {
-    const air = e.event_class === "1";
-    root.append(air ? svg("circle", { cx: x(e.t), cy: y(e.lmax), r: 4.5, fill: "var(--s2)", stroke: "var(--surface)", "stroke-width": 2 })
+    root.append(e.event_class === "1"
+      ? svg("circle", { cx: x(e.t), cy: y(e.lmax), r: 4.5, fill: "var(--s2)", stroke: "var(--surface)", "stroke-width": 2 })
       : svg("circle", { cx: x(e.t), cy: y(e.lmax), r: 3.8, fill: "var(--surface)", stroke: "var(--s3)", "stroke-width": 2 }));
   }
   const cross = svg("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
-  root.append(cross);
-  const hit = svg("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent", tabindex: 0 });
-  root.append(hit);
+  const sel = svg("rect", { y: m.t, height: H - m.t - m.b, fill: "var(--s1)", "fill-opacity": 0.15, stroke: "var(--s1)",
+    "stroke-opacity": 0.5, "stroke-width": 1, visibility: "hidden" });
+  const hit = svg("rect", { class: "hit", x: m.l, y: m.t, width: plotW, height: H - m.t - m.b, fill: "transparent", tabindex: 0,
+    "aria-label": "Sound level chart. Left and right arrows step through it, + zooms in, - zooms out, Backspace goes back." });
+  root.append(cross, sel, hit);
   const tip = el("div", { class: "tip" });
   holder.replaceChildren(root, tip);
+  if (chart.refocus) { chart.refocus = false; hit.focus({ preventScroll: true }); }
 
+  // Tooltip for the point nearest t, and the nearest event within 12 px of it.
+  const clock = s.bucket_s < 60 ? hms : hm, nearPx = 12 * len / plotW;
   const show = (t) => {
-    let best = null;
-    for (const p of pts) if (best == null || Math.abs(p.t + s.bucket_s / 2 - t) < Math.abs(best.t + s.bucket_s / 2 - t)) best = p;
+    const best = pts[nearest(pts, t, mid)];
     if (!best) return;
-    let ev = null;
-    for (const e of evs) if (Math.abs(e.t - t) <= (s.end - s.start) / (W - m.l - m.r) * 12 && (!ev || Math.abs(e.t - t) < Math.abs(ev.t - t))) ev = e;
-    const cx = x(ev ? ev.t : best.t + s.bucket_s / 2);
+    const ei = nearest(evs, t, (e) => e.t), ev = ei >= 0 && Math.abs(evs[ei].t - t) <= nearPx ? evs[ei] : null;
+    const cx = x(ev ? ev.t : mid(best));
     cross.setAttribute("x1", cx); cross.setAttribute("x2", cx); cross.setAttribute("visibility", "visible");
-    const line = (color, value, label, ring) => {
-      const k = svg("svg", { width: 14, height: 10 });
-      k.append(ring ? svg("circle", { cx: 7, cy: 5, r: 3.5, fill: "none", stroke: color, "stroke-width": 2 })
-        : color === "var(--s1)" ? svg("line", { x1: 0, x2: 14, y1: 5, y2: 5, stroke: color, "stroke-width": 2 }) : svg("circle", { cx: 7, cy: 5, r: 4, fill: color }));
-      return el("div", { class: "r" }, k, el("b", { text: value }), el("span", { class: "muted", text: label }));
-    };
-    const kids = [el("div", { class: "t", text: `${hm(best.t)}–${hm(best.t + s.bucket_s)}` }),
-      line("var(--s1)", `${fmt(best.laeq)} dB`, `LAeq · max ${fmt(best.max)}`)];
+    const kids = [el("div", { class: "t", text: `${clock(best.t)}–${clock(best.t + s.bucket_s)}` }),
+      tipRow(svg("line", { x1: 0, x2: 14, y1: 5, y2: 5, stroke: "var(--s1)", "stroke-width": 2 }), `${fmt(best.laeq)} dB`, `LAeq · max ${fmt(best.max)}`)];
     if (ev) {
+      const air = ev.event_class === "1";
       const who = ev.track ? `${ev.callsign || "track " + ev.track} ${ev.type || ""} ${ev.direction || ""}`.trim() : "no aircraft in range";
       kids.push(el("div", { class: "t", style: "margin-top:6px", text: `Event ${hms(ev.t)}` }),
-        line(ev.event_class === "1" ? "var(--s2)" : "var(--s3)", `${fmt(ev.lmax)} dB`, `LAmax · SEL ${fmt(ev.sel)}`, ev.event_class !== "1"),
+        tipRow(air ? svg("circle", { cx: 7, cy: 5, r: 4, fill: "var(--s2)" }) : svg("circle", { cx: 7, cy: 5, r: 3.5, fill: "none", stroke: "var(--s3)", "stroke-width": 2 }),
+          `${fmt(ev.lmax)} dB`, `LAmax · SEL ${fmt(ev.sel)}`),
         el("div", { class: "muted", text: who + (ev.slant != null ? ` · ${ev.slant} m slant` : "") }));
     }
     tip.replaceChildren(...kids);
@@ -541,54 +749,99 @@ function drawChart(holder, s) {
     if (left + tip.offsetWidth > box.width) left = cx * scale - tip.offsetWidth - 14;
     tip.style.left = `${Math.max(0, left)}px`; tip.style.top = `${m.t + 4}px`;
   };
-  hit.addEventListener("pointermove", (ev) => {
-    const r = root.getBoundingClientRect();
-    const px = (ev.clientX - r.left) * W / r.width;
-    show(s.start + (px - m.l) / (W - m.l - m.r) * (s.end - s.start));
+  const hide = () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); };
+  const toPx = (ev) => { const r = root.getBoundingClientRect(); return Math.min(W - m.r, Math.max(m.l, (ev.clientX - r.left) * W / r.width)); };
+  const toT = (px) => s.start + (px - m.l) / plotW * len;
+
+  // Drag to choose a span to zoom into; a plain click or tap just shows the tooltip.
+  let drag = null;
+  hit.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    drag = { x0: toPx(ev), id: ev.pointerId, moved: false };
+    chart.dragging = true;
+    hit.setPointerCapture(ev.pointerId);
   });
-  hit.addEventListener("pointerleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+  hit.addEventListener("pointermove", (ev) => {
+    const px = toPx(ev);
+    if (drag && drag.id === ev.pointerId && (drag.moved || Math.abs(px - drag.x0) > 4)) {
+      drag.moved = true;
+      hide();
+      sel.setAttribute("x", Math.min(px, drag.x0)); sel.setAttribute("width", Math.abs(px - drag.x0));
+      sel.setAttribute("visibility", "visible");
+      return;
+    }
+    show(toT(px));
+  });
+  const endDrag = (ev, cancel) => {
+    if (!drag || drag.id !== ev.pointerId) return;
+    const d = drag;
+    drag = null; chart.dragging = false;
+    sel.setAttribute("visibility", "hidden");
+    if (cancel || !d.moved) return;
+    const px = toPx(ev);
+    hide();
+    zoomTo(toT(Math.min(d.x0, px)), toT(Math.max(d.x0, px)));
+  };
+  hit.addEventListener("pointerup", (ev) => endDrag(ev, false));
+  hit.addEventListener("pointercancel", (ev) => endDrag(ev, true));
+  hit.addEventListener("pointerleave", () => { if (!drag) hide(); });
+  hit.addEventListener("blur", hide);
+
   let kb = null;
   hit.addEventListener("keydown", (ev) => {
+    const c = kb == null ? (s.start + s.end) / 2 : kb;
+    const zoom = { "+": 0.25, "=": 0.25, "-": 1, "_": 1 }[ev.key];
+    if (zoom) { ev.preventDefault(); chart.refocus = true; zoomTo(c - len * zoom, c + len * zoom); return; }
+    if (ev.key === "Backspace" && viewHistory.length) { ev.preventDefault(); chart.refocus = true; goBack(); return; }
     if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
     ev.preventDefault();
-    kb = (kb == null ? s.start : kb) + (ev.key === "ArrowRight" ? 1 : -1) * s.bucket_s;
-    kb = Math.min(s.end, Math.max(s.start, kb)); show(kb);
+    kb = Math.min(s.end, Math.max(s.start, (kb == null ? s.start : kb) + (ev.key === "ArrowRight" ? 1 : -1) * s.bucket_s));
+    show(kb);
   });
-  hit.addEventListener("blur", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
 }
 
 // --- start --------------------------------------------------------------------------------
 async function init() {
-  monitors = await api("/api/monitors");
+  const monitors = await api("/api/monitors");
   $("monitor-checks").replaceChildren(...monitors.map((m) => el("label", {},
-    el("input", { type: "checkbox", value: m.id, ...(m.id === "106" ? { checked: "" } : {}), onchange: planSoon }),
-    `NMT${m.id} ${m.name}`)));
-  $("presets").addEventListener("click", (e) => { if (e.target.dataset.preset) setPreset(e.target.dataset.preset); });
-  for (const id of ["from", "to", "delay"]) $(id).addEventListener("input", planSoon);
+    el("input", { type: "checkbox", value: m.id, checked: m.id === "106", onchange: planSoon }), `NMT${m.id} ${m.name}`)));
+  let periodChosen = false;  // once the person picks a period, the late WebTrak range mustn't replace it
+  $("presets").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-preset]");
+    if (b) { periodChosen = true; setPreset(b.dataset.preset); }
+  });
+  for (const id of ["from", "to", "delay"]) $(id).addEventListener("input", () => { if (id !== "delay") periodChosen = true; planSoon(); });
   $("fetch-btn").addEventListener("click", () => start("fetch"));
   $("follow-btn").addEventListener("click", () => start("follow"));
-  $("s-go").addEventListener("click", loadStats);
-  $("cov-day").addEventListener("change", refreshCoverage);
-  await loadRange();
+  $("s-go").addEventListener("click", () => {
+    const next = { nmt: $("s-mon").value, from: $("s-from").value, to: $("s-to").value };
+    if (!next.nmt || !next.from || !next.to) { $("s-note").textContent = "Choose a monitor and a period."; return; }
+    showStats(next);
+  });
+  $("cov-day").addEventListener("change", () => { coverageKey = ""; refreshCoverage(); });
+  new ResizeObserver(paintCoverage).observe($("coverage"));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintCoverage);
+
+  // WebTrak's range comes over the network and can take seconds: show the local data without
+  // waiting for it, guessing WebTrak's usual delay until it arrives.
   setPreset("last2");
-  $("cov-day").value = localDay(latestUtc || Date.now() / 1000);
+  $("cov-day").value = localDay(Date.now() / 1000 - 30 * 60);
+  loadRange().then(() => { if (!periodChosen) setPreset("last2"); });
   await refreshStatus();
-  // Statistics start on the newest download, or else the latest 2 hours.
-  const lastFetch = lastStatus.jobs.find((j) => j.kind === "fetch");
-  const firstMon = lastStatus.monitors[0];
-  const want = new URLSearchParams(location.search);
-  if (want.get("from") && want.get("to")) {
-    $("s-mon").value = want.get("nmt") || "106"; $("s-from").value = want.get("from"); $("s-to").value = want.get("to");
-  } else if (lastFetch) { $("s-mon").value = lastFetch.nmt[0]; $("s-from").value = lastFetch.from; $("s-to").value = lastFetch.to; }
-  else if (firstMon && firstMon.last_utc) {
-    $("s-mon").value = firstMon.id; $("s-to").value = localInput(firstMon.last_utc); $("s-from").value = localInput(firstMon.last_utc - 7200);
-  }
   refreshCoverage();
-  if ($("s-from").value) loadStats();
-  setInterval(refreshStatus, 2000);
-  setInterval(refreshCoverage, 10000);
   setInterval(loadRange, 300000);
+
+  // Statistics start on the period in the address, else the newest download, else the latest 2 hours saved.
+  const want = new URLSearchParams(location.search);
+  const lastFetch = lastStatus && lastStatus.jobs.find((j) => j.kind === "fetch");
+  const firstMon = lastStatus && lastStatus.monitors[0];
+  let first = null;
+  if (want.get("from") && want.get("to")) first = { nmt: want.get("nmt") || "106", from: want.get("from"), to: want.get("to") };
+  else if (lastFetch) first = { nmt: lastFetch.nmt[0], from: lastFetch.from, to: lastFetch.to };
+  else if (firstMon && firstMon.last_utc) first = { nmt: firstMon.id, from: localInput(firstMon.last_utc - 7200), to: localInput(firstMon.last_utc) };
+  if (first) showStats(first, false);
 }
+
 init().catch((e) => {
   // Opened as a plain file, or from a server that isn't the app's: there is no /api to talk to.
   const hint = location.protocol === "file:" || /HTTP 404|Failed to fetch|NetworkError/.test(e.message)

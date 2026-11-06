@@ -589,6 +589,39 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(server.BadRequest):
             self.app.start_job({"kind": "rm", "nmt": "106"})
 
+    def test_statistics_bucket_follows_the_zoom(self):
+        zoomed = self.app.statistics({"nmt": "106", "from": "2026-11-05 08:00:00", "to": "2026-11-05 08:02:30", "bucket": "5"})
+        self.assertEqual(zoomed["bucket_s"], 5)
+        self.assertEqual(zoomed["end"] - zoomed["start"], 150)
+        self.assertEqual(self.app.statistics({"nmt": "106", "from": "2026-11-05 08:00", "to": "2026-11-05 09:00"})["bucket_s"], 60)
+        # Too fine for a long period: made coarser to keep the reply small.
+        self.assertEqual(server._bucket("1", 31 * 86400), 600)
+        with self.assertRaises(server.BadRequest):
+            self.app.statistics({"nmt": "106", "from": "2026-11-05 08:00", "to": "2026-11-05 09:00", "bucket": "7"})
+
+    def test_data_deleted_by_hand_is_no_longer_saved(self):
+        mdir = os.path.join(self.root, "lcy", "nmt106")
+        for name in os.listdir(os.path.join(mdir, "levels")):
+            os.remove(os.path.join(mdir, "levels", name))
+        self.assertEqual(self.app.status()["monitors"], [])
+        self.assertEqual(self.app.coverage({"day": "2026-11-05"})["monitors"], {})
+        plan = self.app.plan({"nmt": "106", "from": "2026-11-05 08:01", "to": "2026-11-05 08:05", "delay": "2"})
+        self.assertEqual(plan["to_save"], plan["chunks"])
+        # A download starting again sees the gap too, so it fetches the day again.
+        self.assertEqual(store.MonitorStore(os.path.join(self.root, "lcy"), MONITOR).state["saved"], [])
+
+    def test_on_disk_keeps_the_days_still_there(self):
+        mdir = os.path.join(self.root, "lcy", "nmt106")
+        os.makedirs(os.path.join(mdir, "levels"), exist_ok=True)
+        day = lambda text: parse.handle_for_utc(parse.local_to_utc(text))
+        ranges = [[day("2026-11-04 23:00"), day("2026-11-06 01:00")]]
+        for name in os.listdir(os.path.join(mdir, "levels")):
+            os.remove(os.path.join(mdir, "levels", name))
+        open(os.path.join(mdir, "levels", "2026-11-04.csv"), "w").close()
+        open(os.path.join(mdir, "levels", "2026-11-06.csv"), "w").close()
+        self.assertEqual(store.on_disk(mdir, ranges),
+                         [[ranges[0][0], day("2026-11-05 00:00") - 1], [day("2026-11-06 00:00"), ranges[0][1]]])
+
     def test_a_busy_monitor_cant_get_a_second_download(self):
         if store.fcntl is None:
             self.skipTest("no fcntl")

@@ -29,8 +29,27 @@ TOOL_DIR = os.path.dirname(PACKAGE_DIR)
 MAX_STATS_DAYS = 31
 
 
+MAX_SERIES_POINTS = 5000
+BUCKETS = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600)
+
+
 class BadRequest(Exception):
     pass
+
+
+def _bucket(asked, seconds):
+    """The chart's bucket length: the one asked for (60 s if none), made coarser if the period
+    would otherwise give more than MAX_SERIES_POINTS points."""
+    try:
+        want = int(asked) if asked not in (None, "") else 60
+    except ValueError:
+        raise BadRequest(f"bad bucket {asked!r}")
+    if want not in BUCKETS:
+        raise BadRequest(f"bucket must be one of {', '.join(map(str, BUCKETS))} seconds")
+    for b in BUCKETS:
+        if b >= want and seconds / b <= MAX_SERIES_POINTS:
+            return b
+    return BUCKETS[-1]
 
 
 def _alive(pid):
@@ -125,8 +144,11 @@ class App:
             path = os.path.join(self.site_dir, folder)
             state = store.read_state(path)
             saved = state.get("saved", [])
+            writing = store.is_locked(path)
+            if not saved and not writing:
+                continue  # nothing on disk any more (deleted by hand), and nothing on its way
             monitors.append({
-                "id": mid, "name": names.get(mid, ""), "writing": store.is_locked(path),
+                "id": mid, "name": names.get(mid, ""), "writing": writing,
                 "chunks": sum(b - a + 1 for a, b in saved), "ranges": len(saved),
                 "first_utc": parse.utc_for_handle(saved[0][0]) if saved else None,
                 "last_utc": parse.utc_for_handle(saved[-1][1] + 1) if saved else None,
@@ -158,7 +180,7 @@ class App:
         start, end, ids = self._period(query, max_days=MAX_STATS_DAYS)
         if len(ids) != 1:
             raise BadRequest("statistics are for one monitor at a time")
-        return stats.summary(self.monitor_dir(ids[0]), start, end)
+        return stats.summary(self.monitor_dir(ids[0]), start, end, bucket_s=_bucket(query.get("bucket"), end - start))
 
     def _period(self, query, max_days=None):
         try:

@@ -49,7 +49,7 @@ python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00" --nmt
 
 ### The web app
 
-`serve` runs a small web app on this computer only (standard library, no installs). From it you can start a `fetch` for a period or `follow` live, for one or several monitors, with an estimate of how many chunks need downloading and how long it will take. You can then watch each download's progress, rate and time left, see which half-minutes of a day each monitor has saved, and look at statistics for any saved period: LAeq, L10/L50/L90, the aircraft share of the sound energy, a chart of 1-minute LAeq with every event's LAmax, 15-minute figures, results by aircraft type, and the list of events.
+`serve` runs a small web app on this computer only (standard library, no installs). From it you can start a `fetch` for a period or `follow` live, for one or several monitors, with an estimate of how many chunks need downloading and how long it will take. You can then watch each download's progress, rate and time left, see which half-minutes of a day each monitor has saved, and look at statistics for any saved period: LAeq, L10/L50/L90, the aircraft share of the sound energy, a chart of LAeq with every event's LAmax (drag across it to zoom in, down to a minute; its LAeq buckets get finer as you zoom, down to 1 s, and Back, Zoom out, Earlier and Later move around), 15-minute figures, results by aircraft type, and the list of events.
 
 Downloads run as ordinary `fetch`/`follow` processes, so closing the app doesn't stop them; Stop finishes the current chunk and exits cleanly (as Ctrl-C now does on the command line). A download started from the command line shows as "being written" on its monitor, and the app won't start a second one there.
 
