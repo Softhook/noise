@@ -12,3 +12,4 @@ tools/adsb/data/
 
 # WebTrak scraper: scraped monitor data stays local
 tools/webtrak/data/
+tools/opensky/data/

@@ -184,6 +184,15 @@ The options for obtaining NMT6 data, in order of preference:
 
 Our own ADS-B log would make matching their events to flights straightforward.
 
+## Other ADS-B sources: OpenSky and a home receiver
+
+On 6 November 2026 we compared the [OpenSky Network](../../opensky/README.md) with WebTrak near NMT6 for 08:01–11:01 UTC on 5 November. All 19 London City flights within 3 km were in both. Their times of closest approach agree to within about 2 s, and their distances usually agree to within about 100 m. But OpenSky's free API gives simplified tracks, with points up to 112 s apart and heights rounded to 1000 ft, so it can identify flights but can't give their heights.
+
+- **OpenSky's research database** (access applied for) has positions about once a second and full-resolution heights. It is likely to be close to our own receiver for most flights. But its coverage is only what its volunteers heard, so a missed pass can't be detected, and its clock and publication terms aren't ours. It's a cross-check and gap-filler, not a replacement for the garden Pi.
+- **A home receiver about 15 km away** gets the same messages, at the same accuracy. But it sees aircraft over Thamesmead only 1–3° above its horizon, so buildings may block the lowest arrivals. Its coverage can be measured against WebTrak before relying on it.
+
+The garden Pi stays the main source. See [`tools/opensky`](../../opensky/README.md) for the details and next steps.
+
 ## Risks
 
 | Risk | Effect | How we reduce it |
@@ -214,3 +223,5 @@ Our own ADS-B log would make matching their events to flights straightforward.
 - [ ] Can the airport supply flight records for checking types and capture?
 - [ ] Which geoid model should we use, and what is the geoid height at the garden? The [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/request/download.phtml) archive works for EGLC METARs, with QNH and temperature.
 - [ ] Do these targets suit the analysis? Review them after the trial.
+- [ ] Once OpenSky research access is approved, do its heights near NMT6 agree with WebTrak's radar?
+- [ ] What share of NMT6 passes does a home receiver about 15 km away catch, and at what heights does it start missing them?
