@@ -62,8 +62,9 @@ Go-arounds and missed approaches are labelled `other` without a specific flag. L
 
 `viewer.html` opens in any browser, works offline and loads nothing from the internet. Hover over anything for details, and click to select a flight.
 
-- **Tracks around the site:** a plan view in kilometres from the site, with rings at 1, 2 and 5 km. The site is marked with its `label`.
+- **Tracks around the site:** a plan view in kilometres from the site, with distance rings (1, 2 and 5 km at the default radius). The site is marked with its `label`.
 - **Height profile:** height above the microphone against distance east of the site.
+- **Zoom and pan:** in both of these, scroll to zoom in or out around the pointer, and drag to pan. Double-click or **Reset zoom** goes back to the whole radius. The plan view's rings get finer as you zoom in, down to 50 m, and its note gives the width of the view. The profile zooms both axes together. Changing the radius resets both views; the other filters and selecting a flight keep them.
 - **By aircraft type:** one dot per flight for a chosen measure, such as path angle (with 4.49° and 5.5° marked), offset, height, distance or sound delay.
 - **Flights table:** sortable, with a panel showing every value for the selected flight.
 - **Warnings and summary:** from `summary.txt`.
