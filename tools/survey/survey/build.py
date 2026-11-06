@@ -16,13 +16,44 @@ A step still to be built (match, resolve, checks) goes in build() between these.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import fcntl
+import glob
 import os
+import shutil
 import sys
 
 from . import adapters, explain, link, manifest, schema
 from .common import iso, rounded
 from .geometry import Frame, closest_approach
+
+
+class Busy(Exception):
+    """Another build of the same deployment is running."""
+
+
+@contextlib.contextmanager
+def build_lock(m, wait=True):
+    """Held for the whole of a build, so two builds of one deployment never swap tables at once,
+    whether they're started by `make build` or the app's Rebuild. A lock file beside the
+    deployment's folder, not in it, so the folder holds only what the build writes. The lock goes
+    when the process does, so a build that crashes never leaves it held. wait=False: raise Busy
+    instead of waiting for the other build."""
+    parent = os.path.dirname(m["out_dir"])
+    os.makedirs(parent, exist_ok=True)
+    with open(os.path.join(parent, f".{m['deployment']}.build.lock"), "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            raise Busy(f"{m['deployment']} is being built by another process; try again when it's done") from None
+        yield
+
+
+def clear_leftovers(m):
+    """Remove the staging and old tables folders a build that was killed part-way left behind."""
+    for path in glob.glob(os.path.join(m["out_dir"], ".common.*")):
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def read_sources(m, warnings, log):
@@ -103,9 +134,15 @@ def summarise(m, tables, warnings):
     }
 
 
-def build(m, log=None):
-    """Build manifest m (from manifest.load). Returns the build summary."""
-    log = log or sys.stderr
+def build(m, log=None, wait=True):
+    """Build manifest m (from manifest.load). Returns the build summary. If another build of it is
+    running, waits for it to finish, or with wait=False raises Busy."""
+    with build_lock(m, wait):
+        clear_leftovers(m)
+        return _build(m, log or sys.stderr)
+
+
+def _build(m, log):
     warnings = list(m["warnings"])
     tables, limits = read_sources(m, warnings, log)
 

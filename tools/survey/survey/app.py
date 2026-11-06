@@ -31,15 +31,17 @@ class BadRequest(Exception):
 class Deployment:
     """One deployment: its manifest, and its built tables, kept until a build changes them."""
 
-    def __init__(self, path, lock=None):
+    def __init__(self, path, locks=None):
         self.manifest_path = path
         self.m = manifest.load(path)
         self.stamp = None
         self.tables = None
-        # Held while this deployment is rebuilt, and while its tables are read, so a request never
-        # sees half-written tables. Other deployments, and the list of them, don't wait for it.
-        # The App keeps one per deployment name, so it outlives a re-read of the manifest.
-        self.lock = lock or threading.Lock()
+        # lock: held while the tables are read and indexed, so two requests don't both read them.
+        # building: held while the page's Rebuild runs, so a second press is refused. The two are
+        # separate, so a day being read never makes a Rebuild look like it's already running, and
+        # a request during a rebuild gets the old tables (a build swaps the new ones in whole).
+        # The App keeps one pair per deployment name, so they outlive a re-read of the manifest.
+        self.lock, self.building = locks or (threading.Lock(), threading.Lock())
 
     @property
     def folder(self):
@@ -125,13 +127,24 @@ def day_bounds(day):
 
 
 def minutes_covered(coverage, lo, hi):
-    """{source: minutes of data between lo and hi}, from coverage rows."""
-    minutes = {}
+    """{source: minutes of data between lo and hi}, from coverage rows. A source's rows may overlap
+    (two periods in SOURCE.txt, say), so they're merged first and no minute counts twice."""
+    spans = {}
     for c in coverage:
         a, b = max(lo, parse_time(c["start_utc"])), min(hi, parse_time(c["end_utc"]))
         if a < b:
-            minutes[c["source"]] = minutes.get(c["source"], 0) + (b - a) / 60
-    return {k: round(v) for k, v in minutes.items()}
+            spans.setdefault(c["source"], []).append((a, b))
+    minutes = {}
+    for source, runs in spans.items():
+        total, end = 0.0, None
+        for a, b in sorted(runs):
+            if end is not None and a < end:
+                a = end
+            if a < b:
+                total += b - a
+            end = b if end is None else max(end, b)
+        minutes[source] = round(total / 60)
+    return minutes
 
 
 def thinned(points):
@@ -148,8 +161,7 @@ def thinned(points):
 def receptor_view(r):
     """A receptors table row, as the page uses it."""
     return {"id": r["id"], "name": r["name"], "label": r["label"], "lat": float(r["lat"]),
-            "lon": float(r["lon"]), "public": r["public"] == "True",
-            "mic_amsl_m": (number(r["ground_elevation_m"]) or 0) + (number(r["mic_height_m"]) or 0)}
+            "lon": float(r["lon"]), "public": r["public"] == "True"}
 
 
 class App:
@@ -167,8 +179,8 @@ class App:
                 with self.lock:
                     cached = self.cache.get(name)
                     if not cached or cached[0] != (path, stamp):
-                        lock = self.locks.setdefault(name, threading.Lock())
-                        self.cache[name] = ((path, stamp), Deployment(path, lock))
+                        locks = self.locks.setdefault(name, (threading.Lock(), threading.Lock()))
+                        self.cache[name] = ((path, stamp), Deployment(path, locks))
                     return self.cache[name][1]
         raise BadRequest(f"no deployment {name!r}")
 
@@ -201,21 +213,25 @@ class App:
         return found
 
     def rebuild(self, body):
-        """Build a deployment again, unless it's being built already."""
+        """Build a deployment again, unless it's being built already, here or by `make build`."""
         d = self.deployment(str(body.get("deployment", "")))
-        if not d.lock.acquire(blocking=False):
+        if not d.building.acquire(blocking=False):
             raise BadRequest(f"{d.m['deployment']} is already being rebuilt")
         try:
             d.m = manifest.load(d.manifest_path)
-            return build.build(d.m, log=io.StringIO())
+            return build.build(d.m, log=io.StringIO(), wait=False)
+        except build.Busy as error:
+            raise BadRequest(str(error)) from None
         finally:
-            d.lock.release()
+            d.building.release()
 
     def day(self, query):
         """Everything the page draws for one day of a deployment."""
         d = self.deployment(query.get("deployment", ""))
         day = query.get("day", "")
         lo, hi = day_bounds(day)
+        if day not in days(d.m["start"], d.m["end"]):
+            raise BadRequest(f"{day} isn't in {d.m['deployment']}'s window")
         t = d.load()
 
         flights = []

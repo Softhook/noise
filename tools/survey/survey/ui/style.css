@@ -73,7 +73,8 @@ button:disabled { opacity: 0.5; cursor: default; }
   border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
 .filters label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
 select, input[type=search] { font: inherit; font-size: 13px; color: var(--text); background: var(--page);
-  border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; max-width: 100%; min-width: 0; }
+.filters label { max-width: 100%; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px;
   padding: 2px 10px 2px 8px; cursor: pointer; user-select: none; color: var(--text); font-size: 13px; }
 .chip input { margin: 0; }

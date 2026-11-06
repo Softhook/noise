@@ -163,6 +163,12 @@ function scrollableTable() {
 function select(id, from) {
   state.selected = state.selected === id ? null : id;
   render();
+  // render() replaces the table's rows, so give focus back to the row chosen from the table, and
+  // the arrow keys carry on from it
+  if (from === "table") {
+    const again = $("table").querySelector(`tr[data-pass="${CSS.escape(id)}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
   if (!state.selected) return;
   if (from !== "map") revealOnPlan();
   if (from !== "table") {

@@ -4,13 +4,16 @@ Evidence, strongest first (ARCHITECTURE.md, Link):
 1. `registration`: the same registration, with overlapping times, and tracks that agree: where
    both have positions at the same time, their median separation is under REGISTRATION_TRACK_M,
    so a registration sent by mistake doesn't join two different aircraft;
+   `registration, tracks not compared` (UNCHECKED): the same registration, with overlapping
+   times, but no times at which both have positions, so the tracks couldn't be compared;
 2. `track`: no registration to compare, but the closest approaches to the pass receptor came
    within TRACK_TIME_S of each other, and the aircraft were within TRACK_DISTANCE_M of each other
    then, and within TRACK_HEIGHT_M in height when both have one.
 
 Every candidate pair is found first, and then joined best first: registration links before track
 links, and closer tracks before further ones. So a flight joins the best match on offer, not the
-first one found. Flights whose registrations differ are never linked, and two flights from the
+first one found. A registration link whose tracks couldn't be compared ranks between the two.
+Flights whose registrations differ are never linked, and two flights from the
 same source are never in one pass.
 
 A pass id is stable across rebuilds: the time of its closest approach to the pass receptor, to the
@@ -37,6 +40,9 @@ TRACK_HEIGHT_M = 200
 # Generous, as clocks may differ by a few seconds and radar positions are coarse.
 REGISTRATION_TRACK_M = 2000
 MAX_INTERPOLATE_S = 30  # A track is only interpolated between positions this close in time
+# The evidence for a registration link whose tracks couldn't be compared: they overlap in time
+# only within OVERLAP_SLACK_S, or have no positions at the same times
+UNCHECKED = "registration, tracks not compared"
 
 # Which source's flight dates and names a pass. Sources not listed rank between these and WebTrak.
 SOURCE_RANK = ("adsb", "adsblol", "opensky")
@@ -87,9 +93,13 @@ def _evidence(a, b, tracks, approaches, receptor):
     ka, kb = (a["source"], a["source_id"]), (b["source"], b["source_id"])
     if a["registration"] and a["registration"] == b["registration"]:
         apart = separation_m(tracks[ka], tracks[kb]) if ka in tracks and kb in tracks else None
-        if apart is not None and apart > REGISTRATION_TRACK_M:
+        if apart is None:
+            # No times at which both have positions, so the tracks couldn't be checked: weaker
+            # than a registration whose tracks agree, though still stronger than tracks alone
+            return 1, 0.0, UNCHECKED
+        if apart > REGISTRATION_TRACK_M:
             return None  # The same registration on two different aircraft
-        return 0, apart or 0.0, "registration"
+        return 0, apart, "registration"
     if a["registration"] and b["registration"]:
         return None  # Different registrations: never the same aircraft
     ca, cb = approaches.get((*ka, receptor)), approaches.get((*kb, receptor))
@@ -102,7 +112,7 @@ def _evidence(a, b, tracks, approaches, receptor):
         return None
     if pa[2] is not None and pb[2] is not None and abs(pa[2] - pb[2]) > TRACK_HEIGHT_M:
         return None
-    return 1, apart, "track"
+    return 2, apart, "track"
 
 
 def candidates(flights, tracks, approaches, receptor):

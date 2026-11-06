@@ -53,7 +53,7 @@ So the design has one rule: **each source plugs in through an adapter, and the c
 
 ## Common tables
 
-CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`). An adapter that can't establish a file's time zone stops, as the measurement plan requires. Every row carries `source` and the source's own id, so any result can be traced back to its source.
+CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`), except the `t` column of `positions` and `levels`, which is Unix seconds (`1793866351.25`): those tables have a row for every second or so, and are read and compared as numbers. An adapter that can't establish a file's time zone stops, as the measurement plan requires. Every row carries `source` and the source's own id, so any result can be traced back to its source.
 
 | Table | Key columns | Filled by |
 |---|---|---|
@@ -83,7 +83,7 @@ The core computes **closest approach to every receptor** from `positions`, so NM
 1. the same registration, with overlapping times, and tracks that agree: where both sources have positions at the same time, their median separation is under 2 km;
 2. tracks that come close in space and time: closest approaches to the pass receptor within 30 s, and the aircraft within 500 m and 200 m in height then.
 
-The first check means a registration sent by mistake doesn't join two different aircraft. Tracks are only compared where both have positions, never across a hole in one of them, such as where an aircraft left OpenSky's box and came back. Every possible link is found first, then they're made best first: registration links before track links, closer tracks before further ones. So a flight joins its best match, not the first one found. Each link records its evidence. Squawks aren't used: the ADS-B sources don't carry them here.
+The first check means a registration sent by mistake doesn't join two different aircraft. Tracks are only compared where both have positions, never across a hole in one of them, such as where an aircraft left OpenSky's box and came back. Every possible link is found first, then they're made best first: registration links before track links, closer tracks before further ones. A registration link whose tracks couldn't be compared, because the two have no positions at the same times, ranks between them, with the evidence `registration, tracks not compared`. So a flight joins its best match, not the first one found. Each link records its evidence. Squawks aren't used: the ADS-B sources don't carry them here.
 
 A pass id is stable across reruns, so notes and overrides keep pointing at the same pass: the UTC time of the closest approach to the pass receptor, to the minute, and the registration, or a source id if there's no registration (e.g. `20261105T0812-GLCYN`). The pass receptor is the manifest's `pass_receptor`, or else its first public receptor. A private one like the garden may be missing on another computer, and the ids must come out the same wherever the build runs. The time and the source id come from the pass's flight in the highest-ranked source: the garden's ADS-B, then adsb.lol, OpenSky, any others, and WebTrak last. So adding or removing WebTrak never changes an id. Adding a higher-ranked source can, so build with every ADS-B source a deployment will have before writing overrides against its passes.
 

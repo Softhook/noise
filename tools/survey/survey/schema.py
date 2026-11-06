@@ -1,7 +1,9 @@
 """The common tables: their columns, and reading and writing them as CSV, safely for a reader.
 
 Every row carries `source` and the source's own id (`source_id`), so any result can be traced
-back. Times are UTC ISO strings; heights are metres above mean sea level with their kind.
+back. Times are UTC ISO strings, except `t` in positions and levels, which is Unix seconds: those
+tables have a row for every second or so, and are read as numbers. Heights are metres above mean
+sea level, with their kind.
 """
 
 from __future__ import annotations
@@ -18,12 +20,12 @@ TABLES = {
     # One row per flight per source
     "flights": ["source", "source_id", "first_utc", "last_utc", "registration", "callsign", "callsign_kind",
                 "type", "squawk", "direction", "origin", "destination", "hex"],
-    # Every position. height_kind: geometric, qnh or radar
+    # Every position, t in Unix seconds. height_kind: geometric, qnh or radar
     "positions": ["source", "source_id", "t", "lat", "lon", "height_m", "height_kind", "speed_ms"],
     # Noise events at a receptor. event_class: "aircraft", "other" or "unknown", as the source classed it
     "noise_events": ["source", "receptor", "start_utc", "lmax_utc", "end_utc", "lmax_db", "sel_db", "leq_db",
                      "event_class"],
-    # Sound levels, one per second where the source has them
+    # Sound levels, one per second where the source has them, t in Unix seconds
     "levels": ["source", "receptor", "t", "level_db", "flag"],
     # When each source has data
     "coverage": ["source", "start_utc", "end_utc", "note"],

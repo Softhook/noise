@@ -19,7 +19,7 @@ import unittest
 from unittest import mock
 
 from survey import adapters, build, explain, link, manifest, schema, server
-from survey.app import TRACK_SPACING_S, App, BadRequest
+from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, registration
 from survey.geometry import Frame, closest_approach
@@ -330,7 +330,22 @@ class Linking(unittest.TestCase):
         # WebTrak's saved data starts just after OpenSky's track ends: nothing to compare, so the registration decides
         before, after = [p for p in westbound(T0) if p[0] <= T0], [p for p in westbound(T0) if p[0] >= T0 + 30]
         fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0), flight("webtrak", "b", "GLCYN", T0 + 30, T0 + 60)]
-        self.assertEqual(len(self.passes(fs, [before, after])), 1)
+        groups = self.passes(fs, [before, after])
+        self.assertEqual(list(groups.values()), [[("opensky", link.UNCHECKED), ("webtrak", link.UNCHECKED)]])
+
+    def test_a_registration_whose_tracks_agree_beats_one_never_compared(self):
+        # OpenSky has two flights with WebTrak's registration: one ends before WebTrak's starts, so
+        # it can't be compared, and one whose track agrees with WebTrak's. WebTrak joins the second.
+        track = westbound(T0, span_s=120)
+        early = [p for p in track if p[0] <= T0 - 30]
+        late = [p for p in track if p[0] >= T0]
+        radar = [p for p in track if p[0] >= T0 - 10]
+        fs = [flight("opensky", "early", "GLCYN", T0 - 120, T0 - 30), flight("opensky", "late", "GLCYN", T0, T0 + 120),
+              flight("webtrak", "w", "GLCYN", T0 - 10, T0 + 120)]
+        rows = link.link(fs, *self.tracks_and_approaches(fs, [early, late, radar]), "nmt6")
+        pass_of = {r["source_id"]: r["pass_id"] for r in rows}
+        self.assertEqual(pass_of["w"], pass_of["late"])
+        self.assertNotEqual(pass_of["w"], pass_of["early"])
 
     def test_a_hole_in_one_track_isnt_compared_as_a_straight_line(self):
         # OpenSky loses the aircraft while it's out of its box, 9 km north, and finds it again;
@@ -490,7 +505,7 @@ class BuildAndServe(unittest.TestCase):
         app = App(self.deployments)
         d = app.deployment("2026-11-05")
         path = os.path.join(self.deployments, "2026-11-05.json")
-        with d.lock:  # As if a rebuild were running
+        with d.building:  # As if a rebuild were running
             os.utime(path, (os.path.getmtime(path) + 5,) * 2)
             self.assertIsNot(app.deployment("2026-11-05"), d)
             with self.assertRaises(BadRequest):
@@ -533,6 +548,7 @@ class BuildAndServe(unittest.TestCase):
         body = json.dumps({"deployment": "2026-11-05"})
         self.assertEqual(ask("POST", "/api/build", body=body, kind="text/plain"), 403)  # A form another site could send
         self.assertEqual(ask("POST", "/api/build", body="{", kind="application/json"), 400)
+        self.assertEqual(ask("POST", "/api/build", body="[1]", kind="application/json"), 400)
         self.assertEqual(ask("POST", "/api/build", body=body, kind="application/json"), 200)
         self.assertEqual(ask("GET", "/api/day?deployment=2026-11-05&day=nope"), 400)
 
@@ -569,7 +585,8 @@ class BuildAndServe(unittest.TestCase):
         self.assertTrue(all(len(p) == 4 for pts in day["tracks"].values() for p in pts))
         self.assertTrue(all(b[0] - a[0] >= TRACK_SPACING_S for pts in day["tracks"].values() for a, b in zip(pts, pts[1:])))
         self.assertEqual(day["levels"][0][:2], [T0 - day["start"], "nmt6"])
-        self.assertEqual(app.day({"deployment": "2026-11-05", "day": "2026-11-06"})["flights"], [])
+        with self.assertRaises(BadRequest):
+            app.day({"deployment": "2026-11-05", "day": "2026-11-06"})  # Outside its window
         with self.assertRaises(BadRequest):
             app.day({"deployment": "2026-11-05", "day": "yesterday"})
         with self.assertRaises(BadRequest):
@@ -600,10 +617,41 @@ class BuildAndServe(unittest.TestCase):
         app = App(self.deployments)
         app.rebuild({"deployment": "2026-11-05"})
         d = app.deployment("2026-11-05")
-        with d.lock:  # As if a rebuild were running
+        with d.building:  # As if a rebuild were running
             self.assertTrue(app.deployments()[0]["built"])  # The list doesn't wait for it
             with self.assertRaises(BadRequest):
                 app.rebuild({"deployment": "2026-11-05"})  # A second rebuild is refused
+
+    def test_a_day_being_read_doesnt_refuse_a_rebuild(self):
+        app = App(self.deployments)
+        d = app.deployment("2026-11-05")
+        with d.lock:  # As if a day's tables were being read
+            app.rebuild({"deployment": "2026-11-05"})
+        self.assertEqual(len(d.load()["flights"]), 3)
+
+    def test_a_build_outside_the_app_refuses_a_rebuild_from_it(self):
+        app = App(self.deployments)
+        d = app.deployment("2026-11-05")
+        with build.build_lock(d.m):  # As if make build were running
+            with self.assertRaises(build.Busy):
+                build.build(d.m, log=io.StringIO(), wait=False)
+            with self.assertRaises(BadRequest):
+                app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"})  # And once it's done, a rebuild goes ahead
+
+    def test_a_build_clears_what_a_killed_build_left_behind(self):
+        m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
+        build.build(m, log=io.StringIO())
+        out = os.path.join(self.dir, "out", "2026-11-05")
+        os.makedirs(os.path.join(out, ".common.new.abc123"))
+        build.build(m, log=io.StringIO())
+        self.assertEqual(sorted(os.listdir(out)), ["build.json", "common"])
+
+    def test_overlapping_coverage_counts_each_minute_once(self):
+        rows = [{"source": "opensky", "start_utc": iso(T0), "end_utc": iso(T0 + 3600)},
+                {"source": "opensky", "start_utc": iso(T0 + 1800), "end_utc": iso(T0 + 5400)},
+                {"source": "opensky", "start_utc": iso(T0 + 600), "end_utc": iso(T0 + 1200)}]
+        self.assertEqual(minutes_covered(rows, T0 - 3600, T0 + 86400), {"opensky": 90})
 
 
 @unittest.skipUnless(shutil.which("node"), "needs node to run the page's script")

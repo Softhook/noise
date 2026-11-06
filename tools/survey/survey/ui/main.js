@@ -5,8 +5,12 @@ function tiles(flights, passes) {
   const d = state.data, r = $("f-receptor").value;
   const several = passes.filter((p) => new Set(p.flights.map((f) => f.source)).size > 1).length;
   const missed = passes.filter((p) => unexplained(p.id)).length;
+  // Events follow the receptor, the time window and the source switches. Not the search or the
+  // pass filters: an event isn't tied to an aircraft until `match` is built.
+  const events = d.events.filter((e) => e.receptor === r && state.sources.has(e.source) &&
+    (!state.window || (toT(e.lmax_utc) >= state.window[0] && toT(e.lmax_utc) <= state.window[1])));
   const items = [["Passes", passes.length], ["In several sources", several], ["Missed, unexplained", missed],
-    ["Noise events", d.events.filter((e) => e.receptor === r && (!state.window || (toT(e.lmax_utc) >= state.window[0] && toT(e.lmax_utc) <= state.window[1]))).length]];
+    ["Noise events", events.length]];
   $("tiles").replaceChildren(...items.map(([l, v]) => h("div", { class: "tile" }, h("div", { class: "label", text: l }), h("div", { class: "value", text: v.toLocaleString("en-GB") }))));
 }
 function render() {

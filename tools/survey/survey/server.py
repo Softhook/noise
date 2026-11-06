@@ -86,6 +86,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         except ValueError:
             return self._send(400, {"error": "bad JSON"})
+        if not isinstance(body, dict):
+            return self._send(400, {"error": "the body must be a JSON object"})
         if self.path in POST_ROUTES:
             return self._run(POST_ROUTES[self.path], body)
         self._send(404, {"error": "not found"})
