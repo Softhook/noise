@@ -17,7 +17,7 @@ import csv
 import os
 import sys
 
-from . import trino, webtrak
+from . import aircraft, trino, webtrak
 from .common import NMT6, OUT_DIR, iso, parse_time
 from .geometry import box_around
 from .passes import CSV_FIELDS, passes_near
@@ -68,7 +68,7 @@ def report(radar, passes, events, radius_m, out=None):
 
     say(f"\nWebTrak: {len(radar)} radar tracks within {radius_m:.0f} m, {len(events)} NMT6 events\n")
     say(f"{'closest (UTC)':20} {'WebTrak':10} {'type':5} {'dist':>5} {'alt':>5} | "
-        f"{'OpenSky':9} {'dist':>5} {'geo':>5} {'baro':>5} {'dt':>4} {'gap':>4} {'rx':>3} | {'dalt':>5} | NMT6 LAmax")
+        f"{'OpenSky':9} {'type':5} {'dist':>5} {'geo':>5} {'baro':>5} {'dt':>4} {'gap':>4} {'rx':>3} | {'dalt':>5} | NMT6 LAmax")
     pairs = pair(radar, passes, MATCH_S)
     diffs = []
     for w, o in pairs:
@@ -77,8 +77,8 @@ def report(radar, passes, events, radius_m, out=None):
         alt = w.altitude_m if w and w.altitude_m is not None else float("nan")
         left = f"{w.callsign:10} {w.type:5} {w.distance_m:5.0f} {alt:5.0f}" if w else " " * 28
         offset = f"{o.t - w.t:+.0f}" if w and o else ""
-        right = (f"{o.callsign:9} {o.distance_m:5} {blank(o.geo_msl_m):>5} {blank(o.baro_alt_m):>5} {offset:>4} "
-                 f"{o.point_gap_s:>4} {o.receivers:>3}") if o else " " * 40
+        right = (f"{o.callsign:9} {o.type or '?':5} {o.distance_m:5} {blank(o.geo_msl_m):>5} {blank(o.baro_alt_m):>5} {offset:>4} "
+                 f"{o.point_gap_s:>4} {o.receivers:>3}") if o else " " * 46
         dalt = ""
         if w and o and w.altitude_m is not None and o.geo_msl_m is not None:
             diffs.append(o.geo_msl_m - w.altitude_m)
@@ -100,13 +100,26 @@ def add_arguments(parser):
     parser.add_argument("--to", dest="end", required=True)
     parser.add_argument("--radius", type=float, default=3000, help="metres from NMT6 (default 3000, as WebTrak)")
     parser.add_argument("--geoid", type=float, default=45.0, help="geoid height at NMT6 in metres (default 45)")
+    parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/aircraft-db)")
 
 
-def run(args, client=None):
+def add_types(passes, db):
+    """Fill in each pass's type and registration from the aircraft database."""
+    for p in passes:
+        found = db.get(p.icao24.lower())
+        if found:
+            p.type, p.registration = found.type, found.registration
+
+
+def run(args, client=None, db=None):
     begin, end = parse_time(args.begin), parse_time(args.end)
+    if db is None:
+        _, db = aircraft.database(getattr(args, "aircraft_db", None))
     box = box_around(NMT6, max(QUERY_BOX_M, args.radius + BOX_MARGIN_M))
     states = trino.fetch_states(begin - PAD_S, end + PAD_S, box, client)
     passes = passes_near(states, begin, end, args.radius, args.geoid)
+    add_types(passes, db)
+    aircraft.report_unknown(db, [(p.icao24, p.callsign) for p in passes])
 
     out = os.path.join(OUT_DIR, f"nmt6-trino-{iso(begin)[:16].replace(':', '')}.csv")
     write_csv(passes, out)

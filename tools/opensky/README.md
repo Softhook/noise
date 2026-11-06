@@ -19,6 +19,7 @@ make test     # made-up data and a fake Trino client; no network, no pyopensky n
 For each hour of the period, it runs one query on `state_vectors_data4` for every airborne aircraft in a box 5 km either side of NMT6, whichever airport it uses. Each query asks for the whole hour, and OpenSky sends each position once, at the time it received it. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
 
 For each pass it gives:
+- the aircraft type and registration (see [Aircraft type](#aircraft-type)),
 - the closest ground distance,
 - GPS height above sea level (`geoaltitude` minus `--geoid`),
 - uncorrected pressure altitude,
@@ -34,6 +35,8 @@ For each pass it gives:
 | `opensky/geometry.py` | Distances from NMT6, closest approach, the query box |
 | `opensky/webtrak.py` | WebTrak's saved radar tracks and NMT6 events |
 | `opensky/compare.py` | The `compare` command: the CSV and the table against WebTrak |
+| `opensky/logs.py` | The `logs` command: positions as the ADS-B logger's hourly files, for `adsb analyse` and its viewer |
+| `opensky/aircraft.py` | Aircraft type and registration from a dated copy of tar1090-db, and the `aircraft` command |
 | `opensky/common.py` | NMT6, paths, times and numbers |
 
 ### Setup
@@ -72,13 +75,48 @@ Three hours near NMT6 (08:01–11:01) take five whole-hour queries, about 5 seco
 
 Some periods are missing from OpenSky's data because of outages. Two of them fall in 2026: 2 January 19:00 to 3 January 18:00, and 24 January 08:00–17:00 UTC. Its processing changed on 13–14 August 2026, so results from before and after then may differ.
 
+### In the ADS-B viewer
+
+`python -m opensky logs` writes the same positions as the ADS-B logger's hourly files, so [`tools/adsb`](../adsb/README.md)'s `adsb analyse` and its viewer read them unchanged, with NMT6 as the site (`nmt6-site.json`):
+
+```bash
+make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z    # data/2026-10-28/adsb, then data/2026-10-28/results/viewer.html
+```
+
+- It uses the same whole-hour queries as `compare`, so hours already fetched come from the cache.
+- Heights go in as feet, as readsb gives them. `alt_geom` is OpenSky's `geoaltitude`, which `adsb analyse` corrects with the config's geoid height, and `alt_baro` is pressure altitude. `make viewer` also downloads EGLC METARs (`adsb metars`), so QNH heights are worked out too, and `QNH minus geometric` compares the two.
+- Each record carries the aircraft's type, registration and description (`t`, `r`, `desc`), as readsb's do, so the viewer's "By aircraft type" chart and `summary.txt` work.
+- OpenSky gives no ground speed here. `adsb analyse` works out headings from the positions.
+- `nmt6-site.json` names the site "NMT6, St Pauls Church, Thamesmead", labels it NMT6, and marks it `public`, since WebTrak publishes its location. So the summary and the viewer show its latitude and longitude. Its ground elevation and microphone height are placeholders, so heights above the microphone are approximate.
+- The summary names OpenSky as the source and notes that there's no health log. Gaps over 30 minutes are reported as unchecked. On 28 October there were three, 01:01–02:40 and 04:53–05:35 UTC. Each lay between high overflights, with nothing else within 5 km of NMT6. OpenSky was receiving aircraft over London in every 10 minutes of those hours, so the sky near NMT6 was quiet: London City is closed at night, and Heathrow's first arrivals came after 04:30.
+- Only positions in the 5 km query box are included.
+- The files stay in `data/`, which git ignores, under OpenSky's research terms.
+
+**28 October 2026 (westerly operations):** `adsb analyse` labels all 71 London City flights below 500 m as runway 27 arrivals. They fly a remarkably tight path:
+- 203–215 m south of NMT6 (median 210 m, sd 2 m),
+- 319–335 m above sea level as they pass (median 327 m, sd 3 m),
+- on a 5.5–5.7° path, heading 273°.
+
+From 4 km east of NMT6 to 3 km west, the flights stay within about ±25 m of each other sideways and ±20 m in height. OpenSky's GPS heights come in 25 ft (7.6 m) steps, which limits how finely height can be resolved.
+
+By type, the 71 were 55 E190, 5 BCS1 (A220-100), 3 DH8D (Dash 8-400), 3 E290 and 3 E295 (E190-E2 and E195-E2), 1 C56X and 1 E55P (business jets). All the types fly the same path: their medians are 209–215 m from NMT6 at 321–331 m.
+
+### Aircraft type
+
+OpenSky's state vectors give no aircraft type, so `compare` and `logs` look up every `icao24` in [tar1090-db](https://github.com/wiedehopf/tar1090-db/tree/csv), the database readsb uses on the garden Pi. Both sources therefore give the same ICAO type codes (`E190`, `BCS1`, `A20N`).
+
+- **Saved copies:** each copy is kept in `data/aircraft-db/aircraft-<date downloaded>.csv.gz`, which git ignores. Every run uses the newest one and prints its name, and `logs` writes it into `SOURCE.txt`.
+- **First run:** if there's no copy, it downloads one, about 8 MB.
+- **Updating:** `python -m opensky aircraft --update` saves a newer copy. Keep one copy for a whole stage, as the [plan](../adsb/docs/PLAN.md) says, and pass `--aircraft-db PATH` to repeat a run with an older one.
+- **Missing types:** any aircraft without a type is listed as a warning, with its `icao24` and callsign. On 28 October all 264 aircraft were found. On the 3 flights WebTrak also had, the types matched.
+
 ### Things to know about the data
 
 - **Repeated positions:** a state vector repeats the last position until a new one arrives. The query groups states by `lastposupdate`, which the tool uses as each position's time, keeping the first state's heights and the most receivers that heard any of them.
 - **GPS height:** `geoaltitude` is height above the WGS84 ellipsoid. Subtract the geoid height (about 45 m in London) to get height above sea level, as WebTrak gives.
 - **Pressure altitude:** `baroaltitude` is pressure altitude (1013.25 hPa) and needs a QNH correction, as `tools/adsb` does. On 5 November it read about 90–100 m below GPS height near NMT6.
 - **Aircraft without ADS-B:** the state vectors only include aircraft that send ADS-B. `readsb_mlat_sv` has multilateration (MLAT) positions, worked out from the timing of signals at several receivers, for some aircraft that send no position. The tool doesn't query it yet.
-- **Aircraft type:** OpenSky doesn't give one. Look up `icao24` in an aircraft database (OpenSky's own, or tar1090-db as readsb uses).
+- **Aircraft type:** OpenSky doesn't give one. The tool looks it up (see [Aircraft type](#aircraft-type)), so a type is only as good as the database's entry for that `icao24`.
 - **Licence:** OpenSky's research terms limit what can be published or redistributed. Publish summaries and cite OpenSky, not the raw state vectors.
 
 ### First comparison, 5 November 2026, 08:01–11:01 UTC
@@ -117,5 +155,5 @@ The research database makes OpenSky a strong second source. It covers periods be
 
 1. Repeat the comparison over more periods: both runways, both arrivals and departures, and evenings and weekends. Check that the coverage and heights hold.
 2. Query `readsb_mlat_sv` as well, for aircraft that don't send ADS-B positions.
-3. Look up aircraft types from `icao24`.
+3. Check the looked-up types against the airport's records, especially to tell an `A20N` from an `A320`.
 4. Add OpenSky as a survey source like [adsb.lol](../adsb/docs/traces.md): convert it to the logger's hourly files, so that `adsb analyse` and the match check page can read it unchanged. Then compare it with the garden Pi, flight by flight, in the Fusion trial.

@@ -1,0 +1,16 @@
+{
+  "_comment": "NMT6 (WebTrak monitor 106) as the site, for `adsb analyse` on OpenSky data from `opensky logs`. Its location is public, from WebTrak's monitor list, so the viewer may show it. Ground elevation and mic height are placeholders, not surveyed.",
+  "site": {
+    "name": "NMT6, St Pauls Church, Thamesmead",
+    "label": "NMT6",
+    "public": true,
+    "lat": 51.50535,
+    "lon": 0.11075,
+    "ground_elevation_m": 3.0,
+    "mic_height_m": 3.0
+  },
+  "geoid_height_m": 45.0,
+  "analysis": {
+    "max_km": 15
+  }
+}

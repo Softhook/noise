@@ -15,7 +15,7 @@ from .geometry import closest_approach
 
 PASS_GAP_S = 300  # An aircraft unseen for this long has left; a new pass starts when it returns
 
-CSV_FIELDS = ["closest_utc", "callsign", "icao24", "distance_m", "geo_msl_m", "baro_alt_m", "positions",
+CSV_FIELDS = ["closest_utc", "callsign", "icao24", "type", "registration", "distance_m", "geo_msl_m", "baro_alt_m", "positions",
               "point_gap_s", "receivers"]
 
 
@@ -30,6 +30,8 @@ class Pass:
     positions: int
     point_gap_s: float  # Seconds between positions either side of the closest approach
     receivers: int  # Most receivers that heard one state
+    type: str = ""  # ICAO type code, from the aircraft database
+    registration: str = ""
 
     @property
     def closest_utc(self):

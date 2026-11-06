@@ -12,7 +12,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from opensky import compare, geometry, passes, trino, webtrak
+import gzip
+import json
+
+from opensky import aircraft, compare, geometry, logs, passes, trino, webtrak
 from opensky.common import NMT6, number, parse_time
 
 T0 = parse_time("2026-11-05T09:00:00Z")  # The start of an hour partition
@@ -31,6 +34,14 @@ def state(t, x_m, y_m=0.0, icao24="abc123", **extra):
 def flyover(t_closest, y_m=100.0, icao24="abc123", speed_ms=100.0, span_s=60):
     """States once a second for an aircraft flying east, passing y_m north of NMT6 at t_closest."""
     return [state(t_closest + dt, dt * speed_ms, y_m, icao24) for dt in range(-span_s, span_s + 1)]
+
+
+DB = {"abc123": aircraft.Aircraft("G-TEST", "E190", 0, "EMBRAER ERJ-190-100")}
+
+
+def write_db(path, lines):
+    with gzip.open(path, "wt") as f:
+        f.write("".join(line + "\n" for line in lines))
 
 
 class FakeFrame:
@@ -258,9 +269,10 @@ class TestCompare(unittest.TestCase):
                 mock.patch("opensky.webtrak.radar_passes", return_value=[]), \
                 mock.patch("opensky.webtrak.events", return_value=[]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-            compare.run(args, client)
+            compare.run(args, client, DB)
             written = os.listdir(tmp)
         self.assertEqual(written, ["nmt6-trino-2026-11-05T0900.csv"])
+        self.assertIn(" E190 ", out.getvalue())
         self.assertIn("In both: 0. WebTrak only: 0. OpenSky only: 1.", out.getvalue())
         self.assertTrue(all("hour = " in sql for sql, _ in client.calls))
 
@@ -272,11 +284,111 @@ class TestCompare(unittest.TestCase):
                     mock.patch("opensky.webtrak.radar_passes", return_value=[]), \
                     mock.patch("opensky.webtrak.events", return_value=[]), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                compare.run(args, client)
+                compare.run(args, client, DB)
             return [sql for sql, _ in client.calls]
 
         self.assertEqual(sqls(1500), sqls(3000))
         self.assertNotEqual(sqls(3000), sqls(4000))  # A larger radius widens the box
+
+
+class TestLogs(unittest.TestCase):
+    def test_records_are_in_the_loggers_fields_and_units(self):
+        states = flyover(T0 + 120, span_s=2)
+        states.append(dict(states[-1], time=states[-1]["time"] + 1))  # A repeat of the last position
+        recs = logs.records(states)
+        self.assertEqual(len(recs), 5)
+        r = recs[0]
+        self.assertEqual((r["hex"], r["flight"], r["seen_pos"]), ("abc123", "TEST1", 0.0))
+        self.assertEqual((r["alt_baro"], r["alt_geom"]), (1969, 2297))  # 600 m and 700 m in feet
+        self.assertEqual([r["now"] for r in recs], sorted(r["now"] for r in recs))
+
+    def test_missing_heights_and_callsigns_are_left_out(self):
+        r = logs.records([state(T0, 0, baroaltitude=float("nan"), geoaltitude=None, callsign=None)])[0]
+        self.assertNotIn("alt_baro", r)
+        self.assertNotIn("alt_geom", r)
+        self.assertNotIn("flight", r)
+
+    def test_run_writes_hourly_files_and_source(self):
+        client = FakeTrino(flyover(T0 + 3600 - 30, span_s=60))  # Crosses an hour boundary
+        with tempfile.TemporaryDirectory() as out:
+            args = argparse.Namespace(begin="2026-11-05T09:00Z", end="2026-11-05T11:00Z", out=out)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                logs.run(args, client, DB)
+            self.assertEqual(sorted(os.listdir(out)),
+                             ["2026-11-05T09.jsonl.gz", "2026-11-05T10.jsonl.gz", "SOURCE.txt"])
+            with gzip.open(os.path.join(out, "2026-11-05T10.jsonl.gz"), "rt") as f:
+                rows = [json.loads(line) for line in f]
+            self.assertTrue(all(T0 + 3600 <= r["now"] < T0 + 7200 for r in rows))
+            with open(os.path.join(out, "SOURCE.txt")) as f:
+                self.assertIn("NOT the logger's own record", f.read())
+            with self.assertRaises(SystemExit):  # Won't write over existing files
+                with contextlib.redirect_stderr(io.StringIO()):
+                    logs.run(args, client, DB)
+
+
+class TestAircraft(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_flags_become_readsbs_db_flags(self):
+        self.assertEqual([aircraft.db_flags(f) for f in ("00", "10", "01", "0011", "")], [0, 1, 2, 12, 0])
+
+    def test_load_reads_tar1090_db(self):
+        path = os.path.join(self.dir, "aircraft-2026-11-06.csv.gz")
+        write_db(path, ["3009B7;I-JENI;E190;00;EMBRAER ERJ-190-100;;;", "AE1234;;K35R;10;BOEING KC-135R;;;",
+                        "000001;;;10;;;Miscode - VARIOUS;", "4CA123;EI-ABC"])
+        db = aircraft.load(path)
+        self.assertEqual(db["3009b7"], aircraft.Aircraft("I-JENI", "E190", 0, "EMBRAER ERJ-190-100"))
+        self.assertEqual(db["ae1234"].db_flags, 1)
+        self.assertEqual(db["4ca123"].type, "")  # Short lines are padded
+
+    def test_database_uses_the_newest_saved_copy(self):
+        write_db(os.path.join(self.dir, "aircraft-2026-10-01.csv.gz"), ["ABC123;OLD;A320;00;;;;"])
+        write_db(os.path.join(self.dir, "aircraft-2026-11-01.csv.gz"), ["ABC123;NEW;A20N;00;;;;"])
+        with mock.patch.object(aircraft, "DB_DIR", self.dir), mock.patch.object(aircraft, "download") as fetch:
+            path, db = aircraft.database(log=io.StringIO())
+        fetch.assert_not_called()
+        self.assertTrue(path.endswith("aircraft-2026-11-01.csv.gz"))
+        self.assertEqual(db["abc123"].registration, "NEW")
+
+    def test_database_downloads_a_copy_when_none_is_saved(self):
+        saved = os.path.join(self.dir, "aircraft-2026-11-06.csv.gz")
+        write_db(saved, ["ABC123;G-TEST;E190;00;;;;"])
+        with mock.patch.object(aircraft, "DB_DIR", os.path.join(self.dir, "empty")), \
+                mock.patch.object(aircraft, "download", return_value=saved) as fetch:
+            _, db = aircraft.database(log=io.StringIO())
+        fetch.assert_called_once()
+        self.assertEqual(db["abc123"].type, "E190")
+
+    def test_a_broken_download_is_not_kept(self):
+        source = os.path.join(self.dir, "source.csv.gz")
+        write_db(source, ["ABC123;G-TEST;E190;00;;;;"])
+        out = os.path.join(self.dir, "db")
+        with self.assertRaises(SystemExit):
+            aircraft.download(out, "file://" + source, log=io.StringIO())
+        self.assertEqual(os.listdir(out), [])
+
+    def test_unknown_types_are_reported_by_name(self):
+        log = io.StringIO()
+        db = {**DB, "def456": aircraft.Aircraft("N1", "", 0, "")}
+        count = aircraft.report_unknown(db, [("abc123", "A"), ("def456", "B"), ("fff000", "")], log)
+        self.assertEqual(count, 2)
+        self.assertIn("def456 (B)", log.getvalue())
+        self.assertIn("fff000 (no callsign)", log.getvalue())
+
+    def test_passes_get_their_type_and_registration(self):
+        found = passes.passes_near(flyover(T0 + 600), T0, T0 + 3600, 3000, 45)
+        compare.add_types(found, DB)
+        self.assertEqual((found[0].type, found[0].registration), ("E190", "G-TEST"))
+        self.assertEqual(found[0].row()["type"], "E190")
+
+    def test_log_records_carry_the_type(self):
+        r = logs.records(flyover(T0 + 60, span_s=1), DB)[0]
+        self.assertEqual((r["t"], r["r"], r["desc"]), ("E190", "G-TEST", "EMBRAER ERJ-190-100"))
+        self.assertNotIn("dbFlags", r)  # 0 is left out, as readsb does
+        self.assertNotIn("t", logs.records(flyover(T0 + 60, span_s=1, icao24="ffffff"), DB)[0])
 
 
 if __name__ == "__main__":
