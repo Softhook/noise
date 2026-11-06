@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import os
+import tempfile
 
 TABLES = {
     # The places flights are measured from, from the manifest
@@ -17,7 +18,7 @@ TABLES = {
                 "type", "squawk", "direction", "origin", "destination", "hex"],
     # Every position. height_kind: geometric, qnh or radar
     "positions": ["source", "source_id", "t", "lat", "lon", "height_m", "height_kind", "speed_ms"],
-    # Noise events at a receptor
+    # Noise events at a receptor. event_class: "aircraft", "other" or "unknown", as the source classed it
     "noise_events": ["source", "receptor", "start_utc", "lmax_utc", "end_utc", "lmax_db", "sel_db", "leq_db",
                      "event_class"],
     # Sound levels, one per second where the source has them
@@ -39,13 +40,19 @@ TABLES = {
 def write_table(folder, name, rows):
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"{name}.csv")
-    temp = path + ".tmp"
-    with open(temp, "w", newline="") as f:
-        writer = csv.DictWriter(f, TABLES[name], extrasaction="raise")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: "" if value is None else value for key, value in row.items()})
-    os.replace(temp, path)
+    # A temporary file of its own, so two writers never share one
+    fd, temp = tempfile.mkstemp(prefix=f".{name}.", suffix=".tmp", dir=folder)
+    try:
+        with os.fdopen(fd, "w", newline="") as f:
+            writer = csv.DictWriter(f, TABLES[name], extrasaction="raise")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({key: "" if value is None else value for key, value in row.items()})
+        os.replace(temp, path)
+    except BaseException:
+        if os.path.exists(temp):
+            os.remove(temp)
+        raise
     return path
 
 

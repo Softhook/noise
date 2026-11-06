@@ -5,11 +5,16 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import gzip
+import http.client
+import http.server
 import io
 import json
 import math
 import os
+import shutil
+import subprocess
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -151,6 +156,20 @@ class Manifests(unittest.TestCase):
         self.assertEqual(m["receptors"]["garden"]["name"], "Garden")
         self.assertFalse(m["receptors"]["garden"]["public"])
 
+    def test_pass_ids_are_dated_by_a_public_receptor_unless_the_manifest_names_one(self):
+        os.makedirs(os.path.join(self.dir, "private"))
+        with open(os.path.join(self.dir, "private", "site.json"), "w") as f:
+            json.dump({"site": {"name": "Garden", "lat": 51.5, "lon": 0.1}}, f)
+        receptors = {"garden": {"config": "private/site.json"},
+                     "nmt6": {"lat": NMT6[0], "lon": NMT6[1], "public": True}}
+        # The garden is listed first, but it's private, so it may be missing elsewhere
+        self.assertEqual(manifest.load(self.write(receptors=receptors))["pass_receptor"], "nmt6")
+        self.assertEqual(manifest.load(self.write(receptors=receptors, pass_receptor="garden"))["pass_receptor"], "garden")
+        os.remove(os.path.join(self.dir, "private", "site.json"))
+        m = manifest.load(self.write(receptors=receptors, pass_receptor="garden"))  # Named, but its site.json isn't there
+        self.assertEqual(m["pass_receptor"], "nmt6")
+        self.assertTrue(any("pass_receptor" in w for w in m["warnings"]))
+
     def test_bad_manifests_are_refused(self):
         with self.assertRaises(manifest.ManifestError):
             manifest.load(self.write(window_utc=["2026-11-05T00:00:00", "2026-11-06T00:00:00Z"]))
@@ -177,6 +196,45 @@ class Adapters(unittest.TestCase):
         self.assertEqual(positions[0]["height_kind"], "geometric")
         self.assertEqual(warnings, [])
         self.assertEqual(coverage[0]["note"], "data")
+
+    def test_a_flight_keeps_its_whole_track_when_the_window_ends_mid_flight(self):
+        folder = os.path.join(self.dir, "results")
+        # A slow 40-minute flight, for one that starts well before the window ends and passes NMT6 well after
+        adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0, span_s=1200, speed=5))])
+        flights, positions, _ = adsb.read("opensky", {"results": folder}, T0 - 3600, T0 - 900, [])
+        self.assertEqual(len(positions), 2401)
+        pts = [(p["t"], p["lat"], p["lon"], p["height_m"]) for p in positions]
+        self.assertFalse(closest_approach(pts, Frame(*NMT6))[4])  # Not cut short at the window's end
+
+    def test_the_loggers_coverage_comes_from_its_health_log(self):
+        folder, logs = os.path.join(self.dir, "results"), os.path.join(self.dir, "logs")
+        adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0))])
+        records = []
+        for t in range(int(T0 - 3600), int(T0 + 3601), 300):
+            if T0 + 600 < t < T0 + 1800:
+                continue  # The logger stopped writing for 20 minutes: under summary.txt's 30-minute gaps
+            record = {"time": t, "event": None, "connected": True, "lines": 5000, "clock": {"synchronised": True}}
+            if t == T0 - 1800:
+                record["clock"] = {"synchronised": False}
+            records.append(record)
+        records.append({"time": T0 + 2400 + 5, "event": "disconnected", "connected": False, "lines": 10})
+        records.sort(key=lambda r: r["time"])
+        os.makedirs(os.path.join(logs, "health"))
+        with open(os.path.join(logs, "health", "2026-11-05.jsonl"), "w") as f:
+            f.write("not json\n")
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+        _, _, coverage = adsb.read("adsb", {"results": folder, "logs": logs}, T0 - 3600, T0 + 3600, [])
+        spans = [(parse_time(c["start_utc"]) - T0, parse_time(c["end_utc"]) - T0) for c in coverage]
+        self.assertEqual({c["note"] for c in coverage}, {"health log"})
+        # Not while the clock was unsynchronised (-1800), in the 20 minutes without records, or from
+        # the disconnection (2405) to the next record that shows it connected again (2700)
+        self.assertEqual(spans, [(-3600, -2100), (-1500, 600), (1800, 2400), (2700, 3600)])
+        # A pass in the outage is then "no data", not a miss the logger should explain
+        lim = explain.prepare({"ceiling_m": 3048.0, "areas": [("circle", *NMT6, 15.0)], "any": False})
+        when = [(parse_time(c["start_utc"]), parse_time(c["end_utc"])) for c in coverage]
+        self.assertEqual(explain.why_unseen(westbound(T0 + 1200), lim, when), explain.NO_DATA)
+        self.assertEqual(explain.why_unseen(westbound(T0), lim, when), explain.UNEXPLAINED)
 
     def test_adsb_warns_when_positions_are_missing(self):
         folder = os.path.join(self.dir, "results")
@@ -209,6 +267,7 @@ class Adapters(unittest.TestCase):
         self.assertTrue(all(p["height_kind"] == "radar" for p in positions))
         self.assertEqual(len(positions), 31)
         self.assertEqual([(e["lmax_db"], e["lmax_utc"]) for e in noise], [(72.5, iso(T0 + 3))])
+        self.assertEqual(noise[0]["event_class"], "aircraft")  # WebTrak's class 1, in the common table's terms
         self.assertEqual(len(levels), 30)
         self.assertEqual(coverage[0]["note"], "saved chunks")
 
@@ -255,6 +314,52 @@ class Linking(unittest.TestCase):
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0, north_m=1500)])), 2)
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0 + 50)])), 2)
 
+    def test_the_same_registration_on_two_different_tracks_doesnt_link(self):
+        fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("webtrak", "b", "GLCYN", T0 - 60, T0 + 60)]
+        self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0, north_m=5000)])), 2)
+
+    def test_the_same_registration_links_when_the_tracks_dont_overlap_in_time(self):
+        # WebTrak's saved data starts just after OpenSky's track ends: nothing to compare, so the registration decides
+        before, after = [p for p in westbound(T0) if p[0] <= T0], [p for p in westbound(T0) if p[0] >= T0 + 30]
+        fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0), flight("webtrak", "b", "GLCYN", T0 + 30, T0 + 60)]
+        self.assertEqual(len(self.passes(fs, [before, after])), 1)
+
+    def test_a_hole_in_one_track_isnt_compared_as_a_straight_line(self):
+        # OpenSky loses the aircraft while it's out of its box, 9 km north, and finds it again;
+        # WebTrak follows it all the way. A line across OpenSky's hole would be 9 km from WebTrak.
+        # OpenSky's positions come once a second, so its track is the one interpolated at WebTrak's times.
+        def where(t):
+            return (t, *at(-(t - T0) * 70, 9000 if abs(t - T0) < 150 else -210), 330)
+        radar = [where(t) for t in range(int(T0 - 200), int(T0 + 201), 4)]
+        adsb_track = [where(t) for t in range(int(T0 - 200), int(T0 + 201)) if abs(t - T0) >= 150]
+        fs = [flight("opensky", "a", "GLCYN", T0 - 200, T0 + 200), flight("webtrak", "b", "GLCYN", T0 - 200, T0 + 200)]
+        self.assertEqual(len(self.passes(fs, [adsb_track, radar])), 1)
+
+    def test_a_flight_joins_its_best_match_not_the_first_found(self):
+        fs = [flight("opensky", "a", "GAAAA", T0 - 70, T0 + 60), flight("opensky", "b", "GBBBB", T0 - 60, T0 + 60),
+              flight("webtrak", "c", "", T0 - 60, T0 + 60)]
+        groups = self.passes(fs, [westbound(T0, north_m=-560), westbound(T0, north_m=-230), westbound(T0)])
+        joined = [g for g in groups.values() if len(g) > 1]
+        self.assertEqual(len(joined), 1)
+        self.assertIn("20261105T0900-GBBBB", groups)
+        self.assertEqual(len(groups["20261105T0900-GBBBB"]), 2)  # 20 m away, not GAAAA's 350 m
+
+    def test_adding_webtrak_doesnt_change_a_pass_id(self):
+        # WebTrak's closest approach is in the minute before OpenSky's
+        opensky = flight("opensky", "a", "GLCYN", T0 - 55, T0 + 65)
+        alone = self.passes([opensky], [westbound(T0 + 5)])
+        both = self.passes([opensky, flight("webtrak", "b", "GLCYN", T0 - 65, T0 + 55)], [westbound(T0 + 5), westbound(T0 - 5)])
+        self.assertEqual(list(alone), ["20261105T0900-GLCYN"])
+        self.assertEqual(list(both), ["20261105T0900-GLCYN"])
+        # Without a registration (so linked by track, which needs them closer), it's named by the ADS-B source's id
+        unnamed = self.passes([flight("opensky", "a", "", T0 - 58, T0 + 62), flight("webtrak", "b", "", T0 - 62, T0 + 58)],
+                              [westbound(T0 + 2), westbound(T0 - 2)])
+        self.assertEqual(list(unnamed), ["20261105T0900-a"])
+
+    def test_sources_are_ranked_ads_b_first_and_webtrak_last(self):
+        ranked = sorted(["webtrak", "fusion", "opensky", "adsb", "adsblol"], key=link.source_rank)
+        self.assertEqual(ranked, ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
+
     def test_two_flights_from_one_source_are_never_one_pass(self):
         fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("opensky", "b", "GLCYN", T0 - 60, T0 + 60)]
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0)])), 2)
@@ -287,6 +392,13 @@ class Explain(unittest.TestCase):
         high = westbound(T0, height_at_abeam=9000)
         self.assertEqual(explain.why_unseen(high, self.limits(), [(T0 - 600, T0 + 600)]), explain.ABOVE)
         self.assertEqual(explain.why_unseen(high, self.limits(ceiling_m=None), [(T0 - 600, T0 + 600)]), explain.UNEXPLAINED)
+
+    def test_just_below_the_ceiling_counts_as_above_it(self):
+        # 2,800 m QNH is above a 10,000 ft (3,048 m) pressure-altitude ceiling when QNH is under about 983 hPa
+        level = [(t, lat, lon, 2800.0) for t, lat, lon, _ in westbound(T0)]
+        self.assertEqual(explain.why_unseen(level, self.limits(), [(T0 - 600, T0 + 600)]), explain.ABOVE)
+        lower = [(t, lat, lon, 2700.0) for t, lat, lon, _ in westbound(T0)]
+        self.assertEqual(explain.why_unseen(lower, self.limits(), [(T0 - 600, T0 + 600)]), explain.UNEXPLAINED)
 
     def test_adsb_limits_come_from_the_results_and_logs(self):
         with tempfile.TemporaryDirectory() as d:
@@ -340,6 +452,77 @@ class BuildAndServe(unittest.TestCase):
         [unseen] = schema.read_table(common, "unseen")
         self.assertEqual((unseen["pass_id"], unseen["source"], unseen["reason"]), ("20261105T0910-GLCYO", "webtrak", explain.NO_DATA))
         self.assertEqual(summary["unseen"][explain.UNEXPLAINED], 0)
+
+    def test_a_build_replaces_the_tables_folder_whole(self):
+        m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
+        build.build(m, log=io.StringIO())
+        out = os.path.join(self.dir, "out", "2026-11-05")
+        with open(os.path.join(out, "common", "stale.csv"), "w") as f:
+            f.write("left over\n")
+        build.build(m, log=io.StringIO())
+        self.assertFalse(os.path.exists(os.path.join(out, "common", "stale.csv")))
+        self.assertEqual(sorted(os.listdir(out)), ["build.json", "common"])  # Nothing temporary left
+        self.assertEqual(sorted(os.listdir(os.path.join(out, "common"))), sorted(f"{n}.csv" for n in schema.TABLES))
+        positions = schema.read_table(os.path.join(out, "common"), "positions")
+        keys = [(p["source"], p["source_id"], float(p["t"])) for p in positions]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_the_app_sees_a_build_made_outside_it(self):
+        app = server.App(self.deployments)
+        app.rebuild({"deployment": "2026-11-05"})
+        d = app.deployment("2026-11-05")
+        self.assertEqual(len(d.load()["flights"]), 3)
+        build_json = os.path.join(self.dir, "out", "2026-11-05", "build.json")
+        stamp = os.path.getmtime(build_json)
+        webtrak_chunks(os.path.join(self.dir, "lcy"), [("102", "GLCYO", "E190", westbound(T0 + 601))])
+        build.build(manifest.load(d.manifest_path), log=io.StringIO())  # As make build would
+        os.utime(build_json, (stamp, stamp))  # Even if build.json's time looks unchanged
+        self.assertEqual(len(d.load()["flights"]), 4)
+
+    def test_a_rebuild_is_refused_even_after_the_manifest_is_read_again(self):
+        app = server.App(self.deployments)
+        d = app.deployment("2026-11-05")
+        path = os.path.join(self.deployments, "2026-11-05.json")
+        with d.lock:  # As if a rebuild were running
+            os.utime(path, (os.path.getmtime(path) + 5,) * 2)
+            self.assertIsNot(app.deployment("2026-11-05"), d)
+            with self.assertRaises(server.BadRequest):
+                app.rebuild({"deployment": "2026-11-05"})
+
+    def test_the_day_says_which_tracks_are_radar_and_classes_events(self):
+        app = server.App(self.deployments)
+        app.rebuild({"deployment": "2026-11-05"})
+        day = app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
+        self.assertEqual({(f["source"], f["height_kind"]) for f in day["flights"]}, {("opensky", "geometric"), ("webtrak", "radar")})
+        self.assertEqual([e["event_class"] for e in day["events"]], ["aircraft"])
+        self.assertFalse(any(k.startswith("_") for f in day["flights"] for k in f))
+
+    def test_the_server_answers_only_this_computer_and_json_posts(self):
+        server.Handler.app = server.App(self.deployments)
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        port = httpd.server_address[1]
+
+        def ask(method, path, host=f"127.0.0.1:{port}", body=None, kind=None):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            headers = {"Host": host, **({"Content-Type": kind} if kind else {})}
+            c.request(method, path, body=body, headers=headers)
+            r = c.getresponse()
+            r.read()
+            c.close()
+            return r.status
+
+        self.assertEqual(ask("GET", "/"), 200)
+        self.assertEqual(ask("GET", "/api/deployments", host=f"localhost:{port}"), 200)
+        self.assertEqual(ask("GET", "/api/deployments", host=f"evil.example:{port}"), 403)  # DNS rebinding
+        self.assertEqual(ask("GET", "/api/deployments", host=f"localhost.evil.example:{port}"), 403)
+        body = json.dumps({"deployment": "2026-11-05"})
+        self.assertEqual(ask("POST", "/api/build", body=body, kind="text/plain"), 403)  # A form another site could send
+        self.assertEqual(ask("POST", "/api/build", body="{", kind="application/json"), 400)
+        self.assertEqual(ask("POST", "/api/build", body=body, kind="application/json"), 200)
+        self.assertEqual(ask("GET", "/api/day?deployment=2026-11-05&day=nope"), 400)
 
     def test_a_pass_one_source_should_have_seen_is_unexplained(self):
         # The same track, but WebTrak gives another registration, so the two can't be linked
@@ -409,6 +592,38 @@ class BuildAndServe(unittest.TestCase):
             self.assertTrue(app.deployments()[0]["built"])  # The list doesn't wait for it
             with self.assertRaises(server.BadRequest):
                 app.rebuild({"deployment": "2026-11-05"})  # A second rebuild is refused
+
+
+@unittest.skipUnless(shutil.which("node"), "needs node to run the page's script")
+class Page(unittest.TestCase):
+    """The survey app's own script (ui.html), run by tests/ui_check.js without a browser."""
+
+    def run_page(self, data, receptor="nmt6", sources=()):
+        here = os.path.dirname(os.path.abspath(__file__))
+        done = subprocess.run(["node", os.path.join(here, "ui_check.js"), os.path.join(server.PACKAGE_DIR, "ui.html")],
+                              input=json.dumps({"data": data, "receptor": receptor, "sources": list(sources)}),
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def test_each_noise_event_goes_to_one_pass_the_closest(self):
+        def f(pass_id, t, ground):
+            return {"pass_id": pass_id, "source": "opensky", "first_utc": iso(t - 60),
+                    "approaches": {"nmt6": {"t": iso(t), "ground_m": ground, "height_m": 300}}}
+
+        def e(t, db, receptor="nmt6"):
+            return {"receptor": receptor, "lmax_utc": iso(t), "lmax_db": str(db)}
+
+        data = {"flights": [f("far", T0, 2000), f("near", T0 + 10, 150), f("alone", T0 + 600, 900), f("quiet", T0 + 1200, 500)],
+                "events": [e(T0 + 15, 75), e(T0 + 30, 70), e(T0 + 610, 68), e(T0 + 650, 80), e(T0 + 1200, 90, "garden")]}
+        got = self.run_page(data)["events"]
+        # Both events near T0 go to "near", which came 150 m from NMT6, not to "far" as well; "alone"
+        # gets the one 10 s after it but not the one 50 s after; nothing at another receptor counts
+        self.assertEqual(got, {"near": "75", "alone": "68"})
+
+    def test_sources_are_listed_ads_b_first_and_webtrak_last(self):
+        got = self.run_page({"flights": [], "events": []}, sources=["webtrak", "fusion", "opensky", "adsb", "adsblol"])
+        self.assertEqual(got["order"], ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
 
 
 if __name__ == "__main__":

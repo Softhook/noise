@@ -11,16 +11,41 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import shutil
 import sys
+import tempfile
 
 from . import explain, link, manifest, schema
 from .adapters import adsb, webtrak
-from .common import iso, parse_time, rounded
+from .common import iso, rounded
 from .geometry import Frame, closest_approach
 
 
 def receptor_rows(receptors):
     return [{key: r[key] for key in schema.TABLES["receptors"]} for r in receptors.values()]
+
+
+def write_tables(out, tables):
+    """Write every table into a new folder, then put it in place of the old one, so a reader (the
+    survey app, while `make build` runs) sees either the old build's tables or the new one's, never
+    a mixture."""
+    parent = os.path.dirname(out)
+    os.makedirs(parent, exist_ok=True)
+    staging = tempfile.mkdtemp(prefix=".common.new.", dir=parent)
+    try:
+        for name, rows in tables.items():
+            schema.write_table(staging, name, rows)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    old = None
+    if os.path.exists(out):
+        old = tempfile.mkdtemp(prefix=".common.old.", dir=parent)
+        os.rmdir(old)
+        os.rename(out, old)
+    os.rename(staging, out)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def approaches_for(tracks, receptors):
@@ -65,23 +90,26 @@ def build(m, log=None):
         points.sort(key=lambda p: p["t"])
     flights = [f for f in flights if (f["source"], f["source_id"]) in tracks]
     approaches = approaches_for(tracks, m["receptors"])
-    first = next(iter(m["receptors"]))
-    passes = link.link(flights, tracks, approaches, first)
+    passes = link.link(flights, tracks, approaches, m["pass_receptor"])
     unseen = explain.unseen_rows(passes, tracks, limits, coverage)
 
     out = os.path.join(m["out_dir"], "common")
-    schema.write_table(out, "receptors", receptor_rows(m["receptors"]))
-    schema.write_table(out, "flights", flights)
-    schema.write_table(out, "positions", positions)
-    schema.write_table(out, "noise_events", noise)
-    schema.write_table(out, "levels", levels)
-    schema.write_table(out, "coverage", coverage)
-    schema.write_table(out, "approaches", [
-        {"source": s, "source_id": sid, "receptor": rid, "t": iso(t), "ground_m": rounded(g),
-         "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else ""}
-        for (s, sid, rid), (t, g, h, sl, end) in sorted(approaches.items())])
-    schema.write_table(out, "passes", passes)
-    schema.write_table(out, "unseen", unseen)
+    tables = {
+        "receptors": receptor_rows(m["receptors"]),
+        "flights": flights,
+        # In track order, so a reader can take each track's positions as they come
+        "positions": sorted(positions, key=lambda p: (p["source"], p["source_id"], p["t"])),
+        "noise_events": noise,
+        "levels": levels,
+        "coverage": coverage,
+        "approaches": [
+            {"source": s, "source_id": sid, "receptor": rid, "t": iso(t), "ground_m": rounded(g),
+             "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else ""}
+            for (s, sid, rid), (t, g, h, sl, end) in sorted(approaches.items())],
+        "passes": passes,
+        "unseen": unseen,
+    }
+    write_tables(out, tables)
 
     linked = {}
     for row in passes:
@@ -102,8 +130,10 @@ def build(m, log=None):
         "unseen": {reason: sum(1 for u in unseen if u["reason"] == reason) for reason in explain.REASONS},
         "warnings": warnings,
     }
-    with open(os.path.join(m["out_dir"], "build.json"), "w") as f:
+    fd, temp = tempfile.mkstemp(prefix=".build.", suffix=".tmp", dir=m["out_dir"])
+    with os.fdopen(fd, "w") as f:
         json.dump(summary, f, indent=2)
+    os.replace(temp, os.path.join(m["out_dir"], "build.json"))
     for w in warnings:
         print(f"WARNING: {w}", file=log)
     print(f"{summary['passes']} passes, {summary['passes_in_several_sources']} seen by more than one source, "

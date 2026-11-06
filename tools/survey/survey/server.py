@@ -10,12 +10,14 @@ fetching more data. Downloads stay in each tool: the WebTrak app (python3 -m web
 
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import http.server
 import io
 import json
 import os
 import threading
+import time
 import urllib.parse
 
 from . import build, manifest, schema
@@ -24,6 +26,7 @@ from .common import number, parse_time
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 TRACK_SPACING_S = 2.0  # Positions closer together than this are thinned for drawing
 DAY_S = 86400
+READ_ATTEMPTS = 5  # Tries at reading a build's tables while another build is replacing them
 
 
 class BadRequest(Exception):
@@ -46,7 +49,7 @@ def _day_bounds(day):
 class Deployment:
     """One deployment's built tables, read once and kept until build.json changes."""
 
-    def __init__(self, path):
+    def __init__(self, path, lock=None):
         self.manifest_path = path
         self.m = manifest.load(path)
         self.folder = os.path.join(self.m["out_dir"], "common")
@@ -54,7 +57,8 @@ class Deployment:
         self.tables = None
         # Held while this deployment is rebuilt, and while its tables are read, so a request never
         # sees half-written tables. Other deployments, and the list of them, don't wait for it.
-        self.lock = threading.Lock()
+        # The App keeps one per deployment name, so it outlives a re-read of the manifest.
+        self.lock = lock or threading.Lock()
 
     def build_info(self):
         path = os.path.join(self.m["out_dir"], "build.json")
@@ -63,26 +67,65 @@ class Deployment:
         with open(path) as f:
             return json.load(f)
 
+    def _identity(self):
+        """What changes when a build finishes: build.json's time, and the tables' folder, which a
+        build replaces as a whole (build.write_tables)."""
+        path = os.path.join(self.m["out_dir"], "build.json")
+        try:
+            return os.path.getmtime(path), os.stat(self.folder).st_ino
+        except FileNotFoundError:
+            return None
+
     def load(self):
         with self.lock:
-            path = os.path.join(self.m["out_dir"], "build.json")
-            stamp = os.path.getmtime(path) if os.path.exists(path) else None
-            if stamp is None:
-                raise BadRequest(f"{self.m['deployment']} isn't built yet")
-            if stamp != self.stamp:
-                self.tables = {name: schema.read_table(self.folder, name) for name in schema.TABLES}
-                self.stamp = stamp
-            return self.tables
+            for _ in range(READ_ATTEMPTS):
+                before = self._identity()
+                if before is None:
+                    if not os.path.exists(os.path.join(self.m["out_dir"], "build.json")):
+                        raise BadRequest(f"{self.m['deployment']} isn't built yet")
+                    time.sleep(0.1)  # A build outside the app is putting its tables in place
+                    continue
+                if before == self.stamp:
+                    return self.tables
+                tables = index({name: schema.read_table(self.folder, name) for name in schema.TABLES})
+                if self._identity() == before:  # No build finished while they were read
+                    self.tables, self.stamp = tables, before
+                    return tables
+            raise BadRequest(f"{self.m['deployment']} is being rebuilt; try again in a moment")
 
     def coverage(self):
         """Only the coverage table: enough to list the days, without reading every position."""
         return schema.read_table(self.folder, "coverage")
 
 
+def index(t):
+    """The tables, with what a day's request needs worked out once: times as numbers, positions by
+    track as tuples (far smaller than a dict per row), and levels in time order."""
+    for f in t["flights"]:
+        f["_first"], f["_last"] = parse_time(f["first_utc"]), parse_time(f["last_utc"])
+    tracks, kinds = {}, {}
+    for p in t["positions"]:
+        key = (p["source"], p["source_id"])
+        tracks.setdefault(key, []).append((float(p["t"]), float(p["lat"]), float(p["lon"]), number(p["height_m"])))
+        kinds.setdefault(key, p["height_kind"])
+    for pts in tracks.values():
+        pts.sort()
+    levels = sorted((float(lv["t"]), lv["receptor"], float(lv["level_db"])) for lv in t["levels"])
+    approaches = {}
+    for a in t["approaches"]:
+        approaches.setdefault((a["source"], a["source_id"]), {})[a["receptor"]] = {
+            "t": a["t"], "ground_m": number(a["ground_m"]), "height_m": number(a["height_m"]),
+            "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1"}
+    return {**t, "positions": None, "levels": None, "tracks": tracks, "height_kinds": kinds,
+            "level_rows": levels, "level_times": [lv[0] for lv in levels], "approach_index": approaches,
+            "pass_index": {(p["source"], p["source_id"]): p for p in t["passes"]}}
+
+
 class App:
     def __init__(self, deployments_dir=None):
         self.dir = deployments_dir or manifest.DEPLOYMENTS_DIR
         self.cache = {}
+        self.locks = {}  # Deployment name -> its lock, kept when its manifest is read again
         self.lock = threading.Lock()
 
     def deployment(self, name):
@@ -93,7 +136,8 @@ class App:
                 with self.lock:
                     cached = self.cache.get(name)
                     if not cached or cached[0] != (path, stamp):
-                        self.cache[name] = ((path, stamp), Deployment(path))
+                        lock = self.locks.setdefault(name, threading.Lock())
+                        self.cache[name] = ((path, stamp), Deployment(path, lock))
                     return self.cache[name][1]
         raise BadRequest(f"no deployment {name!r}")
 
@@ -151,33 +195,27 @@ class App:
         t = d.load()
         in_day = lambda text: lo <= parse_time(text) < hi  # noqa: E731
 
-        passes = {(p["source"], p["source_id"]): p for p in t["passes"]}
-        approaches = {}
-        for a in t["approaches"]:
-            approaches.setdefault((a["source"], a["source_id"]), {})[a["receptor"]] = {
-                "t": a["t"], "ground_m": number(a["ground_m"]), "height_m": number(a["height_m"]),
-                "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1"}
         flights, day_passes = [], set()
         for f in t["flights"]:
-            if parse_time(f["last_utc"]) < lo or parse_time(f["first_utc"]) >= hi:
+            if f["_last"] < lo or f["_first"] >= hi:
                 continue
             key = (f["source"], f["source_id"])
-            link = passes.get(key, {})
+            link = t["pass_index"].get(key, {})
             day_passes.add(link.get("pass_id", ""))
-            flights.append({**f, "pass_id": link.get("pass_id", ""), "evidence": link.get("evidence", ""),
-                            "approaches": approaches.get(key, {})})
-        keys = {(f["source"], f["source_id"]) for f in flights}
-        tracks, last = {}, {}
-        for p in t["positions"]:
-            key = (p["source"], p["source_id"])
-            if key not in keys:
-                continue
-            tt = float(p["t"])
-            if key in last and tt - last[key] < TRACK_SPACING_S:
-                continue
-            last[key] = tt
-            tracks.setdefault(f"{key[0]}|{key[1]}", []).append(
-                [round(tt, 1), float(p["lat"]), float(p["lon"]), number(p["height_m"])])
+            flights.append({**{k: v for k, v in f.items() if not k.startswith("_")},
+                            "pass_id": link.get("pass_id", ""), "evidence": link.get("evidence", ""),
+                            "height_kind": t["height_kinds"].get(key, ""),
+                            "approaches": t["approach_index"].get(key, {})})
+        tracks = {}
+        for f in flights:
+            key = (f["source"], f["source_id"])
+            out, last = [], None
+            for tt, lat, lon, height in t["tracks"].get(key, []):
+                if last is not None and tt - last < TRACK_SPACING_S:
+                    continue
+                last = tt
+                out.append([round(tt, 1), lat, lon, height])
+            tracks[f"{key[0]}|{key[1]}"] = out
         unseen = {}
         for u in t["unseen"]:
             if u["pass_id"] in day_passes:
@@ -187,6 +225,8 @@ class App:
             receptors.append({"id": r["id"], "name": r["name"], "label": r["label"], "lat": float(r["lat"]),
                               "lon": float(r["lon"]), "public": r["public"] == "True",
                               "mic_amsl_m": (number(r["ground_elevation_m"]) or 0) + (number(r["mic_height_m"]) or 0)})
+        times = t["level_times"]
+        levels = t["level_rows"][bisect.bisect_left(times, lo):bisect.bisect_left(times, hi)]
         return {
             "deployment": d.m["deployment"],
             "day": day,
@@ -198,8 +238,7 @@ class App:
             "unseen": unseen,
             "tracks": tracks,
             "events": [e for e in t["noise_events"] if in_day(e["lmax_utc"])],
-            "levels": [[round(float(lv["t"]) - lo, 1), lv["receptor"], float(lv["level_db"])]
-                       for lv in t["levels"] if lo <= float(lv["t"]) < hi],
+            "levels": [[round(lt - lo, 1), receptor, db] for lt, receptor, db in levels],
         }
 
 

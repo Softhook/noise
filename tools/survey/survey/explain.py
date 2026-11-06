@@ -26,8 +26,11 @@ REASONS = (NO_DATA, OUTSIDE, ABOVE, UNEXPLAINED)
 MIN_VISIBLE_S = 20  # An aircraft seen for less than this, where the source could see it, isn't counted
 MAX_STEP_S = 60  # Time between two positions counts only if they're this close together
 # A ceiling is in pressure altitude, and heights here are radar, QNH or GPS heights, so a height
-# this close below the ceiling may still have been above it for the source.
-CEILING_MARGIN_M = 150
+# this close below the ceiling may still have been above it for the source. Pressure altitude is
+# about 8.3 m higher for each hPa that QNH is below 1013.25: 300 m covers QNH down to about 977 hPa,
+# lower than London sees in all but the deepest storms. (The other way, with a high QNH, the
+# source could see higher than its ceiling, which only makes a miss less likely to be explained.)
+CEILING_MARGIN_M = 300
 
 
 def prepare(limits):

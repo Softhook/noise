@@ -60,8 +60,9 @@ CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`). An adapter
 | `receptors` | `id` (`garden`, `nmt6`), lat, lon, ground elevation, mic height | the manifest |
 | `flights` | source, source_id, first and last time, registration (normalised), callsign and its kind (ICAO or IATA), type, squawk, direction, origin, destination | adsb, adsblol, webtrak, airport |
 | `positions` | source, source_id, t, lat, lon, height AMSL, height kind (`qnh`, `geometric`, `radar`), ground speed, track | adsb, adsblol, webtrak |
-| `noise_events` | source, receptor, start, LAmax time, end, LAmax, SEL, Leq, metric (e.g. LAS or 1 s LAeq), trigger flags | fusion (garden), webtrak (nmt6), airport (nmt6) |
+| `noise_events` | source, receptor, start, LAmax time, end, LAmax, SEL, Leq, class (`aircraft`, `other` or `unknown`, as the source classed it), later the metric (e.g. LAS or 1 s LAeq) and trigger flags | fusion (garden), webtrak (nmt6), airport (nmt6) |
 | `levels` | source, receptor, t, level, flag | fusion, webtrak |
+| `coverage` | source, start, end, note: when the source has data | each adapter: from `SOURCE.txt`'s period, the logger's health log, or WebTrak's saved chunks |
 | `clock` | source, start, end, synchronised, offset if known | adsb health log, Fusion event log |
 
 Normalisation is the adapters' job:
@@ -79,13 +80,12 @@ The core computes **closest approach to every receptor** from `positions`, so NM
 
 `link` groups the flights from different sources that are the same aircraft movement into a **pass**. Evidence, from strongest to weakest:
 
-1. the same registration, with overlapping times;
-2. the same squawk, with overlapping times;
-3. tracks that stay close in space and time: the median separation, after the best time shift, under a threshold.
+1. the same registration, with overlapping times, and tracks that agree: where both sources have positions at the same time, their median separation is under 2 km;
+2. tracks that come close in space and time: closest approaches to the pass receptor within 30 s, and the aircraft within 500 m and 200 m in height then.
 
-A link needs the tracks to agree as well as the identifiers, so a registration sent by mistake doesn't join two different aircraft. Each link records its evidence and a confidence.
+The first check means a registration sent by mistake doesn't join two different aircraft. Tracks are only compared where both have positions, never across a hole in one of them, such as where an aircraft left OpenSky's box and came back. Every possible link is found first, then they're made best first: registration links before track links, closer tracks before further ones. So a flight joins its best match, not the first one found. Each link records its evidence. Squawks aren't used: the ADS-B sources don't carry them here.
 
-A pass id is stable across reruns, so notes and overrides keep pointing at the same pass: the UTC time of closest approach to the garden, to the minute, and the registration, or the ADS-B hex if there's no registration (e.g. `20261105T0812-GLCYN`).
+A pass id is stable across reruns, so notes and overrides keep pointing at the same pass: the UTC time of the closest approach to the pass receptor, to the minute, and the registration, or a source id if there's no registration (e.g. `20261105T0812-GLCYN`). The pass receptor is the manifest's `pass_receptor`, or else its first public receptor. A private one like the garden may be missing on another computer, and the ids must come out the same wherever the build runs. The time and the source id come from the pass's flight in the highest-ranked source: the garden's ADS-B, then adsb.lol, OpenSky, any others, and WebTrak last. So adding or removing WebTrak never changes an id. Adding a higher-ranked source can, so build with every ADS-B source a deployment will have before writing overrides against its passes.
 
 ### Match: noise events to passes
 
@@ -261,7 +261,7 @@ The test that WebTrak really is removable: from Phase 1 on, build each deploymen
 
 Phase 0 is fetched after the fact, from windows chosen once the Pi's health log shows they're clean (clock synchronised, no gaps), and with a spread of weather for the height check. The 3.8 hours saved for 5 Nov 2026 held 31 LCY movements, so three such windows give about a hundred LCY passes and many more overflights, which is enough to measure the clock offset, position and height differences.
 
-Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them. OpenSky gives a real ADS-B source in the meantime. On 5 November 2026, all 19 WebTrak passes within 3 km of NMT6 and below 3,000 m linked to their OpenSky flights by registration.
+Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them. OpenSky gives a real ADS-B source in the meantime. On 5 November 2026, all 19 WebTrak passes within 3 km of NMT6 and below 3,000 ft linked to their OpenSky flights by registration.
 
 A closest approach that falls at the first or last position of a source's track is flagged `at_track_end`, as `adsb analyse` does. The aircraft may have come closer outside that source's data, at the edge of OpenSky's box or where WebTrak's saved chunks start or stop. Such approaches are left out of comparisons between sources.
 

@@ -240,11 +240,24 @@ dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
 "use strict";
 const SVG = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
-const SOURCE_ORDER = ["adsb", "webtrak", "opensky"];  // Fixed colour slots; anything else is "other"
+const COLOUR_SLOTS = ["adsb", "webtrak", "opensky"];  // Fixed colour slots; anything else is "other"
 const SOURCE_NAMES = { adsb: "Garden ADS-B", webtrak: "WebTrak radar", opensky: "OpenSky", adsblol: "adsb.lol" };
-const colourOf = (source) => `var(--src-${SOURCE_ORDER.includes(source) ? source : "other"})`;
+const colourOf = (source) => `var(--src-${COLOUR_SLOTS.includes(source) ? source : "other"})`;
 const sourceName = (s) => SOURCE_NAMES[s] || s;
-const isRadar = (source) => source === "webtrak";
+// The order sources are listed in, everywhere on the page: ADS-B first, WebTrak last, as
+// survey/link.py ranks them. So Δ height is always an ADS-B source minus the next source.
+const SOURCE_RANK = ["adsb", "adsblol", "opensky"], LAST_SOURCES = ["webtrak"];
+function sourceRank(s) {
+  if (SOURCE_RANK.includes(s)) return [0, SOURCE_RANK.indexOf(s), s];
+  if (LAST_SOURCES.includes(s)) return [2, LAST_SOURCES.indexOf(s), s];
+  return [1, 0, s];
+}
+function bySource(a, b) {
+  const ra = sourceRank(a), rb = sourceRank(b);
+  return ra[0] - rb[0] || ra[1] - rb[1] || (ra[2] < rb[2] ? -1 : ra[2] > rb[2] ? 1 : 0);
+}
+// Radar tracks are drawn dashed: the sources whose positions are radar heights (positions.height_kind)
+const isRadar = (source) => !!(state.radar && state.radar.has(source));
 // Why a source has no flight in a pass (survey/explain.py), as the table puts it
 const WHY = { "no data": "no data then", "outside its area": "outside its area", "above its ceiling": "above its ceiling", "unexplained": "missed" };
 const unseenOf = (passId) => (state.data.unseen || {})[passId] || {};
@@ -254,6 +267,7 @@ const PROFILE_HALF_WIDTH_M = 3000;
 const state = {
   deployments: [], data: null, window: null, selected: null,
   sources: new Set(), off: new Set(), view: { plan: null, profile: null, timeline: null },
+  radar: new Set(), eventOf: new Map(),
 };
 
 // ---------- helpers ----------
@@ -380,7 +394,7 @@ function passesOf(flights) {
   }
   const r = $("f-receptor").value;
   const when = (fs) => Math.min(...fs.map((f) => (f.approaches[r] ? toT(f.approaches[r].t) : toT(f.first_utc))));
-  return [...map.entries()].map(([id, fs]) => ({ id, flights: fs.sort((a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source)), t: when(fs) }))
+  return [...map.entries()].map(([id, fs]) => ({ id, flights: fs.sort((a, b) => bySource(a.source, b.source)), t: when(fs) }))
     .sort((a, b) => a.t - b.t);
 }
 
@@ -629,7 +643,7 @@ function nearestLevel(r, rel) {
   return best && Math.abs(best[0] - rel) <= 30 ? best : null;
 }
 function timelineLayout() {
-  const lanes = state.data.sources;
+  const lanes = state.data.sources.slice().sort(bySource);
   const levelTop = TL.laneTop + lanes.length * (TL.laneH + TL.gap) + 14;
   return { lanes, levelTop, levelBottom: levelTop + TL.levelH, height: levelTop + TL.levelH + 26 };
 }
@@ -702,9 +716,9 @@ function drawTimeline(flights) {
   }
   for (const e of d.events.filter((ev) => ev.receptor === r && inView(toT(ev.lmax_utc)))) {
     const x = sx(toT(e.lmax_utc)), y = sy(Number(e.lmax_db));
-    const dot = el("circle", { cx: x, cy: y, r: 4, class: "lmax" + (e.event_class === "1" ? "" : " other") }, layer);
+    const dot = el("circle", { cx: x, cy: y, r: 4, class: "lmax" + (e.event_class === "aircraft" ? "" : " other") }, layer);
     dot.addEventListener("mousemove", (ev) => showTip(ev, [h("div", {}, h("b", { text: `${fmt(Number(e.lmax_db), 1)} dB LAmax` })),
-      h("div", { class: "row", text: `${hms(toT(e.lmax_utc))} · SEL ${fmt(Number(e.sel_db), 1)} dB · ${e.event_class === "1" ? "aircraft event" : "other event"}` })]));
+      h("div", { class: "row", text: `${hms(toT(e.lmax_utc))} · SEL ${fmt(Number(e.sel_db), 1)} dB · ${e.event_class === "aircraft" ? "aircraft event" : e.event_class === "other" ? "not an aircraft, by the source" : "unclassed event"}` })]));
     dot.addEventListener("mouseleave", hideTip);
   }
   if (state.window) {
@@ -813,19 +827,43 @@ function shownFlightsIgnoringWindow() {
 }
 
 // ---------- table and detail ----------
-function eventNear(t, r) {
-  // The loudest event at the receptor whose LAmax came 0-40 s after the closest approach (sound takes a few seconds)
-  let best = null;
+// Each noise event at the receptor goes to at most one pass: of the passes whose closest approach
+// came from 5 s before its LAmax to 40 s before it (sound takes a few seconds to arrive, and the
+// clocks may differ a little), the one that came closest to the receptor. Each pass then shows the
+// loudest event it was given. It isn't a match (ARCHITECTURE.md, Match, is still to be built), but
+// two passes never both claim one event. Worked out over every pass of the day, whatever the
+// filters, so filtering never moves an event to another pass.
+const EVENT_BEFORE_S = 5, EVENT_AFTER_S = 40;
+function assignEvents(r) {
+  const passes = new Map();
+  for (const f of state.data.flights) {
+    const a = f.approaches[r];
+    const p = passes.get(f.pass_id) || { t: Infinity, ground: Infinity };
+    p.t = Math.min(p.t, a ? toT(a.t) : toT(f.first_utc));
+    if (a && a.ground_m !== null) p.ground = Math.min(p.ground, a.ground_m);
+    passes.set(f.pass_id, p);
+  }
+  const list = [...passes.entries()].sort((a, b) => a[1].t - b[1].t);
+  const owner = new Map();
   for (const e of state.data.events) {
     if (e.receptor !== r) continue;
-    const dt = toT(e.lmax_utc) - t;
-    if (dt >= -5 && dt <= 40 && (!best || Number(e.lmax_db) > Number(best.lmax_db))) best = e;
+    const at = toT(e.lmax_utc);
+    let best = null;
+    for (const [id, p] of list) {
+      const dt = at - p.t;
+      if (dt < -EVENT_BEFORE_S || dt > EVENT_AFTER_S) continue;
+      if (!best || p.ground < best[1].ground || (p.ground === best[1].ground && p.t < best[1].t)) best = [id, p];
+    }
+    if (!best) continue;
+    const had = owner.get(best[0]);
+    if (!had || Number(e.lmax_db) > Number(had.lmax_db)) owner.set(best[0], e);
   }
-  return best;
+  return owner;
 }
+const eventNear = (passId) => state.eventOf.get(passId) || null;
 function drawTable(passes) {
-  const r = $("f-receptor").value, sources = state.data.sources.filter((s) => state.sources.has(s));
-  // Δ height compares the first two sources shown, in the fixed source order
+  const r = $("f-receptor").value, sources = state.data.sources.filter((s) => state.sources.has(s)).sort(bySource);
+  // Δ height compares the first two sources shown, in source order (bySource)
   const pair = sources.length >= 2 ? sources.slice(0, 2) : null;
   const top = (name, num, cls) => h("th", { rowspan: 2, class: [num ? "num" : "", cls || ""].join(" ").trim() }, name);
   const row1 = [top("Closest (UTC)", false, "pin"), top("Registration", false, "pin pin2"), top("Callsign"), top("Type")];
@@ -836,7 +874,7 @@ function drawTable(passes) {
   }
   if (pair) row1.push(h("th", { rowspan: 2, class: "num", title: "Height at closest approach, the first source's minus the second's. Left out where either is at its track's end." },
     "Δ height (m)", h("div", { class: "sub-th", text: `${sourceName(pair[0])} − ${sourceName(pair[1])}` })));
-  row1.push(top("LAmax (dB)", true));
+  row1.push(h("th", { rowspan: 2, class: "num", title: `The loudest noise event at the receptor whose LAmax came ${EVENT_BEFORE_S} s before to ${EVENT_AFTER_S} s after this pass's closest approach, unless another pass in that time came closer to the receptor. A guide, not a match.` }, "LAmax (dB)"));
   const thead = $("table").querySelector("thead");
   thead.replaceChildren(h("tr", {}, ...row1), h("tr", {}, ...row2));
   const rows = passes.map((p) => {
@@ -863,7 +901,7 @@ function drawTable(passes) {
       const diff = ok ? a.height_m - b.height_m : null;
       cells.push(h("td", { class: "num", text: ok ? (diff >= 0 ? "+" : "") + fmt(diff, 0) : "" }));
     }
-    const ev = eventNear(p.t, r);
+    const ev = eventNear(p.id);
     cells.push(h("td", { class: "num", text: ev ? fmt(Number(ev.lmax_db), 1) : "" }));
     const tr = h("tr", { class: p.id === state.selected ? "selected" : "", tabindex: 0, "data-pass": p.id, "aria-selected": String(p.id === state.selected) }, ...cells);
     tr.addEventListener("click", () => select(p.id, "table"));
@@ -890,8 +928,8 @@ function drawDetail(passes) {
   const r = $("f-receptor").value;
   const parts = passes.some((p) => p.id === state.selected) ? [] : [h("p", { class: "hidden-note", text: "Not in the table or map now: the filters, sources or time window leave it out." })];
   parts.push(h("dl", {}, h("dt", { text: "Pass" }), h("dd", { text: state.selected }),
-    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? (fs.map((f) => f.evidence).find(Boolean) || "registration") : "only one source" })));
-  for (const f of fs.sort((a, b) => SOURCE_ORDER.indexOf(a.source) - SOURCE_ORDER.indexOf(b.source))) {
+    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? (fs.map((f) => f.evidence).find(Boolean) || "not recorded") : "only one source" })));
+  for (const f of fs.sort((a, b) => bySource(a.source, b.source))) {
     const a = f.approaches[r] || {};
     parts.push(h("div", { class: "detail-source" }, key(f.source, colourOf(f.source), isRadar(f.source)), sourceName(f.source)));
     const rows = [["Registration", f.registration], ["Callsign", f.callsign], ["Type", f.type], ["Hex", f.hex], ["Squawk", f.squawk],
@@ -990,6 +1028,7 @@ function tiles(flights, passes) {
 function render() {
   if (!state.data) return;
   const flights = shownFlights(), passes = passesOf(flights);
+  state.eventOf = assignEvents($("f-receptor").value);
   drawTimeline(shownFlightsIgnoringWindow());
   drawPlan(flights);
   drawProfile(flights);
@@ -1030,13 +1069,14 @@ async function loadDay() {
     state.selected = null;
     state.view = { plan: null, profile: null, timeline: null };
     indexLevels();
+    state.radar = new Set(data.flights.filter((f) => f.height_kind === "radar").map((f) => f.source));
     const recSel = $("f-receptor"), prev = recSel.value;
     recSel.replaceChildren(...data.receptors.map((r) => h("option", { value: r.id, text: r.public ? `${r.label} (${r.lat.toFixed(5)}, ${r.lon.toFixed(5)})` : r.label })));
     if (data.receptors.some((r) => r.id === prev)) recSel.value = prev;
     const box = $("f-sources");
     // Sources start on; one switched off stays off from day to day
     state.sources = new Set(data.sources.filter((s) => !state.off.has(s)));
-    box.replaceChildren(...data.sources.map((s) => {
+    box.replaceChildren(...data.sources.slice().sort(bySource).map((s) => {
       const input = h("input", { type: "checkbox" });
       input.checked = state.sources.has(s);
       input.addEventListener("change", () => {

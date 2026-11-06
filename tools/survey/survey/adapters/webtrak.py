@@ -22,6 +22,9 @@ from ..common import iso, registration
 from ..geometry import Frame, distance_m
 
 TRACK_GAP_S = 600  # A track id seen again after this long is a new flight
+# WebTrak's event class, as the common noise_events table puts it. Class 1 looks like an
+# aircraft-correlated event and 5 a non-aircraft one (tools/webtrak/webtrak/parse.py: an inference).
+EVENT_CLASSES = {"1": "aircraft", "5": "other"}
 
 
 def _webtrak(tool):
@@ -100,7 +103,8 @@ def read(name, spec, start, end, receptors, max_km, warnings):
 
     noise = [{
         "source": name, "receptor": rid, "start_utc": iso(e.start), "lmax_utc": iso(e.lmax_time),
-        "end_utc": iso(e.end), "lmax_db": e.lmax, "sel_db": e.sel, "leq_db": e.leq, "event_class": e.event_class,
+        "end_utc": iso(e.end), "lmax_db": e.lmax, "sel_db": e.sel, "leq_db": e.leq,
+        "event_class": EVENT_CLASSES.get(str(e.event_class), "unknown"),
     } for (rid, _), e in sorted(events.items(), key=lambda kv: kv[1].lmax_time)]
     level_rows = [{"source": name, "receptor": rid, "t": round(t, 1), "level_db": lv.level, "flag": lv.flag}
                   for (rid, t), lv in sorted(levels.items(), key=lambda kv: kv[0][1])]

@@ -49,6 +49,18 @@ def _receptor(rid, spec, base, warnings):
     }
 
 
+def _pass_receptor(named, receptors, warnings):
+    """The receptor whose closest approach dates each pass id (link.py). It's the manifest's
+    `pass_receptor`, or else its first public receptor: a private one may be missing on another
+    computer, and pass ids must come out the same wherever the build runs."""
+    if named:
+        if named in receptors:
+            return named
+        warnings.append(f"pass_receptor {named} isn't available, so pass ids are dated by another receptor")
+    public = [rid for rid, r in receptors.items() if r["public"]]
+    return (public or list(receptors))[0]
+
+
 def load(path):
     """The manifest as a dict, with absolute paths, parsed times and the receptors that are available."""
     path = os.path.abspath(path)
@@ -69,6 +81,7 @@ def load(path):
             receptors[rid] = receptor
     if not receptors:
         raise ManifestError(f"{path}: no receptors available")
+    pass_receptor = _pass_receptor(raw.get("pass_receptor"), receptors, warnings)
     sources = {}
     for name, spec in (raw.get("sources") or {}).items():
         if spec is None:
@@ -89,6 +102,7 @@ def load(path):
         "end": end,
         "max_km": float(raw.get("max_km", 15)),
         "receptors": receptors,
+        "pass_receptor": pass_receptor,
         "sources": sources,
         "out_dir": os.path.join(OUT_DIR, name),
         "warnings": warnings,
