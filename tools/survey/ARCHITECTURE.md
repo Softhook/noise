@@ -1,6 +1,6 @@
 # Survey architecture: joining ADS-B, Fusion, WebTrak and airport records
 
-The Thamesmead survey has several data sources that each know part of the story: the Fusion in the garden measures the sound, the ADS-B logger in the garden records the aircraft, WebTrak gives NMT6's levels and the airport's radar, and the airport may give us its own records. This document describes how they fit together so that any source can be added or removed without changing the rest.
+The Thamesmead survey has several data sources that each know part of the story: the Fusion in the garden measures the sound, the ADS-B logger in the garden records the aircraft, WebTrak gives NMT6's levels and the airport's radar, adsb.lol's public archive gives other receivers' ADS-B, and the airport may give us its own records. This document describes how they fit together so that any source can be added or removed without changing the rest.
 
 **Status:** a plan. Nothing in `tools/survey` is written yet. Phase 0 is built first (see [Phases](#phases)).
 
@@ -37,6 +37,7 @@ So the design has one rule: **each source plugs in through an adapter, and the c
 ```
 
 1. **Collectors** are the existing tools: [`tools/adsb`](../adsb/README.md), [`tools/webtrak`](../webtrak/README.md) and [`tools/fusion`](../fusion). They don't know about each other or about this package. The Pi side stays standard-library only and is never changed for the sake of the core.
+   - [adsb.lol's daily archive](../adsb/docs/traces.md), not shown in the diagram, comes in through `tools/adsb` too. `adsb traces` turns its track files into logs, and `adsb analyse` turns those into flights and positions, as for our logger. The same `adsb` adapter then reads it, with the source named in the manifest (`adsb` or `adsblol`).
 2. **Adapters** turn one source's own output into the [common tables](#common-tables). There is one adapter per source. Removing a source means removing it from the deployment's manifest.
 3. **The core** links flights across sources, matches noise events to them and settles each one's identity, using only the common tables. It never imports `adsb`, `webtrak` or `fusion`.
 4. **Lookups** answer a question about one flight when the core can't settle it from what it has. They are optional, limited by a budget, and their answers are kept.
@@ -56,8 +57,8 @@ CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`). An adapter
 | Table | Key columns | Filled by |
 |---|---|---|
 | `receptors` | `id` (`garden`, `nmt6`), lat, lon, ground elevation, mic height | the manifest |
-| `flights` | source, source_id, first and last time, registration (normalised), callsign and its kind (ICAO or IATA), type, squawk, direction, origin, destination | adsb, webtrak, airport |
-| `positions` | source, source_id, t, lat, lon, height AMSL, height kind (`qnh`, `geometric`, `radar`), ground speed, track | adsb, webtrak |
+| `flights` | source, source_id, first and last time, registration (normalised), callsign and its kind (ICAO or IATA), type, squawk, direction, origin, destination | adsb, adsblol, webtrak, airport |
+| `positions` | source, source_id, t, lat, lon, height AMSL, height kind (`qnh`, `geometric`, `radar`), ground speed, track | adsb, adsblol, webtrak |
 | `noise_events` | source, receptor, start, LAmax time, end, LAmax, SEL, Leq, metric (e.g. LAS or 1 s LAeq), trigger flags | fusion (garden), webtrak (nmt6), airport (nmt6) |
 | `levels` | source, receptor, t, level, flag | fusion, webtrak |
 | `clock` | source, start, end, synchronised, offset if known | adsb health log, Fusion event log |
@@ -110,7 +111,7 @@ Each resolved field has a `_source` column (`type_source`: `manual`, `airport`, 
 `checks` reports on the sources against each other:
 
 - **Clock offset** between each pair of sources that track the same aircraft, per pass and per day. Each comes from the time shift that best lines up their tracks. A steady value confirms the clocks, and a jump shows a fault. For the Fusion it uses the measurement plan's check of LASmax time against the predicted sound arrival.
-- **Coverage:** the share of each source's passes near the garden that the other sources also saw, by distance and height. For ADS-B this shows the antenna's coverage, and the effect of the Fusion's 4G modem.
+- **Coverage:** the share of each source's passes near the garden that the other sources also saw, by distance and height. For ADS-B this shows the antenna's coverage, and the effect of the Fusion's 4G modem. In the 37-day survey, WebTrak is only asked about single passes, so adsb.lol is the reference for every day. It's ADS-B too, so it can't show aircraft that don't transmit: only WebTrak and the airport show those.
 - **Heights:** WebTrak radar height against the ADS-B QNH, geometric and chosen heights.
 - **Identity conflicts:** registrations or types that disagree between sources.
 - **Unmatched:** flights and events on either side with nothing to link to.
@@ -126,7 +127,19 @@ Written to `data/<deployment>/` (git-ignored):
 | `event_matches.csv` | noise event → pass, per receptor, with geometry and predicted sound arrival |
 | `identity.csv` | resolved type and registration per pass, with their sources |
 | `checks.txt` | the checks above |
+| `match_check.html` | a page per matched event, for checking matches by eye (see [Match check page](#match-check-page)) |
 | `lookups.log` | every lookup: what was asked, why, how many requests, the answer |
+
+### Match check page
+
+A page that opens offline in a browser, like the ADS-B viewer, with one entry per noise event:
+
+- the 1 s level trace, about 60 s either side of LAmax, with a vertical line at each candidate pass's predicted sound arrival, labelled with its type and distance
+- the matched pass's track, and any other candidate's, on a small plan around the receptor
+- the Fusion's spectrogram for the event, if the export has spectra
+- the match, its flags, and the pass's identity and where each part came from
+
+In the trial, every match is checked on it. In the survey, only the flagged and unmatched ones. MONA's real-time view of levels with the closest approaches marked ([Jackson et al. 2021](https://doi.org/10.3390/engproc2021013006), figure 4) is the same idea, and [NoiseCapt](https://github.com/kx1t/docker-noisecapt)'s spectrogram for each pass gave us the spectrogram. Built with `match`, in Phase 1.
 
 ## Lookups
 
@@ -134,6 +147,7 @@ A lookup takes a pass (its time window and whatever is known about it) and retur
 
 - **Fleet registry:** local, free, always on.
 - **Airport records:** local files, if we get them. They rank above WebTrak.
+- **adsb.lol:** only for days already downloaded and converted (`cache-only`). A day is about 4 GB, so it's fetched by hand for chosen days, not by a lookup.
 - **WebTrak targeted fetch:** reads the raw chunk cache first, and only then fetches the chunks around the pass, about ±2 minutes or 8 requests. It uses `tools/webtrak`'s client, so it keeps its honest user-agent, pacing and caching.
 
 Each lookup's mode is set in the manifest:
@@ -195,7 +209,8 @@ tools/
       __main__.py                     build | lookup | check
       schema.py                       table definitions, reading, writing and validation
       geometry.py                     local coordinates, closest approach to each receptor
-      adapters/adsb.py                reads adsb analyse's flights.csv and positions.csv (--all-positions)
+      adapters/adsb.py                reads adsb analyse's flights.csv and positions.csv (--all-positions), for
+                                      our logger or adsb.lol (source from the manifest)
       adapters/webtrak.py             reads the raw chunk cache with webtrak.parse, within the windows
       adapters/fusion.py              reads the Fusion export, once its format is settled
       adapters/airport.py             reads airport records, once we know their format
@@ -237,14 +252,20 @@ The test that WebTrak really is removable: from Phase 1 on, build each deploymen
 |---|---|---|---|
 | 0: check ADS-B | adsb; webtrak as a source for about three 3-hour windows on 2–3 days | fleet | schema, adsb and webtrak adapters, geometry, `link`, `checks`; the fleet registry seeded from confirmed matches |
 | 1: short Fusion trial | adsb, fusion; webtrak as a source for the trial | fleet; webtrak cache-only | fusion adapter, `match` at the garden and NMT6, the NMT6 v garden comparison, the with/without-WebTrak test |
-| 2: 37-day survey | adsb, fusion; airport if we get records | fleet, airport; webtrak `on` with a small budget | `resolve`'s lookups, the airport adapter |
+| 2: 37-day survey | adsb, fusion, adsblol; airport if we get records | fleet, airport; webtrak `on` with a small budget | `resolve`'s lookups, the airport adapter |
 
 Phase 0 is fetched after the fact, from windows chosen once the Pi's health log shows they're clean (clock synchronised, no gaps), and with a spread of weather for the height check. The 3.8 hours saved for 5 Nov 2026 held 31 LCY movements, so three such windows give about a hundred LCY passes and many more overflights, which is enough to measure the clock offset, position and height differences.
 
 Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them.
 
+## Prior work
+
+- **MONA** (Stanford; [Jackson, Rindfleisch and Alonso 2021](https://doi.org/10.3390/engproc2021013006)) is the closest published system: a single-board computer with dump1090-fa, a GPS with pulse-per-second for the clock, and a sound level meter at each station. Its matching method, "DA-PLANE", works from the aircraft's side. It computes each flight's closest approach to the meter and the expected time of the sound peak. It then looks for peaks in the level time series near that time, rather than relying only on the meter's own triggered events. It stores max(LAeq,1s) and SEL for each attributed overflight, and counts overflights per day within a distance. The paper cites Harding and Ferrier, "Using Post Analysis of a Noise Sample Stream in place of Noise Monitor Based Thresholds in the Detection of Aircraft Noise" (Inter-Noise 2014), and Giladi, "Real-time Identification of Aircraft Sound Events" (Transportation Research Part D 87, 2020), for the same approach. Its code doesn't appear to be published.
+- **[Planefence](https://github.com/sdr-enthusiasts/docker-planefence)** logs the aircraft that pass within a set distance and below a set height of a receiver, with [NoiseCapt](https://github.com/kx1t/docker-noisecapt) for an uncalibrated microphone. Its daily table of close passes is the model for the close-pass count on the ADS-B status page. Its noise measurement isn't usable for ours.
+
 ## Open questions
 
+- **Matching from the pass side:** should `match` also search the `levels` table near each pass's predicted sound arrival, as MONA does, so that a pass the Fusion didn't trigger on still gets a level? The trial will show how many passes have no Fusion event.
 - **Seeding the fleet registry:** only from airframes confirmed by matching two sources, or also from a published fleet list? A published list would need its source and date recorded.
 - **Airport records:** what format, which fields and for which periods? It matters most whether they give the type for each movement and NMT6's event levels.
 - **WebTrak heights:** how are they derived? Phase 0's comparison against ADS-B geometric height should tell us.
