@@ -120,7 +120,7 @@ A 256 GB SSD leaves plenty of margin, and could hold both stages if needed.
 ### 8. Collecting data
 
 - Visit about once a week during the trial and early in the survey, as there are no remote alerts. Run `adsb status` on each visit.
-- Connect a laptop by cable, copy the files with `rsync`, and record SHA-256 checksums, as the measurement plan asks for the Fusion data.
+- The Pi makes its own Wi-Fi hotspot when no known network is in range. A phone on it can open the status page. A laptop on it runs `make pi-collect`, which copies the finished files with `rsync` and checks their SHA-256 checksums, as the measurement plan asks for the Fusion data. A cable is the fallback. See [Setting up the Pi](pi-setup.md#on-each-site-visit).
 - Keep the data on the Pi until a copy has been checked, then keep a second copy off site.
 
 ### 9. Analysis

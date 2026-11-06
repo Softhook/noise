@@ -13,6 +13,7 @@ On the Pi:
 Antenna -> Pro Stick Plus -> readsb --(JSON stream, TCP)--> adsb log -> hourly .jsonl.gz files
                                 |                              |
                                 +--> tar1090 (live map)         +--> health log every 5 minutes
+                                                                    +--> status page every minute (http://<pi>/adsb-status/)
 USB GPS -> gpsd -> chrony (sets the Pi's clock)                 adsb status reads it on site visits
 
 Afterwards, on a laptop:
@@ -28,7 +29,16 @@ python3 -m adsb analyse   --config site.json --logs LOGS --out RESULTS --weather
 python3 -m adsb simulate  demo | logs | serve
 ```
 
-Run it from `tools/adsb`, or with `tools/adsb` on `PYTHONPATH`. On the Pi, `deploy/adsb` wraps this as a plain `adsb` command.
+Run it from `tools/adsb`, or with `tools/adsb` on `PYTHONPATH`. On the Pi, `deploy/install.sh` installs everything and a plain `adsb` command; see [Setting up the Pi](docs/pi-setup.md).
+
+The Pi runs headless, and it's run from a laptop in `tools/adsb`. At the garden, the laptop joins the Pi's own Wi-Fi hotspot and uses `PI=10.42.0.1`:
+
+```bash
+make pi-deploy     # copy the code to the Pi and install or update it
+make pi-status     # the site-visit check
+make pi-config     # edit the Pi's site.json
+make pi-collect    # copy the finished logs to data/collected/ and check their checksums
+```
 
 ## Layout
 
@@ -50,11 +60,11 @@ tools/adsb/
     common.py              units, numbers and UTC times
     simulate.py            a simulated day with known answers, and a fake readsb
   tests/                   unittest tests, on made-up data only
-  deploy/                  systemd service and the `adsb` wrapper for the Pi
+  deploy/                  install script, systemd units and the `adsb` wrapper for the Pi; collect.sh for the laptop
   docs/                    plan, Pi setup, log format, analysis method, the simulated day
   site.example.json        config template; the location is a placeholder
   site.dev.json            config for running the logger on a laptop against the simulator
-  Makefile                 development tasks
+  Makefile                 development tasks, and the `make pi-*` commands for the Pi
 ```
 
 Modules marked **Pi** run on the Raspberry Pi. They must import only the standard library and each other, never the analysis modules, so the Pi needs nothing installed and can't be broken by analysis changes.

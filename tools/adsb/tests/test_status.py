@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 import unittest
 
 from adsb import status as st
@@ -86,6 +87,19 @@ class Status(unittest.TestCase):
     def test_command_exit_code(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(st.main(["--log-dir", self.dir]), 1)
+
+    def test_html_page(self):
+        self.write(record(time.time() - 300, cpu_temp_c=82.0))  # main uses the real time
+        page = os.path.join(self.dir, "index.html")
+        self.assertEqual(st.main(["--log-dir", self.dir, "--html", page]), 0)
+        with open(page) as f:
+            text = f.read()
+        self.assertIn("The Pi is hot", text)
+        self.assertIn("Clock: synchronised to GPS", text)
+        self.assertFalse(os.path.exists(page + ".tmp"))
+        lines, _ = st.check(self.dir, 24, now=NOW)
+        self.assertIn("&lt;b&gt;", st.html_page(lines, ["<b>"], NOW))
+        self.assertIn("No problems found.", st.html_page(lines, [], NOW))
 
 
 if __name__ == "__main__":

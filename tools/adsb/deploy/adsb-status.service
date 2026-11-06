@@ -1,0 +1,13 @@
+[Unit]
+Description=Write the ADS-B logger status page for http://<pi>/adsb-status/
+
+[Service]
+# Run every minute by adsb-status.timer. Installed by deploy/install.sh; see docs/pi-setup.md
+Type=oneshot
+User=adsb-logger
+Environment=PYTHONPATH=/opt/adsb-logger
+# /run/adsb-status is in memory, so the page never writes to the SD card or needs the SSD
+RuntimeDirectory=adsb-status
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+ExecStart=/usr/bin/python3 -m adsb status --html /run/adsb-status/index.html

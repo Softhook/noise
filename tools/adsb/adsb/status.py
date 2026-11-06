@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Check the logger on a site visit: is it running, is the clock right, and is data being kept?
 
-  python3 -m adsb status [--log-dir /var/lib/adsb-logger] [--hours 24]
+  python3 -m adsb status [--log-dir /var/lib/adsb-logger] [--hours 24] [--html PAGE]
 
-Reads the health log and lists the data files. It changes nothing. Exits with 1 if there are
-warnings, so it can also be used in scripts.
+Reads the health log and lists the data files. It changes nothing in the log folder. Exits with 1
+if there are warnings, so it can also be used in scripts. With --html it writes the report as a
+web page instead, for the status page on the Pi (deploy/adsb-status.timer), and exits with 0.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import argparse
 import collections
 import datetime as dt
 import glob
+import html
 import os
 import sys
 import time
@@ -122,12 +124,43 @@ def check(log_dir, hours, now=None):
     return lines, warnings
 
 
+def html_page(lines, warnings, now):
+    """The report as a small web page that reloads itself every minute."""
+    escape = html.escape
+    items = "".join(f"<li>{escape(w)}</li>" for w in warnings)
+    verdict = f"<h2>Warnings</h2><ul class=warn>{items}</ul>" if warnings else "<p class=ok>No problems found.</p>"
+    return f"""<!doctype html>
+<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width, initial-scale=1">
+<meta http-equiv=refresh content=60><title>ADS-B logger status</title>
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem}}
+pre{{white-space:pre-wrap}}.ok{{color:#116622;font-weight:bold}}.warn{{color:#a01010}}</style></head>
+<body><h1>ADS-B logger status</h1>
+<p>Checked {escape(utc(now))}. This page reloads every minute. <a href="/tar1090/">Live map</a></p>
+{verdict}<pre>{escape(chr(10).join(lines))}</pre></body></html>
+"""
+
+
+def write_atomically(path, text):
+    """Replace the page in one step, so the web server never sends half of it."""
+    temporary = f"{path}.tmp"
+    with open(temporary, "w") as f:
+        f.write(text)
+    os.replace(temporary, path)
+
+
 def main(argv=None, prog=None):
     parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     parser.add_argument("--log-dir", default=DEFAULT_LOG_DIR)
     parser.add_argument("--hours", type=float, default=24)
+    parser.add_argument("--html", metavar="PAGE", help="write the report to this web page instead")
     args = parser.parse_args(argv)
-    lines, warnings = check(args.log_dir, args.hours)
+    now = time.time()
+    lines, warnings = check(args.log_dir, args.hours, now=now)
+    if args.log_dir == DEFAULT_LOG_DIR and os.path.isdir(args.log_dir) and not os.path.ismount(args.log_dir):
+        warnings.insert(0, f"{args.log_dir} isn't a mounted disk, so the logger is waiting for the SSD.")
+    if args.html:
+        write_atomically(args.html, html_page(lines, warnings, now))
+        return 0
     print("\n".join(lines))
     if warnings:
         print("\nWARNINGS")

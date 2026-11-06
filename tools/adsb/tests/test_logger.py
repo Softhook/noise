@@ -151,6 +151,14 @@ class Stream(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir)
 
+    def test_odd_hex_values_are_kept_without_crashing(self):
+        logger = make_logger(self.dir)
+        logger.handle_line(b'{"hex":["abc"],"lat":51.51,"lon":0.1}')
+        logger.handle_line(b'{"hex":null,"lat":51.51,"lon":0.1}')
+        logger.close_writer()
+        self.assertEqual(logger.counts["written"], 2)
+        self.assertEqual(logger.aircraft, set())
+
     def test_saves_lines_exactly_filters_far_and_reconnects(self):
         server = socket.socket()
         self.addCleanup(server.close)

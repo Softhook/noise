@@ -52,8 +52,6 @@ def log(message):
     print(f"adsb log: {message}", file=sys.stderr, flush=True)
 
 
-
-
 def classify_line(line, site_lat, site_lon, max_km):
     """Return (decision, record). Unreadable lines are kept, so nothing is silently lost."""
     try:
@@ -218,7 +216,7 @@ class Logger:
         self.counts["lines"] += 1
         self.last_message = time.monotonic()
         decision, record = classify_line(line, self.site_lat, self.site_lon, self.settings["max_km"])
-        if record is not None and record.get("hex"):
+        if record is not None and isinstance(record.get("hex"), str):
             self.aircraft.add(record["hex"])
         if decision != "position":
             self.counts[decision] += 1
@@ -385,8 +383,13 @@ def main(argv=None, prog=None):
     parser = argparse.ArgumentParser(prog=prog, description=__doc__.splitlines()[0])
     parser.add_argument("--config", required=True, help="JSON file; see site.example.json")
     args = parser.parse_args(argv)
-    with open(args.config) as f:
-        logger = Logger(json.load(f))
+    try:
+        with open(args.config) as f:
+            logger = Logger(json.load(f))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        # A clear line in the journal; systemd keeps retrying until the config is fixed
+        log(f"can't use config {args.config}: {error!r}")
+        return 2
     signal.signal(signal.SIGTERM, logger.stop)
     signal.signal(signal.SIGINT, logger.stop)
     logger.run()

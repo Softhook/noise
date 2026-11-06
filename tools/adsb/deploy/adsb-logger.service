@@ -1,17 +1,25 @@
 [Unit]
 Description=ADS-B flight logger for the Thamesmead noise survey
-After=readsb.service chrony.service
+After=readsb.service chrony.service local-fs.target
 Wants=readsb.service
-# Don't start without the SSD, rather than filling the SD card
-RequiresMountsFor=/var/lib/adsb-logger
+# Keep retrying forever (every RestartSec), e.g. while waiting for the SSD to be plugged in
+StartLimitIntervalSec=0
 
 [Service]
-# The adsb package is copied to /opt/adsb-logger/adsb; see docs/pi-setup.md
+# Installed by deploy/install.sh; see docs/pi-setup.md
 Environment=PYTHONPATH=/opt/adsb-logger
+# Don't start without the SSD, rather than filling the SD card. "nofail" in fstab means an SSD
+# that was missing or slow at boot is never mounted later, so mount it here, and retry until it is.
+# The "+" runs these two lines as root.
+ExecStartPre=+/bin/sh -c 'mountpoint -q /var/lib/adsb-logger || mount /var/lib/adsb-logger || { echo "/var/lib/adsb-logger is not mounted: waiting for the SSD"; exit 1; }'
+# A new or replaced SSD belongs to root, and the logger would then run without saving anything
+ExecStartPre=+/bin/chown adsb-logger: /var/lib/adsb-logger
 ExecStart=/usr/bin/python3 -m adsb log --config /etc/adsb-logger/site.json
 User=adsb-logger
 Restart=always
-RestartSec=5
+# Short enough to lose little data after a crash, long enough not to flood the journal while
+# the SSD is missing
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
