@@ -1,11 +1,8 @@
 # OpenSky: aircraft near NMT6
 
-These scripts get the aircraft that passed near NMT6 (St Pauls Church, Thamesmead) from the [OpenSky Network](https://opensky-network.org), and compare them with the WebTrak data saved by [`tools/webtrak`](../webtrak/README.md).
+`nmt6_trino.py` gets every aircraft that passed near NMT6 (St Pauls Church, Thamesmead) from the [OpenSky Network](https://opensky-network.org)'s research database (Trino), and compares them with the WebTrak data saved by [`tools/webtrak`](../webtrak/README.md). It gives a position about once a second and full-resolution heights, and needs research access.
 
-| Script | Source | Use it for |
-|---|---|---|
-| `nmt6_trino.py` | OpenSky's research database (Trino) | **The main one.** Every aircraft in the area, with a position about once a second and full-resolution heights. Needs research access |
-| `nmt6_flights.py` | The free REST API | London City flights only, and their times. Its tracks are simplified and its heights come in 1000 ft steps |
+We use only Trino. OpenSky's free REST API was tried first and dropped (see [below](#why-not-the-rest-api)).
 
 ## Research database: `nmt6_trino.py`
 
@@ -13,7 +10,7 @@ These scripts get the aircraft that passed near NMT6 (St Pauls Church, Thamesmea
 tools/opensky/.venv/bin/python tools/opensky/nmt6_trino.py --from 2026-11-05T08:01Z --to 2026-11-05T11:01Z [--radius 3000] [--geoid 45]
 ```
 
-For each hour of the period, the script runs one query on `state_vectors_data4` for every aircraft in a box about 5 km either side of NMT6, whichever airport it uses. It keeps each position once, at the time OpenSky received it, and drops aircraft on the ground. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
+For each hour of the period, the script runs one query on `state_vectors_data4` for every aircraft in a box about 5 km either side of NMT6, whichever airport it uses. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It keeps each position once, at the time OpenSky received it, and drops aircraft on the ground. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
 
 For each pass it gives:
 - the closest ground distance,
@@ -33,7 +30,7 @@ python3 -m venv .venv && .venv/bin/pip install pyopensky   # .venv is ignored by
 
 [pyopensky](https://github.com/junzis/pyopensky) is the client OpenSky recommends. It's the only package outside the standard library in this repository, and it is kept in `tools/opensky`. `tools/adsb` still uses only the standard library, so the Pi needs nothing installed.
 
-**Login:** Trino uses your OpenSky **account username and password**, not the REST API's client ID and secret. Put them in pyopensky's `settings.conf`, and keep the file private (`chmod 600`). On a Mac it's at `~/Library/Application Support/pyopensky/settings.conf`:
+**Login:** Trino uses your OpenSky **account username and password**, not an API client ID and secret. Put them in pyopensky's `settings.conf`, and keep the file private (`chmod 600`). On a Mac it's at `~/Library/Application Support/pyopensky/settings.conf`:
 
 ```ini
 [default]
@@ -49,10 +46,10 @@ There are no API credits. Instead, OpenSky limits the load on its shared server,
 
 - **Partition filter:** every query filters on the `hour` partition, as well as on time and a small latitude/longitude box. Trino rejects queries without one.
 - **Size:** one query per hour, run one at a time. Each user may have at most 2 queries running and 2 queued. A query may run for at most 30 minutes and scan at most 100 GB.
-- **Caching:** pyopensky saves each result (in `~/Library/Caches/opensky` on a Mac), so a rerun doesn't query again.
+- **Caching:** pyopensky saves each result (in `~/Library/Caches/opensky` on a Mac, kept for 90 days), so a rerun doesn't query again. The script only caches hours that ended more than a day ago. OpenSky may still be processing more recent hours, and a saved partial result would never be refreshed, so those are queried again on every run.
 - **Stale states:** `time - lastcontact <= 15` drops the states OpenSky keeps for up to 300 s after it last heard an aircraft.
 
-Three hours near NMT6 took four queries, a few seconds each, and returned about 7,700 state vectors.
+Three hours near NMT6 (08:01–11:01) take five queries, a few seconds each, including the 5 minutes either side, and return about 8,000 state vectors.
 
 Some periods are missing from OpenSky's data because of outages. Two of them fall in 2026: 2 January 19:00 to 3 January 18:00, and 24 January 08:00–17:00 UTC. Its processing changed on 13–14 August 2026, so results from before and after then may differ.
 
@@ -74,33 +71,26 @@ Some periods are missing from OpenSky's data because of outages. Two of them fal
 - **Heights:** for the 19 London City departures at 550–800 m, OpenSky's GPS height above sea level and WebTrak's radar altitude agree to within about ±20 m. The median difference is about −3 m. The exception is PVD464, a small private jet, at −34 m. That meets the plan's target of agreeing to within about 30 m.
 - **High overflights:** at 4,700–12,000 m, GPS heights are 20–83 m below the radar's. That's as expected for radar altitude, which comes from air pressure and takes no account of air temperature, with the error growing with height. It doesn't matter for the survey.
 
-## Free REST API: `nmt6_flights.py`
+## Why not the REST API
 
-```bash
-python3 tools/opensky/nmt6_flights.py --from 2026-11-05T08:01Z --to 2026-11-05T11:01Z [--radius 3000]
-```
+On 6 November we also tried OpenSky's free REST API (`/flights/arrival`, `/flights/departure` and `/tracks/all`). It found the same 19 London City flights near NMT6 as WebTrak, to within about 2 s. But it was dropped, because:
+- it can only find flights to or from one airport, not every aircraft in an area;
+- its tracks are simplified, with points up to 112 s apart near NMT6;
+- its heights come in 1000 ft steps, so they're no use for the survey;
+- it has daily credit limits, and only goes back 30 days.
 
-The script gets EGLC arrivals and departures from `/flights/arrival` and `/flights/departure`, then fetches each flight's track from `/tracks/all` and works out its closest approach to NMT6. It uses only the standard library and writes to `data/nmt6-<from>.csv`.
-
-**Credentials:** an API client from your OpenSky account page, set as `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET`, or saved in `~/.config/opensky/credentials.json` (`{"clientId": ..., "clientSecret": ...}`, mode 600).
-
-**Limits:**
-- **Credits:** tracks, flights and live states each have their own daily allowance (4,000 credits for a standard user). A historical track costs 30 credits, so the allowance covers about 133 flights a day.
-- **Airport only:** only flights to or from EGLC are found, because the API can't search past times by area.
-- **Simplified tracks:** the tracks endpoint is experimental. It only adds a point when the aircraft turns more than 2.5° or changes height by more than 100 m, and at least every 15 minutes. Heights come in 1000 ft steps.
-
-On 5 November it found the same 19 London City flights near NMT6 as WebTrak, to within about 2 s and usually within 100 m. But its points were up to 112 s apart, and its heights couldn't be used.
+The script is in git history (`tools/opensky/nmt6_flights.py`, before it was removed) if it's ever needed.
 
 ## How the sources compare
 
-| | Garden Pi ([`tools/adsb`](../adsb/README.md)) | OpenSky research database | Free REST API | Home receiver about 15 km away |
-|---|---|---|---|---|
-| Position and height | Every message, full resolution | About 1 s, full resolution | Simplified; 1000 ft heights | Every message, full resolution |
-| Coverage near NMT6 | Almost certain | 33 of 34 on 5 Nov (the missing one sent no ADS-B), 28–60 receivers per flight | London City flights only | Aircraft only 1–3° above the horizon; the lowest arrivals may be blocked |
-| Can we tell what was missed? | Yes, from its health log | No | No | Yes, from its health log |
-| Clock | Our GPS | OpenSky's receivers | OpenSky's receivers | Our GPS, if fitted |
-| History | From when it's installed | Back to 2013 | 30 days | From when it's installed |
-| Terms | Ours | Research licence | API terms | Ours |
+| | Garden Pi ([`tools/adsb`](../adsb/README.md)) | OpenSky research database | Home receiver about 15 km away |
+|---|---|---|---|
+| Position and height | Every message, full resolution | About 1 s, full resolution | Every message, full resolution |
+| Coverage near NMT6 | Almost certain | 33 of 34 on 5 Nov (the missing one sent no ADS-B), 28–60 receivers per flight | Aircraft only 1–3° above the horizon; the lowest arrivals may be blocked |
+| Can we tell what was missed? | Yes, from its health log | No | Yes, from its health log |
+| Clock | Our GPS | OpenSky's receivers | Our GPS, if fitted |
+| History | From when it's installed | Back to 2013 | From when it's installed |
+| Terms | Ours | Research licence | Ours |
 
 The research database makes OpenSky a strong second source. It covers periods before the Pi is installed, fills gaps when the Pi is down, and lets us check the Pi's coverage independently. The garden Pi stays the main record for the Fusion trial and survey, because it's the only source whose completeness and clock we can check ourselves.
 

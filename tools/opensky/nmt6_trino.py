@@ -3,18 +3,23 @@
 
   tools/opensky/.venv/bin/python tools/opensky/nmt6_trino.py --from 2026-11-05T08:01Z --to 2026-11-05T11:01Z
 
-Unlike nmt6_flights.py, which uses the REST API's simplified tracks, this reads state_vectors_data4:
-a state about once a second for every aircraft in a small box around NMT6, whatever its airport,
-with full-resolution pressure (baroaltitude) and GPS (geoaltitude) heights. It needs research
-access and no API credits.
+It reads state_vectors_data4: a state about once a second for every aircraft in a small box
+around NMT6, whatever its airport, with full-resolution pressure (baroaltitude) and GPS
+(geoaltitude) heights. It needs research access and no API credits. WebTrak's radar tracks and
+NMT6 events come from the files saved by tools/webtrak (tools/webtrak/data/lcy/nmt106).
 
 Login: pyopensky reads your OpenSky username and password from its settings.conf (on a Mac,
 ~/Library/Application Support/pyopensky/settings.conf), or opens a browser to log in if they're
 blank. Never put them in this repository.
 
 Load on OpenSky's shared server is kept small, as its guidelines require: one query per hour
-partition, always filtered on `hour`, one at a time, and pyopensky caches each result so a
-rerun doesn't query again.
+partition, always filtered on `hour`, one at a time. pyopensky caches each result so a rerun
+doesn't query again, but only for hours that ended more than a day ago: OpenSky may still be
+processing more recent ones, and a cached partial result would never be refreshed.
+
+Both sources are read for PAD_S either side of the period, so an aircraft passing NMT6 near the
+start or end has positions on both sides of its closest approach. Only passes whose closest
+approach falls inside the period are kept.
 
 Heights: WebTrak's altitude_m is above mean sea level. geoaltitude is GPS height above the WGS84
 ellipsoid, so subtract the geoid height (--geoid, about 45 m in London) to compare them.
@@ -25,22 +30,125 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as dt
 import math
 import os
 import sys
+import time
 import warnings
 
 warnings.filterwarnings("ignore", message=".*OpenSSL.*")
 
-from nmt6_flights import (MATCH_S, NMT6, OUT_DIR, closest_approach, iso, pair, parse_time,
-                          webtrak_events, webtrak_passes)
-
+HERE = os.path.dirname(os.path.abspath(__file__))
+WEBTRAK_DIR = os.path.join(HERE, "..", "webtrak", "data", "lcy", "nmt106")
+OUT_DIR = os.path.join(HERE, "data")
+NMT6 = (51.50535, 0.11075)  # From WebTrak's monitor list
+MATCH_S = 90  # Closest approaches this close in time are taken to be the same flight
+PAD_S = 5 * 60  # Read this long either side of the period; aircraft cross the query box in 1-3 minutes
+SETTLED_S = 24 * 3600  # Only cache an hour's result once it ended this long ago
 BOX_MARGIN_M = 2000  # Query beyond --radius, so a closest approach near the edge has points either side
 PASS_GAP_S = 300  # An aircraft unseen for this long has left; a new pass starts when it returns
 STALE_S = 15  # OpenSky's recommended limit on time - lastcontact
 
 
+def parse_time(text):
+    text = text.strip().replace("Z", "+00:00")
+    t = dt.datetime.fromisoformat(text)
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    return t.timestamp()
+
+
+def iso(t):
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def local_xy(lat, lon):
+    """Metres east and north of NMT6; flat-earth is fine over a few kilometres."""
+    x = math.radians(lon - NMT6[1]) * 6371000 * math.cos(math.radians(NMT6[0]))
+    y = math.radians(lat - NMT6[0]) * 6371000
+    return x, y
+
+
+def closest_approach(points):
+    """(time, ground distance m, height m) of the closest point, interpolated between neighbours.
+
+    points: [(t, lat, lon, height or None)] in time order.
+    """
+    best = None
+    for i in range(len(points)):
+        t0, lat0, lon0, h0 = points[i]
+        x0, y0 = local_xy(lat0, lon0)
+        candidates = [(0.0, x0, y0)]
+        if i + 1 < len(points):
+            t1, lat1, lon1, h1 = points[i + 1]
+            x1, y1 = local_xy(lat1, lon1)
+            dx, dy = x1 - x0, y1 - y0
+            if dx or dy:
+                f = max(0.0, min(1.0, -(x0 * dx + y0 * dy) / (dx * dx + dy * dy)))
+                candidates.append((f, x0 + f * dx, y0 + f * dy))
+        for f, x, y in candidates:
+            d = math.hypot(x, y)
+            if best is None or d < best[1]:
+                if f and i + 1 < len(points):
+                    t = t0 + f * (t1 - t0)
+                    h = h0 + f * (h1 - h0) if h0 is not None and h1 is not None else (h0 if f < 0.5 else h1)
+                else:
+                    t, h = t0, h0
+                best = (t, d, h)
+    return best
+
+
+def webtrak_passes(begin, end, radius):
+    """WebTrak's closest point per radar track, from its saved aircraft files."""
+    tracks = {}
+    day = dt.datetime.fromtimestamp(begin - PAD_S, dt.timezone.utc).date()
+    while day <= dt.datetime.fromtimestamp(end + PAD_S, dt.timezone.utc).date():
+        path = os.path.join(WEBTRAK_DIR, "aircraft", f"{day}.csv")
+        if os.path.exists(path):
+            with open(path, newline="") as f:
+                for row in csv.DictReader(f):
+                    t = parse_time(row["time_utc"])
+                    if not begin - PAD_S <= t <= end + PAD_S or not row["distance_m"]:
+                        continue
+                    d = float(row["distance_m"])
+                    best = tracks.get(row["track"])
+                    if d <= radius and (best is None or d < best["distance_m"]):
+                        tracks[row["track"]] = {"t": t, "closest_utc": row["time_utc"], "callsign": row["callsign"],
+                                                "type": row["type"], "direction": row["direction"],
+                                                "airport": row["airport"], "distance_m": d,
+                                                "height_m": row["height_m"], "altitude_m": row["altitude_m"]}
+        day += dt.timedelta(days=1)
+    return sorted((p for p in tracks.values() if begin <= p["t"] <= end), key=lambda p: p["t"])
+
+
+def webtrak_events(begin, end):
+    path = os.path.join(WEBTRAK_DIR, "events.csv")
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="") as f:
+        rows = [r for r in csv.DictReader(f) if begin <= parse_time(r["lmax_time_local"]) <= end]
+    for r in rows:
+        r["t"] = parse_time(r["lmax_time_local"])
+    return rows
+
+
+def pair(a, b, within):
+    """Greedy one-to-one matching on time, closest first. Returns [(a or None, b or None)]."""
+    options = sorted((abs(x["t"] - y["t"]), i, j) for i, x in enumerate(a) for j, y in enumerate(b)
+                     if abs(x["t"] - y["t"]) <= within)
+    used_a, used_b, pairs = set(), set(), []
+    for _, i, j in options:
+        if i not in used_a and j not in used_b:
+            used_a.add(i), used_b.add(j)
+            pairs.append((a[i], b[j]))
+    pairs += [(a[i], None) for i in range(len(a)) if i not in used_a]
+    pairs += [(None, b[j]) for j in range(len(b)) if j not in used_b]
+    return sorted(pairs, key=lambda p: (p[0] or p[1])["t"])
+
+
 def hour_partitions(begin, end):
+    """The hour partitions that hold states from begin to end (Unix seconds at the start of each UTC hour)."""
     return list(range(int(begin) // 3600 * 3600, int(end) + 1, 3600))
 
 
@@ -57,7 +165,8 @@ def query_hour(trino, hour, begin, end, box):
           AND time - lastcontact <= {STALE_S}
         ORDER BY icao24, time
     """
-    df = trino.query(sql)
+    settled = hour + 3600 < time.time() - SETTLED_S
+    df = trino.query(sql, cached=settled)
     return [] if df is None else df.to_dict("records")
 
 
@@ -139,8 +248,9 @@ def main():
     box = (NMT6[0] - dlat, NMT6[0] + dlat, NMT6[1] - dlon, NMT6[1] + dlon)
     trino = Trino()
     rows = []
-    for hour in hour_partitions(begin, end):
-        got = query_hour(trino, hour, begin, end, box)
+    q_begin, q_end = begin - PAD_S, end + PAD_S
+    for hour in hour_partitions(q_begin, q_end):
+        got = query_hour(trino, hour, max(q_begin, hour), min(q_end, hour + 3599), box)
         print(f"Trino: {iso(hour)}: {len(got)} state vectors", file=sys.stderr)
         rows += got
     passes = passes_from_states(rows, begin, end, args.radius, args.geoid)
