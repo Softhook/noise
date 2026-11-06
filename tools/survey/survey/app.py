@@ -278,6 +278,8 @@ class App:
         for u in t["unseen"]:
             if u["pass_id"] in day_passes:
                 unseen.setdefault(u["pass_id"], {})[u["source"]] = u["reason"]
+        identity = {i["pass_id"]: {k: v for k, v in i.items() if k != "pass_id"}
+                    for i in t["identity"] if i["pass_id"] in day_passes}
         levels = [lv for lv in today["levels"] if lo <= lv[0] < hi]
         return {
             "deployment": d.m["deployment"],
@@ -289,6 +291,7 @@ class App:
                          for c in t["coverage"] if c["_end"] > lo and c["_start"] < hi],
             "flights": flights,
             "unseen": unseen,
+            "identity": identity,  # Pass id -> its resolved registration and type (resolve.py)
             "tracks": {f"{f['source']}|{f['source_id']}": thinned(today["tracks"].get((f["source"], f["source_id"]), []))
                        for f in flights},
             "events": [{k: v for k, v in e.items() if not k.startswith("_")}

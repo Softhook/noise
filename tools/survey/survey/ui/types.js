@@ -22,12 +22,19 @@ const median = (values) => {
   const v = values.slice().sort((a, b) => a - b), n = v.length;
   return !n ? null : n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2;
 };
-// A pass's type: the first one given, in source order, by any of its flights that day, whatever
-// is shown. So a pass sits in the same row whichever sources are switched on.
+// A pass's type: the resolved one (from the fleet table's register entry first), or else the
+// first one given, in source order, by any of its flights that day, whatever is shown. So a pass
+// sits in the same row whichever sources are switched on.
 function passTypes() {
+  const flightsOf = new Map();
+  for (const f of state.data.flights) {
+    if (!flightsOf.has(f.pass_id)) flightsOf.set(f.pass_id, []);
+    flightsOf.get(f.pass_id).push(f);
+  }
   const by = new Map();
-  for (const f of state.data.flights.slice().sort((a, b) => bySource(a.source, b.source))) {
-    if (f.type && !by.has(f.pass_id)) by.set(f.pass_id, f.type);
+  for (const [passId, fs] of flightsOf) {
+    const type = passType(passId, fs);
+    if (type) by.set(passId, type);
   }
   return by;
 }

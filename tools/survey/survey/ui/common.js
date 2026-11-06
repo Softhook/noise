@@ -20,6 +20,21 @@ const isRadar = (source) => !!(state.radar && state.radar.has(source));
 // Why a source has no flight in a pass (survey/explain.py), as the table puts it
 const WHY = { "no data": "no data then", "outside its area": "outside its area", "above its ceiling": "above its ceiling", "unexplained": "missed" };
 const unseenOf = (passId) => (state.data.unseen || {})[passId] || {};
+// A pass's resolved identity (resolve.py): {registration, type, model, type_source, disagree}, or
+// {} for a build made before it existed
+const identityOf = (passId) => (state.data.identity || {})[passId] || {};
+// Where a resolved type came from, in words
+const REGISTER_NAMES = { uk: "the UK register", ch: "the Swiss register" };
+const typeNote = (id) => {
+  const s = id.type_source || "";
+  if (!s) return "";
+  if (s === "manual") return "checked by hand";
+  if (s.startsWith("register:")) return `from ${REGISTER_NAMES[s.slice(9)] || s.slice(9) + " register"}`;
+  return `from ${sourceName(s)} only; not in the fleet table`;
+};
+// A pass's type: the resolved one, or else the first its flights give in source order
+const passType = (passId, flights) => identityOf(passId).type
+  || flights.slice().sort((a, b) => bySource(a.source, b.source)).map((f) => f.type).find(Boolean) || "";
 const unexplained = (passId) => Object.entries(unseenOf(passId)).some(([s, why]) => why === "unexplained" && state.sources.has(s));
 
 const state = {

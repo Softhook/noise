@@ -2,7 +2,7 @@
 
 The Thamesmead survey has several data sources that each know part of the story: the Fusion in the garden measures the sound, the ADS-B logger in the garden records the aircraft, WebTrak gives NMT6's levels and the airport's radar, adsb.lol's public archive gives other receivers' ADS-B, and the airport may give us its own records. This document describes how they fit together so that any source can be added or removed without changing the rest.
 
-**Status:** part of Phase 0 is built (see [README.md](README.md)): the manifest, the common tables, the `adsb` and `webtrak` adapters, closest approaches, `link`, and the survey app (`python3 -m survey serve`), which shows every source together. `checks`, `match`, `resolve`, the lookups and the fleet registry are still to do. OpenSky now stands in for the Pi until the Pi has real data.
+**Status:** part of Phase 0 is built (see [README.md](README.md)): the manifest, the common tables, the `adsb` and `webtrak` adapters, closest approaches, `link`, the fleet registry with its register lookups (`python3 -m survey fleet`), the first part of `resolve`, and the survey app (`python3 -m survey serve`), which shows every source together. `checks`, `match`, the rest of `resolve` and the other lookups are still to do. OpenSky now stands in for the Pi until the Pi has real data.
 
 ## Why
 
@@ -97,19 +97,26 @@ A pass id is stable across reruns, so notes and overrides keep pointing at the s
 
 ### Resolve: identity, with where each answer came from
 
-`resolve` decides each pass's type and registration. It takes the sources in this order and stops at the first confident answer:
+An aircraft's type is fixed by its registration, so the type is settled once per airframe, from its country's official register, rather than per flight.
 
-1. **Manual overrides** (`registry/overrides.csv`, kept in git). A person's decision always wins.
-2. **Airport records**, if we have them for that period.
-3. **The fleet registry** (`registry/fleet.csv`, registration → type, kept in git). LCY's fleet is a few dozen airframes that come back day after day, so once an airframe is confirmed it never needs looking up again. This is what ends the dependence on WebTrak.
-4. **The ADS-B database type**, if it's present and agrees with the registry.
-5. **A [lookup](#lookups)**, only if one of these triggers fires:
-   - the type is on the watch list, the pairs that matter to the survey: `E190`/`E290`, `A320`/`A20N`, `BCS1`/`BCS3`;
+**Built:** `resolve` gives each pass a registration (from its highest-ranked flight that has one) and a type:
+
+1. **The fleet registry** (`registry/fleet.csv`, kept in git), by registration. Each row is the airframe's entry in its country's register, filled by `python3 -m survey fleet` for the registers that can be asked online (the UK's G-INFO, Switzerland's BAZL; `survey/registers.py`), or by a person (`manual`) for the others. LCY's fleet is a few dozen airframes that come back day after day, so once an airframe is in the registry it never needs looking up again. This is what ends the dependence on WebTrak and on tar1090-db.
+2. Otherwise, **the highest-ranked source's type**: tar1090-db's, through the ADS-B sources, before WebTrak's.
+
+It writes `identity`: `type_source` (`register:uk`, `register:ch`, `manual`, or the source's name), and `disagree`, listing any source that gives another type and any transponder address other than the register's.
+
+**Still to do:**
+
+1. **Manual overrides per pass** (`registry/overrides.csv`), for a single movement rather than an airframe. A person's decision always wins.
+2. **Airport records**, if we have them for that period, ahead of the sources.
+3. **A [lookup](#lookups)**, only if one of these triggers fires:
+   - the type is on the watch list, the pairs that matter to the survey: `E190`/`E290`/`E295`, `A320`/`A20N`, `BCS1`/`BCS3`;
    - the type or registration is missing;
    - the registration isn't in the fleet registry;
    - two sources disagree.
 
-Each resolved field has a `_source` column (`type_source`: `manual`, `airport`, `fleet`, `adsb_db`, `webtrak`). Any result can therefore be reported "without WebTrak", and we can see exactly which flights WebTrak changed.
+The registers settled the first watch-list pair on 6 November 2026. Helvetic flies E190-E2s (HB-AZA–AZH, ERJ 190-300) and E195-E2s (HB-AZI–AZL, ERJ 190-400) on the same Swiss flight numbers, so the type can't come from the callsign or the timetable.
 
 ### Checks
 
@@ -130,7 +137,7 @@ Written to `data/<deployment>/` (git-ignored):
 | `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
 | `build.json` | when it was built, the counts per source, and the warnings |
 | `event_matches.csv` | noise event → pass, per receptor, with geometry and predicted sound arrival |
-| `identity.csv` | resolved type and registration per pass, with their sources |
+| `common/identity.csv` | resolved type and registration per pass, where the type came from, and any disagreement (built) |
 | `checks.txt` | the checks above |
 | `match_check.html` | a page per matched event, for checking matches by eye (see [Match check page](#match-check-page)) |
 | `lookups.log` | every lookup: what was asked, why, how many requests, the answer |
@@ -218,14 +225,14 @@ tools/
       adapters/fusion.py              reads the Fusion export, once its format is settled
       adapters/airport.py             reads airport records, once we know their format
       adapters/manual.py              reads the registry's overrides
-      lookups/fleet.py
       lookups/airport.py
       lookups/webtrak.py
       link.py  build.py               built
-      match.py  resolve.py  checks.py to do
+      resolve.py  fleet.py  registers.py  built: types from the fleet registry, and its register lookups
+      match.py  checks.py             to do
       app.py  server.py               the survey app: what the page asks for, and HTTP
       ui/                             the survey app's page: index.html, style.css, a script per panel
-    registry/fleet.csv                registration, type, source, date confirmed
+    registry/fleet.csv                registration, type, model, engines, mass, noise certificate, register, date checked
     registry/overrides.csv            pass id, field, value, reason, who
     tests/
 ```
@@ -275,7 +282,6 @@ A closest approach that falls at the first or last position of a source's track,
 ## Open questions
 
 - **Matching from the pass side:** should `match` also search the `levels` table near each pass's predicted sound arrival, as MONA does, so that a pass the Fusion didn't trigger on still gets a level? The trial will show how many passes have no Fusion event.
-- **Seeding the fleet registry:** only from airframes confirmed by matching two sources, or also from a published fleet list? A published list would need its source and date recorded.
 - **Airport records:** what format, which fields and for which periods? It matters most whether they give the type for each movement and NMT6's event levels.
 - **WebTrak heights:** how are they derived? Phase 0's comparison against ADS-B geometric height should tell us.
 - **NMT6's microphone height and ground elevation:** needed for its closest-approach geometry. They may be in the airport's noise reports.

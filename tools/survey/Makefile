@@ -1,12 +1,13 @@
 # Survey tasks. Run from tools/survey. Standard library only.
 PYTHON ?= python3
 
-.PHONY: help test build serve
+.PHONY: help test build serve fleet
 
 help:
 	@echo "make serve                     the survey app at http://127.0.0.1:8766"
 	@echo "make build DEPLOYMENT=2026-11-05   build one deployment's common tables"
 	@echo "make build                     build every deployment in ../deployments"
+	@echo "make fleet                     look up new aircraft types in the official registers (online)"
 	@echo "make test                      run the tests (made-up data, no network)"
 
 test:
@@ -21,3 +22,6 @@ endif
 
 serve:
 	$(PYTHON) -m survey serve
+
+fleet:
+	$(PYTHON) -m survey fleet

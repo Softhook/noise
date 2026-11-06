@@ -147,6 +147,7 @@ tbody tr:hover td.pin, tbody tr.selected td.pin { background-image: linear-gradi
 tbody tr:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; }
 td.why { color: var(--muted); font-style: italic; text-align: center; }
 td.why.unexplained, .unexplained { color: var(--serious); font-style: normal; font-weight: 600; }
+td.disagree, dd.disagree { color: var(--serious); font-weight: 600; }
 .hidden-note { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody tr { cursor: pointer; }

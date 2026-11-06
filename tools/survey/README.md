@@ -47,7 +47,34 @@ The garden's location is private, so a manifest never holds it. Instead, the gar
 
 Pass ids are dated by the closest approach to one receptor: the manifest's `pass_receptor`, or else its first public receptor, so they come out the same on a computer without the garden's `site.json`.
 
-Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes` and `unseen`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen` and `identity`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+
+## Aircraft types
+
+An aircraft's type is fixed by its registration, so each airframe is looked up once in its country's official register and kept in [`registry/fleet.csv`](registry/fleet.csv), in git. The build then gives every pass of that airframe the register's type. A pass whose airframe isn't in the table takes its type from its highest-ranked source, as before: in the ADS-B sources that's tar1090-db's.
+
+```bash
+make build      # first, so the fleet check knows which aircraft the builds saw
+make fleet      # look up any registration not yet in the table (online)
+make build      # again, to use what it found
+```
+
+`make fleet` (`python3 -m survey fleet`) checks the registrations of flights that came within 3 km of a receptor and below 3,000 ft (`--km`, `--ft`), as the passes table starts with. It asks only about those not already in the table, one request a second. `--dry-run` lists what it would ask, `--recheck` asks again, and `python3 -m survey fleet G-LCYN HB-AZH` checks just those.
+
+Registers it can ask online, in `survey/registers.py`:
+
+| Mark | Register | Gives |
+|---|---|---|
+| G- | UK, the CAA's G-INFO | type, model, engines, MTOW, transponder address, noise certificate |
+| HB- | Switzerland, FOCA/BAZL | type, model and its marketing name, engines, MTOM, noise certificate |
+
+It lists the registrations no register covers. Check those by hand and add a row with `register` set to `manual` and the source in `note`; the script never overwrites one. A registration its register doesn't have gets a `not found` row, so it isn't asked again, and settles no type. Only facts about the aircraft are kept, never its owner or operator.
+
+The noise columns are the airframe's certificated levels, in EPNdB, at the approach, lateral and flyover points.
+
+In the app, a pass's type is the resolved one. Its detail says where it came from. A type in the passes table shown in orange means a source gave another type, or a transponder address other than the register's: worth a look. `build.json`'s `types` counts the passes by where their type came from.
+
+To add a country, write a function in `survey/registers.py` that takes a registration and returns the fleet table's columns, or None if the register doesn't have it, and add it to `REGISTERS`.
 
 ## Code
 
@@ -61,7 +88,10 @@ Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `f
 | `survey/geometry.py` | Local coordinates, closest approach with `at_track_end` (at an edge of the data), the path angle there, and positions along a track |
 | `survey/explain.py` | Why a source has no flight in a pass: no data then, outside its area, above its ceiling, or unexplained |
 | `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; ranks the sources |
-| `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, the tables, as a list of steps |
+| `survey/resolve.py` | Each pass's registration and type: the fleet table's first, then the sources', with any disagreement |
+| `survey/fleet.py` | `python3 -m survey fleet`: the fleet table, and which registrations to look up |
+| `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's |
+| `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, resolving types, the tables, as a list of steps |
 | `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's small tables, read once and kept until the next build, and its positions and levels read a day at a time |
 | `survey/server.py` | `python3 -m survey serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |
 | `survey/ui/` | The page: `index.html` and `style.css`, `common.js` (state and helpers), `map.js` (plan and profile), `timeline.js`, `passes.js` (table and detail), `types.js` (by aircraft type), `main.js` (loading and start-up) |
@@ -69,7 +99,7 @@ Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `f
 ### Extending it
 
 - **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS`, `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Positions and levels can be generators, so a long deployment's rows are read as the build takes them rather than all at once. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `link.SOURCE_RANK` if it should date passes ahead of others, and a colour and name in `ui/common.js`.
-- **A new core step** (`match`, `resolve`, `checks`): a module of its own, called from `build.build()` between the existing steps, with its table added to `schema.TABLES`.
+- **A new core step** (`match`, `checks`): a module of its own, called from `build.build()` between the existing steps, with its table added to `schema.TABLES`.
 - **A new request for the page:** a method on `app.App`, and a line in `server.py`'s `GET_ROUTES` or `POST_ROUTES`.
 - **A new panel on the page:** a script in `ui/`, loaded in `index.html` before `main.js`, and a call from `render()` in `main.js`.
 

@@ -55,8 +55,10 @@ function drawTable(passes) {
     const by = Object.fromEntries(p.flights.map((f) => [f.source, f]));
     const reg = p.flights.map((f) => f.registration).find(Boolean) || "";
     const call = p.flights.map((f) => f.callsign).find(Boolean) || "";
-    const type = p.flights.map((f) => f.type).find(Boolean) || "";
-    const cells = [h("td", { class: "pin", text: hms(p.t) }), h("td", { class: "pin pin2", text: reg || "–" }), h("td", { text: call || "–" }), h("td", { text: type || "–" })];
+    const type = passType(p.id, p.flights), id = identityOf(p.id);
+    const typeCell = h("td", { text: type || "–", title: typeNote(id) });
+    if (id.disagree) typeCell.classList.add("disagree");
+    const cells = [h("td", { class: "pin", text: hms(p.t) }), h("td", { class: "pin pin2", text: reg || "–" }), h("td", { text: call || "–" }), typeCell];
     const unseen = unseenOf(p.id);
     for (const s of sources) {
       if (!by[s] && unseen[s]) {
@@ -101,8 +103,11 @@ function drawDetail(passes) {
   box.className = "";
   const r = $("f-receptor").value;
   const parts = passes.some((p) => p.id === state.selected) ? [] : [h("p", { class: "hidden-note", text: "Not in the table or map now: the filters, sources or time window leave it out." })];
+  const id = identityOf(state.selected);
   parts.push(h("dl", {}, h("dt", { text: "Pass" }), h("dd", { text: state.selected }),
-    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? ([...new Set(fs.map((f) => f.evidence).filter(Boolean))].join("; ") || "not recorded") : "only one source" })));
+    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? ([...new Set(fs.map((f) => f.evidence).filter(Boolean))].join("; ") || "not recorded") : "only one source" }),
+    ...(id.type ? [h("dt", { text: "Type" }), h("dd", { text: [id.type, id.model].filter(Boolean).join(", ") + ` (${typeNote(id)})` })] : []),
+    ...(id.disagree ? [h("dt", { text: "Disagree" }), h("dd", { class: "disagree", text: id.disagree })] : [])));
   for (const f of fs.sort((a, b) => bySource(a.source, b.source))) {
     const a = f.approaches[r] || {};
     parts.push(h("div", { class: "detail-source" }, key(f.source, colourOf(f.source), isRadar(f.source)), sourceName(f.source)));

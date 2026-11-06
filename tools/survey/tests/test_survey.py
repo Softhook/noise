@@ -18,7 +18,7 @@ import threading
 import unittest
 from unittest import mock
 
-from survey import adapters, build, explain, link, manifest, schema, server
+from survey import adapters, build, explain, fleet, link, manifest, registers, resolve, schema, server
 from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, registration
@@ -512,6 +512,27 @@ class BuildAndServe(unittest.TestCase):
         patcher = mock.patch.object(manifest, "OUT_DIR", os.path.join(self.dir, "out"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A fleet table of the test's own, never the real one in registry/
+        self.fleet_path = os.path.join(self.dir, "fleet.csv")
+        fleet.write({"GLCYN": {"registration": "GLCYN", "mark": "G-LCYN", "status": "registered", "icao_type": "E190",
+                               "model": "ERJ 190-100 LR", "icao24": "4006A1", "register": "uk"}}, self.fleet_path)
+        patcher = mock.patch.object(fleet, "FLEET_PATH", self.fleet_path)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_build_resolves_types_from_the_fleet_table(self):
+        m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
+        summary = build.build(m, log=io.StringIO())
+        common = os.path.join(self.dir, "out", "2026-11-05", "common")
+        got = {i["registration"]: i for i in schema.read_table(common, "identity")}
+        self.assertEqual((got["GLCYN"]["type"], got["GLCYN"]["type_source"], got["GLCYN"]["disagree"]),
+                         ("E190", "register:uk", ""))
+        self.assertEqual((got["GLCYO"]["type"], got["GLCYO"]["type_source"]), ("E190", "opensky"))
+        self.assertEqual(summary["types"], {"from a register": 1, "set by hand": 0, "from a source only": 1,
+                                            "unknown": 0, "sources disagree": 0})
+        # The page is given each pass's identity
+        day = App(self.deployments).day({"deployment": "2026-11-05", "day": "2026-11-05"})
+        self.assertEqual(day["identity"]["20261105T0900-GLCYN"]["type_source"], "register:uk")
 
     def test_build_writes_the_common_tables(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
@@ -784,6 +805,174 @@ class Page(unittest.TestCase):
         # A height at an edge of its source's data is shown, but left out of the median
         got = self.run_page(data, sources=["opensky", "webtrak"], measure="height_m")["types"]
         self.assertEqual(got[0], ["A320", 1, [["opensky", [900], None]]])
+
+    def test_a_resolved_type_decides_a_pass_row(self):
+        def f(pass_id, kind):
+            return {"pass_id": pass_id, "source": "opensky", "type": kind, "first_utc": iso(T0 - 60),
+                    "approaches": {"nmt6": {"t": iso(T0), "ground_m": 200, "height_m": 300, "path_angle_deg": -4.5}}}
+
+        # The register says a is an E290, whatever OpenSky says; b isn't in the fleet table
+        data = {"sources": ["opensky"], "events": [], "flights": [f("a", "E190"), f("b", "E190")],
+                "identity": {"a": {"type": "E290", "type_source": "register:ch", "disagree": "opensky E190"}}}
+        got = self.run_page(data, sources=["opensky"], measure="path_angle_deg")["types"]
+        self.assertEqual([row[:2] for row in got], [["E190", 1], ["E290", 1]])
+
+
+class FakeRegister:
+    """registers.Http's stand-in: answers by URL ending, and records what was asked."""
+
+    def __init__(self, answers):
+        self.answers, self.asked = answers, []
+
+    def json(self, url, body=None):
+        self.asked.append((url, body))
+        for ending, answer in sorted(self.answers.items(), key=lambda a: -len(a[0])):  # The most specific first
+            if url.endswith(ending):
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+        raise AssertionError(f"unexpected request {url}")
+
+
+GINFO = {
+    "search": [{"AircraftID": 64481, "Mark": "LCYN", "AircraftType": "ERJ 190-100 LR", "RegistrationStatus": "R"},
+               {"AircraftID": 1, "Mark": "LCYNX"}],
+    "details/64481": {
+        "RegistrationDetails": {"Mark": "LCYN", "Status": "Registered"},
+        "AircraftDetails": {"Manufacturer": "EMPRESA BRASILEIRA DE AERONAUTICA SA", "Type": "ERJ 190-100 LR",
+                            "SerialNumber": "19000392", "ICAO24BitAircraftAddress": {"Hex": "4063c3"},
+                            "PopularName": "EMBRAER 190", "ICAOAircraftTypeDesignator": "E190",
+                            "Engines": [{"NumberOfEngines": 2, "Name": "GENERAL ELECTRIC CO CF34-10E5A1 G07 "}],
+                            "Mtow": "45990 kg", "YearBuild": 2010},
+        "NoiseSummaryDetails": {"NoiseCertificateNumber": "030406", "NoiseChapter": "03"},
+        "RegisteredAircraftOwners": [{"RegisteredOwners": "SOMEONE"}]},
+    "noisecertificationdetails/64481": {"NoiseLevel": {
+        "FlyoverLevel": "Flyover: 81.4 EPNdB", "LateralLevel": "Lateral: 93.0 EPNdB", "ApproachLevel": "Approach: 92.5 EPNdB"}},
+}
+BAZL = {
+    "/lfr": [{"lfrId": "1334634", "registration": "HB-AZH", "status": "Registered"}],
+    "/lfr/1334634": {"lfrId": "1334634", "status": "Registered", "registration": "HB-AZH",
+                     "aircraftModelType": "ERJ 190-300", "icaoCode": "E290", "manufacturer": "YABORA",
+                     "ownerOperators": [{"ownerOperator": "Someone AG"}],
+                     "details": {"marketing": "E190-E2", "serialNumber": "19020046", "yearOfManufacture": 2021,
+                                 "mtom": 54000, "engines": [{"name": "PW1919G", "count": 2}],
+                                 "noiseStandard": "ICAO Annex 16, Vol. 1, Chapter 14",
+                                 "noiseLevel": "Sideline: 85.4 EPNdB; Take Off: 77.7 EPNdB; Approach: 91.4 EPNdB"}},
+}
+
+
+class Fleet(unittest.TestCase):
+    def test_each_registration_goes_to_its_countrys_register(self):
+        self.assertEqual(registers.nationality("HBAZH"), "HB")
+        self.assertEqual(registers.nationality("GLCYN"), "G")
+        self.assertIsNone(registers.nationality("DAKJC"))
+        with self.assertRaises(KeyError):
+            registers.look_up("DAKJC", FakeRegister({}))
+
+    def test_the_uk_register_gives_type_engines_mass_and_noise_but_no_owner(self):
+        http = FakeRegister(GINFO)
+        got = registers.look_up("GLCYN", http)
+        self.assertEqual(http.asked[0][1]["Registration"], "LCYN")
+        self.assertEqual((got["mark"], got["icao_type"], got["model"], got["icao24"], got["mtow_kg"]),
+                         ("G-LCYN", "E190", "ERJ 190-100 LR", "4063C3", 45990))
+        self.assertEqual((got["approach_epndb"], got["lateral_epndb"], got["flyover_epndb"]), (92.5, 93.0, 81.4))
+        self.assertEqual(got["noise_standard"], "ICAO Annex 16, Chapter 3")
+        self.assertEqual(got["engines"], "2 x GENERAL ELECTRIC CO CF34-10E5A1 G07")
+        self.assertEqual(set(got), set(fleet.FIELDS))  # Nothing about the owner
+        self.assertNotIn("SOMEONE", json.dumps(got))
+
+    def test_the_swiss_register_names_its_noise_points_its_own_way(self):
+        got = registers.look_up("HBAZH", FakeRegister(BAZL))
+        self.assertEqual((got["mark"], got["icao_type"], got["model"], got["marketing_name"], got["mtow_kg"]),
+                         ("HB-AZH", "E290", "ERJ 190-300", "E190-E2", 54000))
+        # Sideline is the lateral point, take-off the flyover one
+        self.assertEqual((got["approach_epndb"], got["lateral_epndb"], got["flyover_epndb"]), (91.4, 85.4, 77.7))
+        self.assertEqual(set(got), set(fleet.FIELDS))
+        self.assertNotIn("Someone", json.dumps(got))
+
+    def test_an_aircraft_the_register_doesnt_have_is_none(self):
+        self.assertIsNone(registers.look_up("GLCYQ", FakeRegister({"search": [{"AircraftID": 1, "Mark": "LCYQX"}]})))
+        self.assertIsNone(registers.look_up("HBAZZ", FakeRegister({"/lfr": []})))
+
+    def test_an_unexpected_answer_is_a_failed_lookup_not_a_missing_aircraft(self):
+        with self.assertRaises(registers.LookupFailed):
+            registers.look_up("HBAZH", FakeRegister({"/lfr": [{"registration": "HB-AZH"}]}))  # No lfrId
+
+    def test_only_new_registrations_are_asked_about_and_manual_ones_never(self):
+        entries = {"GLCYN": {"registration": "GLCYN", "register": "uk"},
+                   "PHEZE": {"registration": "PHEZE", "register": fleet.MANUAL}}
+        regs = ["GLCYN", "GLCYO", "PHEZE", "PHEZF", "HBAZH"]
+        self.assertEqual(fleet.to_check(regs, entries), (["GLCYO", "HBAZH"], ["PHEZF"]))
+        self.assertEqual(fleet.to_check(regs, entries, recheck=True), (["GLCYN", "GLCYO", "HBAZH"], ["PHEZF"]))
+
+    def test_checking_keeps_answers_misses_and_what_it_had_when_a_register_fails(self):
+        old = {"registration": "HBAZH", "icao_type": "E290", "register": "ch"}
+        entries = {"HBAZH": dict(old)}
+        answers = {**GINFO, "search": [{"AircraftID": 64481, "Mark": "LCYN"}],
+                   "/lfr": registers.LookupFailed("down")}
+        http = FakeRegister(answers)
+        failed = fleet.check(["GLCYN", "HBAZH"], entries, http, log=io.StringIO())
+        self.assertEqual(failed, ["HBAZH"])
+        self.assertEqual(entries["GLCYN"]["icao_type"], "E190")
+        self.assertEqual(entries["HBAZH"], old)
+        http = FakeRegister({"search": []})
+        fleet.check(["GLCYQ"], entries, http, log=io.StringIO())
+        self.assertEqual((entries["GLCYQ"]["status"], entries["GLCYQ"]["register"]), (fleet.NOT_FOUND, "uk"))
+        self.assertEqual(fleet.known_type(entries["GLCYQ"]), "")
+
+    def test_the_table_reads_back_as_written(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "registry", "fleet.csv")
+            self.assertEqual(fleet.read(path), {})
+            entry = registers.look_up("GLCYN", FakeRegister(GINFO))
+            fleet.write({"GLCYN": entry}, path)
+            got = fleet.read(path)["GLCYN"]
+            self.assertEqual(got["icao_type"], "E190")
+            self.assertEqual(got["approach_epndb"], "92.5")
+            self.assertEqual(list(got), fleet.FIELDS)
+
+
+class Resolve(unittest.TestCase):
+    def flights_and_passes(self, *members):
+        flights, passes = [], []
+        for pass_id, source, reg, kind, hex_ in members:
+            sid = f"{source}-{pass_id}"
+            flights.append({"source": source, "source_id": sid, "registration": reg, "type": kind, "hex": hex_})
+            passes.append({"pass_id": pass_id, "source": source, "source_id": sid, "evidence": ""})
+        return passes, flights
+
+    def test_the_register_decides_and_sources_that_differ_are_listed(self):
+        passes, flights = self.flights_and_passes(
+            ("p1", "webtrak", "HBAZH", "E295", ""), ("p1", "opensky", "HBAZH", "E290", "4b4a01"))
+        entries = {"HBAZH": {"registration": "HBAZH", "icao_type": "E290", "model": "ERJ 190-300", "register": "ch",
+                             "status": "registered", "icao24": ""}}
+        [got] = resolve.resolve(passes, flights, entries)
+        self.assertEqual((got["registration"], got["type"], got["model"], got["type_source"], got["disagree"]),
+                         ("HBAZH", "E290", "ERJ 190-300", "register:ch", "webtrak E295"))
+
+    def test_a_transponder_address_other_than_the_registers_is_flagged(self):
+        passes, flights = self.flights_and_passes(("p1", "opensky", "GLCYN", "E190", "4063C4"))
+        entries = {"GLCYN": {"icao_type": "E190", "register": "uk", "status": "registered", "icao24": "4063C3"}}
+        [got] = resolve.resolve(passes, flights, entries)
+        self.assertEqual(got["disagree"], "opensky hex 4063C4, register 4063C3")
+
+    def test_without_an_entry_the_highest_ranked_source_decides(self):
+        passes, flights = self.flights_and_passes(
+            ("p1", "webtrak", "PHEZE", "E195", ""), ("p1", "opensky", "PHEZE", "E190", ""),
+            ("p2", "webtrak", "", "", ""),
+            ("p3", "opensky", "GLCYQ", "E190", ""))
+        entries = {"GLCYQ": {"status": fleet.NOT_FOUND, "register": "uk"},
+                   "PHEZE": {"status": "", "icao_type": "", "register": fleet.MANUAL}}
+        got = {r["pass_id"]: r for r in resolve.resolve(passes, flights, entries)}
+        self.assertEqual((got["p1"]["type"], got["p1"]["type_source"], got["p1"]["disagree"]), ("E190", "opensky", "webtrak E195"))
+        self.assertEqual((got["p2"]["type"], got["p2"]["type_source"]), ("", ""))
+        self.assertEqual(got["p3"]["type_source"], "opensky")  # A "not found" entry settles nothing
+
+    def test_a_manual_entry_says_so(self):
+        passes, flights = self.flights_and_passes(("p1", "opensky", "PHEZE", "E190", ""))
+        entries = {"PHEZE": {"icao_type": "E190", "register": fleet.MANUAL, "status": "registered"}}
+        [got] = resolve.resolve(passes, flights, entries)
+        self.assertEqual(got["type_source"], fleet.MANUAL)
 
 
 if __name__ == "__main__":

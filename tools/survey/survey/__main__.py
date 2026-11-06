@@ -3,6 +3,7 @@
 commands:
   build    run a deployment's adapters and write its common tables
   serve    the survey app: every source's tracks and noise, by day, at http://127.0.0.1:8766
+  fleet    look up aircraft types in the official registers, into registry/fleet.csv
 """
 
 from __future__ import annotations
@@ -19,10 +20,14 @@ def main(argv=None):
     s = commands.add_parser("serve", help="the survey app (this computer only)")
     s.add_argument("--port", type=int, default=8766)
     s.add_argument("--no-browser", action="store_true", help="don't open a browser")
+    from . import fleet
+    fleet.add_arguments(commands.add_parser("fleet", help="look up aircraft types in the official registers"))
     args = parser.parse_args(argv)
     if args.command == "build":
         from . import build
         return build.main(args)
+    if args.command == "fleet":
+        return fleet.main(args)
     from . import server
     return server.main(args)
 

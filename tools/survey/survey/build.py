@@ -12,7 +12,8 @@ The steps, each a function here, in order:
     approaches     each flight's closest approach to each receptor
     link           flights -> passes (link.py)
     unseen         why a source has no flight in a pass (explain.py)
-A step still to be built (match, resolve, checks) goes in build() between these.
+    resolve        each pass's registration and type, from the fleet table first (resolve.py)
+A step still to be built (match, checks) goes in build() between these.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import os
 import shutil
 import sys
 
-from . import adapters, explain, link, manifest, schema
+from . import adapters, explain, fleet, link, manifest, resolve, schema
 from .common import day_of, iso, rounded
 from .geometry import Frame, closest_approach, path_angle
 
@@ -168,19 +169,28 @@ def summarise(m, tables, tracks, warnings):
         "passes": len(linked),
         "passes_in_several_sources": sum(1 for s in linked.values() if len(s) > 1),
         "unseen": {reason: sum(1 for u in tables["unseen"] if u["reason"] == reason) for reason in explain.REASONS},
+        "types": {
+            "from a register": sum(1 for i in tables["identity"] if i["type_source"].startswith("register:")),
+            "set by hand": sum(1 for i in tables["identity"] if i["type_source"] == fleet.MANUAL),
+            "from a source only": sum(1 for i in tables["identity"] if i["type_source"] and ":" not in i["type_source"]
+                                      and i["type_source"] != fleet.MANUAL),
+            "unknown": sum(1 for i in tables["identity"] if not i["type"]),
+            "sources disagree": sum(1 for i in tables["identity"] if i["disagree"]),
+        },
         "warnings": warnings,
     }
 
 
-def build(m, log=None, wait=True):
+def build(m, log=None, wait=True, fleet_path=None):
     """Build manifest m (from manifest.load). Returns the build summary. If another build of it is
-    running, waits for it to finish, or with wait=False raises Busy."""
+    running, waits for it to finish, or with wait=False raises Busy. fleet_path: the fleet table
+    (fleet.FLEET_PATH if None)."""
     with build_lock(m, wait):
         clear_leftovers(m)
-        return _build(m, log or sys.stderr)
+        return _build(m, log or sys.stderr, fleet_path)
 
 
-def _build(m, log):
+def _build(m, log, fleet_path=None):
     warnings = list(m["warnings"])
     tables, tracks, levels, limits = read_sources(m, warnings, log)
 
@@ -195,6 +205,7 @@ def _build(m, log):
         "approaches": approach_rows(found),
         "passes": passes,
         "unseen": explain.unseen_rows(passes, tracks, limits, tables["coverage"]),
+        "identity": resolve.resolve(passes, tables["flights"], fleet.read(fleet_path)),
     })
 
     out = os.path.join(m["out_dir"], "common")
