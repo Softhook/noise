@@ -23,15 +23,46 @@ const unseenOf = (passId) => (state.data.unseen || {})[passId] || {};
 // A pass's resolved identity (resolve.py): {registration, type, model, type_source, disagree}, or
 // {} for a build made before it existed
 const identityOf = (passId) => (state.data.identity || {})[passId] || {};
-// Where a resolved type came from, in words
+// Where a resolved type came from, in words. id.fleet (resolve.py) says why the fleet table didn't
+// settle it; a build made before it existed has none, so then the note doesn't say why
 const REGISTER_NAMES = { uk: "the UK register", ch: "the Swiss register", ie: "the Irish register", lu: "the Luxembourg register" };
+const FLEET_WHY = {
+  "no registration": "no registration to look up",
+  "not in the table": "not in the fleet table",
+  "not found": "its register doesn't have it",
+  "no type": "its register entry gives no type",
+};
 const typeNote = (id) => {
   const s = id.type_source || "";
   if (!s) return "";
   if (s === "manual") return "checked by hand";
   if (s.startsWith("register:")) return `from ${REGISTER_NAMES[s.slice(9)] || s.slice(9) + " register"}`;
-  return `from ${sourceName(s)} only; not in the fleet table`;
+  return `from ${sourceName(s)} only` + (FLEET_WHY[id.fleet] ? `; ${FLEET_WHY[id.fleet]}` : "");
 };
+// ICAO type designators (Doc 8643) -> the name people know the type by, for the types the survey
+// sees. A designator not here is shown as it is.
+const TYPE_NAMES = {
+  A109: "Leonardo AW109", A19N: "Airbus A319neo", A20N: "Airbus A320neo", A21N: "Airbus A321neo",
+  A319: "Airbus A319", A320: "Airbus A320", A321: "Airbus A321", A332: "Airbus A330-200", A333: "Airbus A330-300",
+  A359: "Airbus A350-900", A35K: "Airbus A350-1000", A388: "Airbus A380", AT75: "ATR 72-500", AT76: "ATR 72-600",
+  B38M: "Boeing 737 MAX 8", B738: "Boeing 737-800", B748: "Boeing 747-8", B763: "Boeing 767-300", B764: "Boeing 767-400",
+  B772: "Boeing 777-200", B77L: "Boeing 777-200LR/F", B77W: "Boeing 777-300ER", B788: "Boeing 787-8",
+  B789: "Boeing 787-9", B78X: "Boeing 787-10", BCS1: "Airbus A220-100", BCS3: "Airbus A220-300",
+  BE20: "Beech King Air 200", C152: "Cessna 152", C17: "Boeing C-17", C172: "Cessna 172", C72R: "Cessna 172RG",
+  C25A: "Cessna Citation CJ2", C25B: "Cessna Citation CJ3", C525: "Cessna Citation CJ1/M2",
+  C56X: "Cessna Citation Excel/XLS", C680: "Cessna Citation Sovereign", C68A: "Cessna Citation Latitude",
+  DA42: "Diamond DA42", DH8A: "Dash 8-100", DH8B: "Dash 8-200", DH8C: "Dash 8-300", DH8D: "Dash 8-400",
+  E190: "Embraer 190", E195: "Embraer 195", E290: "Embraer E190-E2", E295: "Embraer E195-E2",
+  E35L: "Embraer Legacy 600/650", E550: "Embraer Legacy 500/Praetor 600", E55P: "Embraer Phenom 300",
+  E75L: "Embraer 175", EC35: "Airbus H135", EC45: "Airbus H145", EFOX: "Aeropro Eurofox", EUPA: "Europa",
+  FA7X: "Dassault Falcon 7X", FA8X: "Dassault Falcon 8X", GL7T: "Bombardier Global 7500",
+  GLEX: "Bombardier Global Express", GLF6: "Gulfstream G650", H25B: "Hawker 800", K35R: "Boeing KC-135R",
+  LJ45: "Learjet 45", P180: "Piaggio P.180 Avanti", P28A: "Piper PA-28 Cherokee", P28R: "Piper PA-28R Arrow",
+  P46T: "Piper Malibu Meridian", PRM1: "Beechcraft Premier I", TOBA: "Socata TB-10 Tobago",
+};
+const typeName = (code) => TYPE_NAMES[code] || "";
+// A type as text: "E290 (Embraer E190-E2)", or the designator alone if it has no name here
+const typeText = (code) => (code ? (typeName(code) ? `${code} (${typeName(code)})` : code) : "");
 // A pass's type: the resolved one, or else the first its flights give in source order
 const passType = (passId, flights) => identityOf(passId).type
   || flights.slice().sort((a, b) => bySource(a.source, b.source)).map((f) => f.type).find(Boolean) || "";
@@ -97,10 +128,17 @@ function showTip(event, rows) {
   tip.style.top = Math.min(event.clientY + 14, window.innerHeight - tip.offsetHeight - 8) + "px";
 }
 function hideTip() { $("tooltip").style.display = "none"; }
+// A flight's type as its pass resolved it, with the source's own when that differs, so a tooltip
+// never contradicts the table or the type panel's row
+function flightTypeText(f) {
+  const resolved = (f.pass_id && identityOf(f.pass_id).type) || f.type;
+  if (!resolved) return "unknown type";
+  return typeText(resolved) + (f.type && f.type !== resolved ? `; ${sourceName(f.source)} says ${f.type}` : "");
+}
 function flightTip(f) {
   const r = $("f-receptor").value, a = f.approaches[r];
   const rows = [h("div", {}, key(f.source, colourOf(f.source), isRadar(f.source)), " ",
-    h("b", { text: f.registration || f.callsign || f.source_id }), ` · ${f.type || "unknown type"}`)];
+    h("b", { text: f.registration || f.callsign || f.source_id }), ` · ${flightTypeText(f)}`)];
   rows.push(h("div", { class: "row", text: `${sourceName(f.source)}${f.callsign ? " · " + f.callsign : ""}${f.direction ? " · " + ({ A: "arrival", D: "departure", O: "other" }[f.direction] || f.direction) : ""}` }));
   if (a) rows.push(h("div", { class: "row", text: `Closest ${hms(toT(a.t))} · ${fmt(a.ground_m, 0)} m away · ${fmt(a.height_m, 0)} m up${a.at_track_end ? " (edge of its data)" : ""}` }));
   if (a && a.path_angle_deg !== null && a.path_angle_deg !== undefined) rows.push(h("div", { class: "row", text: `Path angle ${pathAngle(a.path_angle_deg)}` }));
@@ -155,7 +193,7 @@ function shownFlights(timeWindow = state.window) {
     if (near && !passNear.has(f.pass_id)) return false;
     if ($("f-linked").checked && passSources.get(f.pass_id).size < 2) return false;
     if ($("f-unexplained").checked && !unexplained(f.pass_id)) return false;
-    if (search && ![f.registration, f.callsign, f.type, f.pass_id].some((v) => (v || "").toLowerCase().includes(search))) return false;
+    if (search && ![f.registration, f.callsign, f.type, typeName(f.type), f.pass_id].some((v) => (v || "").toLowerCase().includes(search))) return false;
     if (timeWindow) {
       const pts = local[trackKey(f)];
       if (!pts || pts[pts.length - 1][0] < timeWindow[0] || pts[0][0] > timeWindow[1]) return false;

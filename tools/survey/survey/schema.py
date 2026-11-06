@@ -47,8 +47,9 @@ TABLES = {
     "unseen": ["pass_id", "source", "reason"],
     # Each pass's registration and type (resolve.py). type_source: register:<code> or manual (the
     # fleet table), or the source whose type was taken. disagree: sources that give another type,
-    # or a transponder address other than the register's
-    "identity": ["pass_id", "registration", "type", "model", "type_source", "disagree"],
+    # or a transponder address other than the register's. fleet: why the fleet table didn't settle
+    # the type (no registration, not in the table, not found, no type), or empty if it did
+    "identity": ["pass_id", "registration", "type", "model", "type_source", "fleet", "disagree"],
 }
 # The tables an adapter may fill. The rest are worked out by the core (build.py).
 SOURCE_TABLES = ("flights", "positions", "noise_events", "levels", "coverage")

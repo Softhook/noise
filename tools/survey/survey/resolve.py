@@ -6,6 +6,10 @@ The type comes from, in order:
 2. otherwise, the first type any of its flights gives, in source order (link.source_rank), so the
    ADS-B sources' (tar1090-db's) before WebTrak's. type_source is that source's name.
 
+`fleet` says why the fleet table didn't settle the type, when it didn't: `no registration`, `not in
+the table` (never looked up, or no register can be asked online), `not found` (its register doesn't
+have it) or `no type` (its register's entry gives none, such as a model registers.MODEL_TYPES lacks).
+
 `disagree` lists every source whose type differs from the one chosen, and a transponder address
 (hex) that differs from the register's, which would mean the registration was matched to the wrong
 aircraft. Such passes are worth a look; the type is still the one chosen above.
@@ -31,6 +35,14 @@ def resolve(passes, flights, entries):
         reg = next((f["registration"] for f in fs if f["registration"]), "")
         entry = entries.get(reg) if reg else None
         given = [(f["source"], f["type"]) for f in fs if f["type"]]
+        if not reg:
+            why = "no registration"
+        elif entry is None:
+            why = "not in the table"
+        elif entry.get("status") == fleet.NOT_FOUND:
+            why = "not found"
+        else:
+            why = "" if fleet.known_type(entry) else "no type"
         if fleet.known_type(entry):
             chosen = entry["icao_type"]
             source = fleet.MANUAL if entry.get("register") == fleet.MANUAL else f"register:{entry.get('register')}"
@@ -45,5 +57,6 @@ def resolve(passes, flights, entries):
             disagree += [f"{f['source']} hex {f['hex'].upper()}, register {want_hex}"
                          for f in fs if f.get("hex") and f["hex"].upper() != want_hex]
         rows.append({"pass_id": pass_id, "registration": reg, "type": chosen, "model": model,
-                     "type_source": source, "disagree": "; ".join(disagree)})
+                     "type_source": source, "fleet": why,
+                     "disagree": "; ".join(disagree)})
     return rows

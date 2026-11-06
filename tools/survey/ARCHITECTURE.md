@@ -104,7 +104,7 @@ An aircraft's type is fixed by its registration, so the type is settled once per
 1. **The fleet registry** (`registry/fleet.csv`, kept in git), by registration. Each row is the airframe's entry in its country's register, filled by `python3 -m survey fleet` for the registers that can be asked online (the UK's G-INFO and Switzerland's BAZL, searched; Ireland's and Luxembourg's published files, downloaded; `survey/registers.py`), or by a person (`manual`) for the others. LCY's fleet is a few dozen airframes that come back day after day, so once an airframe is in the registry it never needs looking up again. This is what ends the dependence on WebTrak and on tar1090-db.
 2. Otherwise, **the highest-ranked source's type**: tar1090-db's, through the ADS-B sources, before WebTrak's.
 
-It writes `identity`: `type_source` (`register:uk`, `register:ch`, `manual`, or the source's name), and `disagree`, listing any source that gives another type and any transponder address other than the register's.
+It writes `identity`: `type_source` (`register:uk`, `register:ch`, `manual`, or the source's name), `fleet` (why the fleet registry didn't settle the type: no registration, not in the table, not found, or no type), and `disagree`, listing any source that gives another type and any transponder address other than the register's.
 
 **Still to do:**
 

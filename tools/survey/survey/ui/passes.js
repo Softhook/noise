@@ -56,7 +56,7 @@ function drawTable(passes) {
     const reg = p.flights.map((f) => f.registration).find(Boolean) || "";
     const call = p.flights.map((f) => f.callsign).find(Boolean) || "";
     const type = passType(p.id, p.flights), id = identityOf(p.id);
-    const typeCell = h("td", { text: type || "–", title: typeNote(id) });
+    const typeCell = h("td", { text: type || "–", title: [typeName(type), typeNote(id)].filter(Boolean).join(", ") });
     if (id.disagree) typeCell.classList.add("disagree");
     const cells = [h("td", { class: "pin", text: hms(p.t) }), h("td", { class: "pin pin2", text: reg || "–" }), h("td", { text: call || "–" }), typeCell];
     const unseen = unseenOf(p.id);
@@ -106,7 +106,7 @@ function drawDetail(passes) {
   const id = identityOf(state.selected);
   parts.push(h("dl", {}, h("dt", { text: "Pass" }), h("dd", { text: state.selected }),
     h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? ([...new Set(fs.map((f) => f.evidence).filter(Boolean))].join("; ") || "not recorded") : "only one source" }),
-    ...(id.type ? [h("dt", { text: "Type" }), h("dd", { text: [id.type, id.model].filter(Boolean).join(", ") + ` (${typeNote(id)})` })] : []),
+    ...(id.type ? [h("dt", { text: "Type" }), h("dd", { text: [typeText(id.type), id.model && `model ${id.model}`].filter(Boolean).join(", ") + ` (${typeNote(id)})` })] : []),
     ...(id.disagree ? [h("dt", { text: "Disagree" }), h("dd", { class: "disagree", text: id.disagree })] : [])));
   for (const f of fs.sort((a, b) => bySource(a.source, b.source))) {
     const a = f.approaches[r] || {};

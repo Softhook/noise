@@ -78,7 +78,7 @@ It lists the registrations no register covers. Check those by hand and add a row
 
 The noise columns are the airframe's certificated levels, in EPNdB, at the approach, lateral and flyover points.
 
-In the app, a pass's type is the resolved one. Its detail says where it came from. A type in the passes table shown in orange means a source gave another type, or a transponder address other than the register's: worth a look. `build.json`'s `types` counts the passes by where their type came from.
+In the app, a pass's type is the resolved one, everywhere, tooltips included; a tooltip adds a source's own type when it differs. Its detail says where it came from and, for a type from a source alone, why the fleet table didn't settle it. Designators are shown with the type's common name (E290, Embraer E190-E2) from `TYPE_NAMES` in `survey/ui/common.js`; add a designator there when a new one turns up. A type in the passes table shown in orange means a source gave another type, or a transponder address other than the register's: worth a look. `build.json`'s `types` counts the passes by where their type came from.
 
 To add a country, write a function in `survey/registers.py` that takes a registration and returns the fleet table's columns, or None if the register doesn't have it, and add it to `REGISTERS`.
 

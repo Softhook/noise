@@ -86,7 +86,7 @@ function drawTypes(flights) {
   svg.replaceChildren();
   const r = $("f-receptor").value, key = $("f-measure").value, m = MEASURES[key];
   const rows = typeRows(flights, key, r);
-  const W = 1200, L = 120, Rt = 1180, T = 22, LANE = 14, PAD = 6;
+  const W = 1200, L = 200, Rt = 1180, T = 22, LANE = 14, PAD = 6;
   const heights = rows.map((rw) => Math.max(28, rw.lanes.length * LANE + 2 * PAD));
   const bottom = T + heights.reduce((s, x) => s + x, 0);
   svg.setAttribute("viewBox", `0 0 ${W} ${bottom + 34}`);
@@ -119,7 +119,9 @@ function drawTypes(flights) {
   let y = T;
   rows.forEach((rw, i) => {
     const hRow = heights[i], top = y + (hRow - rw.lanes.length * LANE) / 2;
-    text(svg, L - 10, y + hRow / 2 + 4, `${rw.type} (${rw.passes})`, { "text-anchor": "end", class: "ink" });
+    const name = typeName(rw.type), mid = y + hRow / 2;
+    text(svg, L - 10, mid + (name ? -2 : 4), `${rw.type} (${rw.passes})`, { "text-anchor": "end", class: "ink" });
+    if (name) text(svg, L - 10, mid + 11, name, { "text-anchor": "end" });
     el("line", { x1: L, y1: y + hRow, x2: Rt, y2: y + hRow, class: "gridline" }, svg);
     rw.lanes.forEach((ln, j) => {
       const cy = top + j * LANE + LANE / 2;
@@ -150,7 +152,7 @@ function drawTypes(flights) {
     const line = h("div", { class: "row" }, h("b", { text: `${fmt(d.v, m.digits)}` }), ` · ${m.label}${d.edge ? " (at an edge of its data)" : ""}`);
     if (d.f) return [...flightTip(d.f), line];
     const reg = d.p.flights.map((f) => f.registration || f.callsign).find(Boolean) || d.pass;
-    return [h("div", {}, h("b", { text: reg }), ` · ${d.p.flights.map((f) => f.type).find(Boolean) || "unknown type"}`),
+    return [h("div", {}, h("b", { text: reg }), ` · ${typeText(passType(d.pass, d.p.flights)) || "unknown type"}`),
       h("div", { class: "row", text: `Pass ${d.pass} · closest ${hms(d.p.t)}` }), line];
   }
 }

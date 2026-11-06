@@ -1174,6 +1174,19 @@ class Resolve(unittest.TestCase):
         self.assertEqual((got["p2"]["type"], got["p2"]["type_source"]), ("", ""))
         self.assertEqual(got["p3"]["type_source"], "opensky")  # A "not found" entry settles nothing
 
+    def test_a_pass_says_why_the_fleet_table_didnt_settle_its_type(self):
+        passes, flights = self.flights_and_passes(
+            ("p1", "opensky", "GLCYN", "E190", ""), ("p2", "opensky", "", "E190", ""),
+            ("p3", "opensky", "PHEZE", "E190", ""), ("p4", "opensky", "GLCYQ", "E190", ""),
+            ("p5", "opensky", "EIFAV", "AT76", ""), ("p6", "opensky", "GLCYT", "E190", ""))
+        entries = {"GLCYN": {"icao_type": "E190", "register": "uk", "status": "registered"},
+                   "GLCYQ": {"status": fleet.NOT_FOUND, "register": "uk"},
+                   "EIFAV": {"icao_type": "", "register": "ie", "status": "registered"},
+                   "GLCYT": {"icao_type": "E190", "register": "uk", "status": fleet.LEFT}}
+        got = {r["pass_id"]: r["fleet"] for r in resolve.resolve(passes, flights, entries)}
+        self.assertEqual(got, {"p1": "", "p2": "no registration", "p3": "not in the table", "p4": "not found",
+                               "p5": "no type", "p6": ""})
+
     def test_a_manual_entry_says_so(self):
         passes, flights = self.flights_and_passes(("p1", "opensky", "PHEZE", "E190", ""))
         entries = {"PHEZE": {"icao_type": "E190", "register": fleet.MANUAL, "status": "registered"}}
