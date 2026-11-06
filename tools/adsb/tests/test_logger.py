@@ -117,6 +117,54 @@ class Chrony(unittest.TestCase):
         self.assertIsNone(al.parse_chrony("nonsense")["synchronised"])
 
 
+# Cut down from a real stats.json, in readsb's own spacing
+READSB_STATS = """{ "now" : 1793000060.0, "gain_db" : 43.9, "estimated_ppm" : 0.4,
+"last1min":{"start":1793000000.0,"end":1793000060.0,"local":{"accepted":[9,1],"strong_signals":5}},
+"last5min":{"start":1793000000.0,"end":1793000040.0,"local":{"samples_processed":3600000000,
+"samples_dropped":0,"samples_lost":0,"modeac":0,"modes":900000,"bad":800000,"unknown_icao":40000,
+"accepted":[58000,2000],"signal":-14.8,"noise":-33.5,"peak_signal":-1.2,"strong_signals":1800,
+"pre_phase_1":[ 1, 2, 3, 4, 5],"best_phase" :[ 1, 2, 3, 4, 5]},"messages_valid": 60000}}"""
+
+
+class ReceiverStats(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.path = os.path.join(self.dir, "stats.json")
+
+    def write(self, text):
+        with open(self.path, "w") as f:
+            f.write(text)
+
+    def test_reads_the_last_five_minutes(self):
+        self.write(READSB_STATS)
+        receiver = al.read_receiver(self.path, now=1_793_000_060.0)
+        self.assertEqual(receiver["messages"], 60000)
+        self.assertEqual(receiver["strong_signals"], 1800)
+        self.assertAlmostEqual(receiver["strong_share"], 0.03)
+        self.assertEqual(receiver["gain_db"], 43.9)
+        self.assertEqual(receiver["noise_dbfs"], -33.5)
+        self.assertEqual(receiver["samples_dropped"], 0)
+        self.assertEqual(receiver["age_s"], 20.0)
+
+    def test_missing_damaged_or_no_radio(self):
+        self.assertIsNone(al.read_receiver(self.path))
+        self.write('{ "now" : 1793000060.0, "gain_db" : 4')  # Read while readsb was replacing it
+        self.assertIsNone(al.read_receiver(self.path))
+        self.write('{"now": 1.0, "last5min": {"start": 0, "end": 1, "messages_valid": 0}}')  # --net-only
+        self.assertIsNone(al.read_receiver(self.path))
+
+    def test_no_messages_yet(self):
+        self.write('{"last5min": {"end": 1, "local": {"accepted": [0], "strong_signals": 0}}}')
+        self.assertIsNone(al.read_receiver(self.path)["strong_share"])
+
+    def test_every_health_record_includes_it(self):
+        self.write(READSB_STATS)
+        logger = make_logger(self.dir, readsb_stats=self.path)
+        logger.health("test")
+        self.assertEqual(health_events(self.dir)[0]["receiver"]["strong_signals"], 1800)
+
+
 def fake_status(_, clock):
     return {"clock": clock}
 
@@ -158,6 +206,24 @@ class Stream(unittest.TestCase):
         logger.close_writer()
         self.assertEqual(logger.counts["written"], 2)
         self.assertEqual(logger.aircraft, set())
+
+    def test_close_low_aircraft_are_listed_in_the_health_record(self):
+        logger = make_logger(self.dir)
+        for raw in (
+            b'{"hex":"aaa111","lat":%.4f,"lon":%.4f,"alt_baro":1200}' % (SITE_LAT + 0.009, SITE_LON),  # 1 km
+            b'{"hex":"aaa111","lat":%.4f,"lon":%.4f,"alt_baro":1100}' % (SITE_LAT + 0.0045, SITE_LON),  # nearer
+            b'{"hex":"bbb222","lat":%.4f,"lon":%.4f,"alt_baro":9000}' % (SITE_LAT, SITE_LON),  # too high
+            b'{"hex":"ccc333","lat":%.4f,"lon":%.4f,"alt_baro":1000}' % (SITE_LAT + 0.05, SITE_LON),  # too far
+            b'{"hex":"ddd444","lat":%.4f,"lon":%.4f,"alt_baro":"ground"}' % (SITE_LAT, SITE_LON),
+        ):
+            logger.handle_line(raw)
+        logger.close_writer()
+        logger.health()
+        logger.health()
+        first, second = health_events(self.dir)
+        self.assertEqual(first["near"], {"aaa111": 0.5})
+        self.assertEqual(first["near_limits"], {"km": 2.0, "max_ft": 3000.0})
+        self.assertEqual(second["near"], {})  # Reset with the other counts
 
     def test_saves_lines_exactly_filters_far_and_reconnects(self):
         server = socket.socket()
@@ -275,6 +341,69 @@ class ClockAndErrors(unittest.TestCase):
         logger.handle_line(line(NEAR))
         logger.writer.close()
         self.assertEqual(len(glob.glob(os.path.join(self.dir, "adsb", "*.jsonl.gz"))), 1)
+
+    def test_a_change_of_clock_state_starts_a_new_file(self):
+        states = iter([False, True])
+        logger = make_logger(self.dir, clock=lambda: {"synchronised": next(states)})
+        logger.check_clock()
+        logger.handle_line(line(NEAR))
+        logger.check_clock()  # Now synchronised
+        logger.handle_line(line(NEAR))
+        logger.close_writer()
+        files = sorted(glob.glob(os.path.join(self.dir, "adsb", "*.jsonl.gz")))
+        self.assertEqual(len(files), 2)
+        self.assertEqual(len({e["file"] for e in health_events(self.dir)} - {None}), 1)
+
+    def test_repeated_write_errors_make_it_exit_and_start_afresh(self):
+        logger = make_logger(self.dir, write_retry_seconds=0)
+
+        def broken(_):
+            raise OSError(30, "Read-only file system")
+
+        logger.writer.write = broken
+        for _ in range(al.MAX_WRITE_FAILURES - 1):
+            logger.handle_line(line(NEAR))
+        self.assertFalse(logger.stopping)
+        logger.handle_line(line(NEAR))
+        self.assertTrue(logger.stopping)
+        self.assertEqual(logger.exit_code, 1)
+
+    def test_a_successful_flush_resets_the_count_of_write_errors(self):
+        logger = make_logger(self.dir, write_retry_seconds=0, flush_seconds=0)
+        logger.write_failed(OSError(5, "Input/output error"))
+        logger.write_failed(OSError(5, "Input/output error"))
+        logger.handle_line(line(NEAR))
+        logger.tick()
+        self.assertEqual(logger.write_failures, 0)
+        logger.close_writer()
+
+    def test_lists_the_files_it_is_writing_for_collect(self):
+        run = os.path.join(self.dir, "run")
+        os.makedirs(run)
+        logger = make_logger(self.dir, open_files=os.path.join(run, "open-files"))
+        logger.handle_line(line(NEAR))
+        logger.health()
+        logger.close_writer()
+        with open(os.path.join(run, "open-files")) as f:
+            names = f.read().split()
+        self.assertEqual(len(names), 2)
+        self.assertTrue(names[0].startswith("adsb/") and names[0].endswith(".jsonl.gz"))
+        self.assertTrue(names[1].startswith("health/") and names[1].endswith(".jsonl"))
+        self.assertTrue(all(os.path.exists(os.path.join(self.dir, n)) for n in names))
+
+    def test_each_health_record_names_its_boot(self):
+        logger = make_logger(self.dir)
+        logger.boot_id = "boot-1"
+        logger.health()
+        self.assertEqual(health_events(self.dir)[-1]["boot_id"], "boot-1")
+
+    def test_the_same_error_goes_to_the_journal_only_now_and_then(self):
+        logger = make_logger(self.dir)
+        with mock.patch.object(al, "log") as journal:
+            for _ in range(5):
+                logger.log_once(ConnectionRefusedError(111, "Connection refused"))
+            logger.log_once("something else")
+        self.assertEqual(journal.call_count, 2)
 
     def test_health_log_failure_does_not_stop_the_logger(self):
         logger = make_logger(os.path.join(self.dir, "missing"))

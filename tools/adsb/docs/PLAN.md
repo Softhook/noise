@@ -30,6 +30,8 @@ These targets are our proposals, to be tested in the trial.
 | Unattended running | 37 days, restarting by itself after a fault or power cut | Matches the survey length |
 | Noise from the Pi | None measurable at the microphone | Must not affect the survey |
 
+Capture is measured against other sources, in the [survey's](../../survey/ARCHITECTURE.md) coverage check: WebTrak's radar tracks while we use it, and [adsb.lol's public archive](traces.md) through the 37-day survey, when WebTrak is only asked about single flights. adsb.lol is also ADS-B, so only WebTrak or the airport's records show aircraft that don't transmit.
+
 ## Elements
 
 ### 1. Hardware
@@ -41,8 +43,7 @@ These targets are our proposals, to be tested in the trial.
 | 1090 MHz antenna with SMA connector | To buy | FlightAware's page doesn't mention one being included, so check the box |
 | Short, low-loss coax | To buy | [Long coax loses a lot of signal](https://www.rtl-sdr.com/flightaware-prostick-vs-flightaware-prostick-plus-review/) |
 | Official 5 V 3 A power supply | To check | Weak supplies are a common cause of unreliable Pis |
-| SD card for the operating system | To check | A good-quality card |
-| USB SSD for logs, 256 GB | To buy | Takes the constant writes off the SD card |
+| USB SSD for the system and logs, 256 GB | To buy | The Pi boots from it, with no SD card. A SATA SSD, within the Pi 4's 1.2 A for USB |
 | Weatherproof enclosure | Depends on site | Only if the Pi can't go indoors |
 | USB GPS receiver | Chosen | Sets the clock. See [Clock](#3-clock) |
 | USB Ethernet or spare cable | To check | For a laptop to collect data on site |
@@ -50,7 +51,7 @@ These targets are our proposals, to be tested in the trial.
 ### 2. Receiver
 
 - Use readsb and tar1090, set up as in [Setting up the Pi](pi-setup.md).
-- Start with automatic gain. Aircraft pass close to the garden, so check signal strength and [aim for a low share of strong signals](https://github.com/wiedehopf/adsb-wiki/wiki/Optimizing-gain).
+- Start with automatic gain. Aircraft pass close to the garden, so check signal strength and [aim for a low share of strong signals](https://github.com/wiedehopf/adsb-wiki/wiki/Optimizing-gain). The health log records the share every 5 minutes, and `adsb status` warns above 10%.
 - Use a tuned 1090 MHz antenna. The stick's amplifier comes before its filter, and [strong FM and TV signals can overload it](https://www.rtl-sdr.com/flightaware-prostick-vs-flightaware-prostick-plus-review/). If that happens, try an external filter before the stick.
 - Save a dated copy of the aircraft database and keep it for the whole stage, so results can be reproduced.
 
@@ -83,7 +84,7 @@ Connects to readsb's JSON stream and writes it to disk.
 - **Config outside the repository**, in `/etc/adsb-logger/site.json`, because it holds the garden's coordinates. It's JSON rather than TOML so it can be read on the laptop's Python 3.9.
 - Runs as a `systemd` service that restarts automatically and starts on boot.
 
-We'll decide in the trial whether to also keep readsb's own daily track files (`--write-globe-history`) as a backup. readsb warns they can [create thousands of files a day](https://github.com/wiedehopf/readsb#saving-traces), though it may be far fewer with one receiver.
+**Decision:** don't keep readsb's own daily track files (`--write-globe-history`) as a backup. They'd be a second copy of the same data, from the same antenna, readsb, clock and SSD, so they'd only cover a fault in the logger itself. The status page shows those faults, and adsb.lol's archive is the independent check (see [adsb.lol's archive](traces.md)). The extra files and moving parts aren't worth it on an unattended Pi.
 
 ### 5. Health log
 
@@ -95,8 +96,10 @@ Every 5 minutes, write a line to a separate file with:
 - free disk space
 - CPU temperature and any low-power or overheating flags from `vcgencmd get_throttled`
 - time since boot
+- the receiver's gain, signal and noise levels, share of strong signals and dropped samples, from readsb's `stats.json`
+- the aircraft that came within 2 km of the garden below 3,000 ft, so `adsb status` can count close passes each day
 
-`adsb status` summarises this log for site visits, and warns about the problems most likely to lose data unnoticed. The clock is checked every 10 seconds until it's synchronised, so short unsynchronised periods after a power cut are caught. We'll decide whether a simple status light is also worth adding.
+`adsb status` summarises this log for site visits, and warns about the problems most likely to lose data unnoticed. Its close-pass count for each day shows straight away whether the flights we need are still being caught, which receiver figures alone don't show. It warns only for a whole day with less than a fifth of the usual count, because wind direction and LCY's weekend closure change the count a lot. The clock is checked every 10 seconds until it's synchronised, so short unsynchronised periods after a power cut are caught. We'll decide whether a simple status light is also worth adding.
 
 ### 6. Storage
 
@@ -185,8 +188,10 @@ Our own ADS-B log would make matching their events to flights straightforward.
 
 | Risk | Effect | How we reduce it |
 |---|---|---|
-| A fault goes unnoticed | Weeks of lost data | Automatic restarts, health log and regular visits |
-| Clock wrong after a power cut | Events matched to the wrong flight | Clock checked every 10 s until synchronised, and flights in unsynchronised periods flagged. The check against closest approach is still to build |
+| A fault goes unnoticed | Weeks of lost data | Automatic restarts, health log, close-pass counts on the status page, and regular visits |
+| The Pi hangs, or the stick or readsb stops | Lost data until the next visit | The watchdog reboots a hung Pi, or one whose SSD has stopped working. The status page warns as soon as readsb stops sending, or the logger or readsb isn't running |
+| A bug in our logger loses flights | Lost data that the health log doesn't show | Close-pass counts on the status page; adsb.lol's archive for an independent check |
+| Clock wrong after a power cut | Events matched to the wrong flight | Clock checked every 10 s until synchronised, a new data file when that changes, and flights in unsynchronised periods flagged, using each boot's uptime because the clock starts behind. The status page checks the clock directly and against the phone's. The check against closest approach is still to build |
 | Fusion and Pi in different time zones, or a time zone lost in export | Every event an hour out | Fusion set to UTC with summer time off, times kept as UTC in ISO format, and the matcher refuses an unknown time zone |
 | Height left uncorrected | Errors of up to about 250 m on a 30 hPa day | QNH correction with temperature and METAR rounding allowed for, compared with geometric height. Geometric height rejected when it shows the sea-level fault |
 | Tests pass but real data differs | False confidence in accuracy | The simulator adds noise, cold weather and known faults, but it can't reproduce everything. Check against tar1090 and airport records once real data exists |
@@ -194,7 +199,7 @@ Our own ADS-B log would make matching their events to flights straightforward.
 | Overload from nearby signals | Fewer flights captured | Tuned antenna and low gain, then an external filter if needed |
 | Interference from the Fusion's 4G modem | Fewer flights captured | Separate the two, and test with the modem on and off |
 | An aircraft doesn't send ADS-B | An unmatched event | Flag it, and compare with airport records |
-| Disk or SD card failure | Lost data | SSD for logs, and regular checked copies |
+| SSD failure | Lost data, and the whole Pi stops, since it boots from the SSD | Regular checked copies. The watchdog reboots the Pi after a USB reset or a read-only disk. The official supply, and UAS turned off if the adapter keeps resetting. A spare SSD with the same image |
 | Garden location is published | Privacy | Config outside the repository, with no logs or real positions committed |
 
 ## Open questions

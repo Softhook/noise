@@ -7,6 +7,7 @@ commands:
   status     check the logger on a site visit (runs on the Pi)
   analyse    turn logs into flights, a summary and a viewer (runs on a laptop)
   simulate   make a simulated day, or replay one as a fake readsb
+  traces     turn readsb track files, such as adsb.lol's archive, into log files
 
 Run python3 -m adsb COMMAND --help for each command's options.
 """
@@ -22,6 +23,7 @@ COMMANDS = {
     "status": "adsb.status",
     "analyse": "adsb.analyse",
     "simulate": "adsb.simulate",
+    "traces": "adsb.traces",
 }
 
 

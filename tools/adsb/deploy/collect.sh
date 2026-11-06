@@ -5,8 +5,11 @@
 #   sh deploy/collect.sh [--all] PI [FOLDER]
 #
 # PI is anything ssh accepts, such as adsb-pi.local or pi@10.42.0.1. FOLDER defaults to
-# data/collected. Files that may still be written to (the newest data file and today's health log)
-# are left for the next visit, so every copied file is final and its checksum never changes. --all copies those too: use it only after `sudo systemctl stop adsb-logger`, at the end.
+# data/collected. Files the logger is still writing to are left for the next visit, so every
+# copied file is final and its checksum never changes. The logger lists them in
+# /run/adsb-logger/open-files. They aren't found by date, because after a power cut the Pi's
+# clock can start behind. --all copies those too: use it only after
+# `sudo systemctl stop adsb-logger`, at the end.
 #
 # Nothing on the Pi is changed or deleted. A file already collected is never overwritten: if the
 # Pi's copy differs from it, that's reported. FOLDER/SHA256SUMS lists every file collected so far.
@@ -14,6 +17,7 @@ set -eu
 
 SSH=${SSH:-ssh}
 LOG_DIR=${LOG_DIR:-/var/lib/adsb-logger}  # On the Pi
+OPEN_FILES=${OPEN_FILES:-/run/adsb-logger/open-files}  # On the Pi, written by the logger
 
 ALL=0
 [ "${1:-}" != "--all" ] || { ALL=1; shift; }
@@ -31,17 +35,26 @@ trap 'rm -rf "$work"' EXIT
 
 # On the Pi: list the finished files with their checksums
 echo "==> Checksumming the logs on $PI"
-$SSH "$PI" sh -s -- "$LOG_DIR" "$ALL" > "$work/remote.sums" <<'EOF'
+$SSH "$PI" sh -s -- "$LOG_DIR" "$ALL" "$OPEN_FILES" > "$work/remote.sums" <<'EOF'
 set -eu
 cd "$1"
-mountpoint -q . || echo "WARNING: $1 isn't a mounted disk; is the SSD plugged in?" >&2
-newest=$(ls -t adsb/*.jsonl.gz 2>/dev/null | head -n 1)
-today=health/$(date -u +%Y-%m-%d).jsonl
-for f in adsb/*.jsonl.gz health/*.jsonl; do
-    [ -f "$f" ] || continue
-    if [ "$2" -eq 0 ]; then
-        case "$f" in "$newest"|"$today") continue ;; esac
+open=$3
+files=$(ls adsb/*.jsonl.gz health/*.jsonl 2>/dev/null || true)
+# Read the open files after listing, so a file opened in between is either unlisted or skipped
+skip=""
+if [ "$2" -eq 0 ]; then
+    if [ -f "$open" ]; then
+        skip=$(cat "$open")
+    elif systemctl is-active -q adsb-logger 2>/dev/null; then
+        # A logger from before the list existed: fall back to the newest files by time
+        skip="$(ls -t adsb/*.jsonl.gz 2>/dev/null | head -n 1)
+health/$(date -u +%Y-%m-%d).jsonl"
+        echo "WARNING: no $open, so the newest files are found by time. Run make pi-deploy." >&2
     fi
+fi
+for f in $files; do
+    [ -f "$f" ] || continue
+    printf '%s\n' "$skip" | grep -qxF -- "$f" && continue
     echo "$f"
 done | xargs -r sha256sum
 EOF

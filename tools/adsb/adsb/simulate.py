@@ -33,7 +33,7 @@ import time
 
 from . import analyse
 from .common import FEET, format_utc
-from .geometry import Site
+from .geometry import Site, distance_km
 from .logger import HourlyWriter
 
 SITE = {"lat": 51.5, "lon": 0.1, "ground_elevation_m": 3.0, "mic_height_m": 3.0}
@@ -366,7 +366,20 @@ def write_logs(records, out_dir, times):
     return written
 
 
-def write_health(records, out_dir, times):
+def near_by_interval(records, site, ends, km=2.0, max_ft=3000.0):
+    """The logger's `near` list for each health record ending at `ends`: hex -> closest km."""
+    near = [dict() for _ in ends]
+    for r in records:
+        if not isinstance(r.get("alt_baro"), (int, float)) or r["alt_baro"] > max_ft or "lat" not in r:
+            continue
+        d = distance_km(site.lat, site.lon, r["lat"], r["lon"])
+        i = bisect.bisect_left(ends, r["now"])
+        if d <= km and i < len(ends) and d < near[i].get(r["hex"], math.inf):
+            near[i][r["hex"]] = round(d, 2)
+    return near
+
+
+def write_health(records, out_dir, times, site=None):
     folder = os.path.join(out_dir, "logs", "health")
     os.makedirs(folder, exist_ok=True)
     cut, back = times["power_cut"], times["power_cut"] + times["power_cut_seconds"]
@@ -384,7 +397,9 @@ def write_health(records, out_dir, times):
     stamps = [r["now"] for r in records]
     lines = []
     previous = None
-    for t, event in sorted(entries, key=lambda e: e[0]):
+    entries.sort(key=lambda e: e[0])
+    near = near_by_interval(records, site, [t for t, _ in entries]) if site else [None] * len(entries)
+    for (t, event), close in zip(entries, near):
         count = bisect.bisect_left(stamps, t) - (bisect.bisect_left(stamps, previous) if previous else 0)
         previous = t
         synced = not (back <= t < synced_from)
@@ -392,10 +407,16 @@ def write_health(records, out_dir, times):
             "time": t, "event": event, "connected": True, "lines": count, "written": count, "far": 0,
             "invalid": 0, "no_position": 0, "dropped_disk_full": 0, "dropped_write_error": 0,
             "aircraft": None, "disconnects": 0,
+            **({"near": dict(sorted(close.items())), "near_limits": {"km": 2.0, "max_ft": 3000.0}}
+               if close is not None else {}),
             "newest_message_age_s": 0.5,
             "clock": {"synchronised": synced, "reference": "GPS" if synced else "", "offset_s": 0.0002 if synced else 3.1},
             "cpu_temp_c": 48.0, "throttled": "throttled=0x0", "uptime_s": t - back if t >= back else t - times["start"] + 900,
-            "disk_free_gb": 230.0, "simulated": True,
+            "disk_free_gb": 230.0,
+            "receiver": {"gain_db": 43.9, "messages": 60000, "strong_signals": 1800, "strong_share": 0.03,
+                         "signal_dbfs": -14.8, "noise_dbfs": -33.5, "peak_signal_dbfs": -1.2,
+                         "samples_dropped": 0, "age_s": 20.0},
+            "simulated": True,
         }))
     day = dt.datetime.fromtimestamp(times["start"], dt.timezone.utc).strftime("%Y-%m-%d")
     with open(os.path.join(folder, f"{day}.jsonl"), "w") as f:
@@ -480,7 +501,7 @@ def simulate(out_dir, seed=1, times=None):
     flights = build_flights(rng, times)
     records = make_records(flights, rng, site)
     write_logs(records, out_dir, times)
-    write_health(records, out_dir, times)
+    write_health(records, out_dir, times, site)
     write_weather(os.path.join(out_dir, "eglc_metars.csv"), times)
     with open(os.path.join(out_dir, "site.json"), "w") as f:
         json.dump(config, f, indent=2)

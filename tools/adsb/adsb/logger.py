@@ -26,7 +26,7 @@ import time
 import zlib
 
 from .geometry import distance_km
-from .health import DEFAULT_LOG_DIR
+from .health import DEFAULT_LOG_DIR, read_boot_id
 
 DEFAULTS = {
     "host": "127.0.0.1",
@@ -39,12 +39,25 @@ DEFAULTS = {
     "reconnect_seconds": 5.0,
     "clock_check_seconds": 10.0,  # How often to check the clock until it's synchronised
     "write_retry_seconds": 60.0,
+    "readsb_stats": "/run/readsb/stats.json",  # Written by readsb every minute; in memory, not on disk
+    # The files the logger is writing to, so deploy/collect.sh leaves them for the next visit. In
+    # memory (the service's RuntimeDirectory), and only written if its folder exists.
+    "open_files": "/run/adsb-logger/open-files",
+    # Aircraft this close and low are listed in each health record, so adsb status can count the
+    # passes each day. Only a site-visit check; the analysis works from the full log.
+    "near_km": 2.0,
+    "near_max_ft": 3000.0,
 }
-NUMERIC_SETTINGS = [key for key in DEFAULTS if key not in ("host", "log_dir")]
+NUMERIC_SETTINGS = [key for key in DEFAULTS if key not in ("host", "log_dir", "readsb_stats", "open_files")]
 MAX_PARTIAL_LINE = 1024 * 1024
 DISK_CHECK_SECONDS = 60.0
 SYNCED_CLOCK_CHECK_SECONDS = 60.0
 MAX_FLUSH_SECONDS = 60.0  # The plan allows at most 60 s of data lost in a power cut
+# After this many write errors in a row, with no successful flush between them, the logger exits
+# and systemd starts it again. If the SSD itself has failed, the disk watchdog reboots the Pi
+# (deploy/disk-check.sh).
+MAX_WRITE_FAILURES = 3
+REPEAT_LOG_SECONDS = 600.0  # The same error, such as readsb being down, goes to the journal this often
 
 
 def log(message):
@@ -107,18 +120,21 @@ class HourlyWriter:
         self.flushed_bytes = 0
 
     def flush(self):
+        """Flush to disk. True if there was anything to flush."""
         if self.gz is None or not self.unflushed:
-            return
+            return False
         self.gz.flush(zlib.Z_SYNC_FLUSH)
         self.raw.flush()
         os.fsync(self.raw.fileno())
         self.last_flush = self.monotonic()
         self.flushed_bytes = self.raw.tell()
         self.unflushed = False
+        return True
 
     def tick(self):
         if self.monotonic() - self.last_flush >= self.flush_seconds:
-            self.flush()
+            return self.flush()
+        return False
 
     def close(self):
         if self.gz is None:
@@ -173,15 +189,49 @@ def read_clock():
     return parse_chrony(chrony) if chrony else {"synchronised": None}
 
 
+def read_receiver(path, now=None):
+    """Signal levels and gain from readsb's stats.json, over its last 5 minutes, or None.
+
+    The share of messages stronger than -3 dBFS shows whether the gain is too high, and so
+    whether close aircraft may be missed. See docs/logs.md.
+    """
+    try:
+        with open(path) as f:
+            stats = json.load(f)
+        period = stats["last5min"]
+        local = period["local"]
+        messages = sum(local["accepted"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    strong = local.get("strong_signals")
+    end = period.get("end")
+    now = time.time() if now is None else now
+    return {
+        "gain_db": stats.get("gain_db"),
+        "messages": messages,
+        "strong_signals": strong,
+        "strong_share": round(strong / messages, 4) if messages and isinstance(strong, int) else None,
+        "signal_dbfs": local.get("signal"),
+        "noise_dbfs": local.get("noise"),
+        "peak_signal_dbfs": local.get("peak_signal"),
+        "samples_dropped": local.get("samples_dropped"),
+        "age_s": round(now - end, 1) if isinstance(end, (int, float)) else None,
+    }
+
+
 def system_status(log_dir, clock):
     """Read what we can about the Pi. Anything unavailable is recorded as null."""
     temp = read_first_number("/sys/class/thermal/thermal_zone0/temp")
+    try:
+        free = round(shutil.disk_usage(log_dir).free / 1e9, 2)
+    except OSError:
+        free = None
     return {
         "clock": clock,
         "cpu_temp_c": None if temp is None else temp / 1000,
         "throttled": run_command("vcgencmd", "get_throttled"),
         "uptime_s": read_first_number("/proc/uptime"),
-        "disk_free_gb": round(shutil.disk_usage(log_dir).free / 1e9, 2),
+        "disk_free_gb": free,
     }
 
 
@@ -200,6 +250,12 @@ class Logger:
         self.clock = {"synchronised": None}
         self.stopping = self.connected = self.paused = False
         self.retry_writes_at = None  # Set after a write error
+        self.write_failures = 0  # In a row, since the last successful flush
+        self.exit_code = 0
+        self.boot_id = read_boot_id()
+        self.noted_open = None  # The open files last written to settings["open_files"]
+        self.health_path = None
+        self.last_logged = (None, -math.inf)
         self.disconnects = 0
         self.last_message = None
         self.last_health = time.monotonic()
@@ -211,6 +267,7 @@ class Logger:
             ("lines", "written", "far", "invalid", "no_position", "dropped_disk_full", "dropped_write_error"), 0
         )
         self.aircraft = set()
+        self.near = {}  # hex -> closest distance in km since the last health record
 
     def handle_line(self, line):
         self.counts["lines"] += 1
@@ -222,6 +279,8 @@ class Logger:
             self.counts[decision] += 1
         if decision == "far":
             return
+        if decision == "position":
+            self.note_near(record)
         if self.paused:
             self.counts["dropped_disk_full"] += 1
             return
@@ -237,6 +296,19 @@ class Logger:
             self.counts["dropped_write_error"] += 1
             return
         self.counts["written"] += 1
+        if self.writer.path != (self.noted_open or (None,))[0]:
+            self.note_open_files()
+
+    def note_near(self, record):
+        """Remember an aircraft that passed close to the garden, for the daily count in adsb status."""
+        code, altitude = record.get("hex"), record.get("alt_baro")
+        if not isinstance(code, str) or not isinstance(altitude, (int, float)):
+            return  # On the ground, or no height yet
+        if altitude > self.settings["near_max_ft"]:
+            return
+        km = distance_km(self.site_lat, self.site_lon, record["lat"], record["lon"])
+        if km <= self.settings["near_km"] and km < self.near.get(code, math.inf):
+            self.near[code] = round(km, 2)
 
     def close_writer(self):
         try:
@@ -245,34 +317,73 @@ class Logger:
             log(f"can't close {self.writer.path}: {error}")
 
     def write_failed(self, error):
-        """Stop writing for a while after a disk error, and record it, rather than looping on it."""
+        """Stop writing for a while after a disk error, and record it, rather than looping on it.
+
+        After MAX_WRITE_FAILURES in a row, exit, so systemd starts the logger afresh.
+        """
         self.close_writer()
         self.retry_writes_at = time.monotonic() + self.settings["write_retry_seconds"]
+        self.write_failures += 1
         log(f"write error: {error}")
         self.health("write_error", error=str(error))
+        if self.write_failures >= MAX_WRITE_FAILURES and not self.stopping:
+            log(f"{self.write_failures} write errors in a row: exiting, to start afresh")
+            self.exit_code = 1
+            self.stopping = True
+
+    def note_open_files(self):
+        """Write the files being written to, relative to log_dir, for deploy/collect.sh."""
+        current = (self.writer.path, self.health_path)
+        if current == self.noted_open:
+            return
+        self.noted_open = current
+        path = self.settings["open_files"]
+        if not path or not os.path.isdir(os.path.dirname(path)):
+            return  # Not running as the service, as in development
+        names = sorted(os.path.relpath(p, self.log_dir) for p in current if p)
+        try:
+            with open(f"{path}.tmp", "w") as f:
+                f.write("".join(f"{name}\n" for name in names))
+            os.replace(f"{path}.tmp", path)
+        except OSError as error:
+            log(f"can't write {path}: {error}")
+
+    def log_once(self, message):
+        """Log a message, but the same one again only every REPEAT_LOG_SECONDS, to keep the journal readable."""
+        text = str(message)
+        previous, when = self.last_logged
+        if text != previous or time.monotonic() - when >= REPEAT_LOG_SECONDS:
+            log(text)
+            self.last_logged = (text, time.monotonic())
 
     def health(self, event=None, **extra):
         now = time.time()
         entry = {
             "time": now, "event": event, "connected": self.connected, **extra, **self.counts,
             "aircraft": len(self.aircraft),
+            "near": dict(sorted(self.near.items())),
+            "near_limits": {"km": self.settings["near_km"], "max_ft": self.settings["near_max_ft"]},
             "disconnects": self.disconnects,
             "newest_message_age_s": None if self.last_message is None
             else round(time.monotonic() - self.last_message, 1),
             "file": self.writer.path,
+            "receiver": read_receiver(self.settings["readsb_stats"]),
+            "boot_id": self.boot_id,
         }
+        entry.update(self.status(self.log_dir, self.clock))
         try:
             folder = os.path.join(self.log_dir, "health")
             os.makedirs(folder, exist_ok=True)
-            entry.update(self.status(self.log_dir, self.clock))
             day = dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime("%Y-%m-%d")
-            with open(os.path.join(folder, f"{day}.jsonl"), "a") as f:
+            self.health_path = os.path.join(folder, f"{day}.jsonl")
+            with open(self.health_path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
         except OSError as error:
             # The disk may be failing. Say so in the system journal and keep going.
             log(f"can't write health log: {error}")
+        self.note_open_files()
         self._reset_counts()
         self.last_health = time.monotonic()
 
@@ -283,6 +394,8 @@ class Logger:
         self.last_clock_check = time.monotonic()
         synced = self.clock.get("synchronised")
         if synced is not None and synced != previous:
+            # Start a new file, so each file is wholly from a synchronised clock or wholly not
+            self.close_writer()
             self.health("clock_synchronised" if synced else "clock_not_synchronised")
 
     def check_disk(self):
@@ -303,7 +416,8 @@ class Logger:
 
     def tick(self):
         try:
-            self.writer.tick()
+            if self.writer.tick():
+                self.write_failures = 0
         except OSError as error:
             self.write_failed(error)
         now = time.monotonic()
@@ -362,7 +476,7 @@ class Logger:
                     self.health("connected")
                     self.read_stream(connection)
             except OSError as error:
-                log(error)
+                self.log_once(error)
             if self.connected:
                 self.connected = False
                 self.disconnects += 1
@@ -393,7 +507,7 @@ def main(argv=None, prog=None):
     signal.signal(signal.SIGTERM, logger.stop)
     signal.signal(signal.SIGINT, logger.stop)
     logger.run()
-    return 0
+    return logger.exit_code
 
 
 if __name__ == "__main__":

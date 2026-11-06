@@ -6,8 +6,10 @@ Description=Write the ADS-B logger status page for http://<pi>/adsb-status/
 Type=oneshot
 User=adsb-logger
 Environment=PYTHONPATH=/opt/adsb-logger
-# /run/adsb-status is in memory, so the page never writes to the SD card or needs the SSD
+# /run/adsb-status is in memory, so the page costs no disk writes
 RuntimeDirectory=adsb-status
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
+# A hung SSD mustn't hold it forever; the page then shows it's out of date
+TimeoutStartSec=45
 ExecStart=/usr/bin/python3 -m adsb status --html /run/adsb-status/index.html

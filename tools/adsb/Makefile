@@ -20,10 +20,10 @@ help:
 	@echo "make dev-analyse  analyse $(DEV_LOGS) into data/dev-results"
 	@echo
 	@echo "On the Pi, from this laptop (PI=$(PI); see docs/pi-setup.md):"
-	@echo "make pi-deploy     copy the code to the Pi and install or update it; ARGS=\"--gps --hotspot\" at home"
+	@echo "make pi-deploy     copy the code to the Pi and install or update it; ARGS=\"--watchdog --gps --hotspot\" at home, \"--graphs\" for the trial"
 	@echo "make pi-status     the site-visit check, and the logger's latest journal lines"
 	@echo "make pi-journal    follow the logger's journal; Ctrl-C to stop"
-	@echo "make pi-config     edit the Pi's site.json, then restart the logger"
+	@echo "make pi-config     edit the Pi's site.json, then turn on and restart the logger"
 	@echo "make pi-collect    copy the finished logs to data/collected/ and check their checksums"
 	@echo "make pi-ssh        a shell on the Pi"
 
@@ -59,7 +59,8 @@ pi-journal:
 	$(SSH) -t $(PI) journalctl -u adsb-logger -f
 
 pi-config:
-	$(SSH) -t $(PI) 'sudoedit /etc/adsb-logger/site.json && sudo systemctl restart adsb-logger \
+	$(SSH) -t $(PI) 'sudoedit /etc/adsb-logger/site.json && sudo systemctl enable adsb-logger \
+		&& sudo systemctl restart adsb-logger \
 		&& sleep 5 && journalctl -u adsb-logger -n 5 --no-pager --output short-iso'
 
 pi-collect:

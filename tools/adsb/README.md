@@ -27,6 +27,7 @@ python3 -m adsb log       --config site.json      # on the Pi, run by systemd
 python3 -m adsb status                             # on the Pi, on each site visit
 python3 -m adsb analyse   --config site.json --logs LOGS --out RESULTS --weather eglc.csv
 python3 -m adsb simulate  demo | logs | serve
+python3 -m adsb traces    --config site.json --out OUT --source NAME INPUT...   # readsb track files to logs
 ```
 
 Run it from `tools/adsb`, or with `tools/adsb` on `PYTHONPATH`. On the Pi, `deploy/install.sh` installs everything and a plain `adsb` command; see [Setting up the Pi](docs/pi-setup.md).
@@ -59,6 +60,7 @@ tools/adsb/
     viewer.py              writes viewer.html from viewer_template.html
     common.py              units, numbers and UTC times
     simulate.py            a simulated day with known answers, and a fake readsb
+    traces.py              readsb track files (adsb.lol's archive) to hourly log files
   tests/                   unittest tests, on made-up data only
   deploy/                  install script, systemd units and the `adsb` wrapper for the Pi; collect.sh for the laptop
   docs/                    plan, Pi setup, log format, analysis method, the simulated day
@@ -107,6 +109,7 @@ Conventions:
 - [What gets logged](docs/logs.md): log files, the health log and the ADS-B fields we use
 - [Analysing the logs](docs/analysis.md): weather data, outputs, how each value is worked out, and the viewer
 - [The simulated day](docs/simulation.md): what it contains and how accurately the analysis recovers it
+- [adsb.lol's archive](docs/traces.md): other receivers' tracks, as a cross-check on coverage and the clock
 
 ## Keep out of this repository
 
