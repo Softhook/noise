@@ -45,7 +45,22 @@ python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00"
 
 # Several monitors from the same downloads
 python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00" --nmt 106,103
+
+# Check the saved NMT6 data for gaps and anything that looks wrong (reads the files only)
+python3 -m webtrak quality
+python3 -m webtrak quality --from "2026-11-05 08:00" --to "2026-11-05 11:00" --json report.json
 ```
+
+### Checking the data (`quality`)
+
+`quality` reads a monitor's saved files (and the raw cache, for the radar status) and reports what is missing and what looks wrong. It never downloads and never changes a file. Each check is marked `ok`, `info` (worth knowing, not a fault) or `WARN`, with a few examples. The thresholds are rules of thumb, listed at the top of `webtrak/quality.py`, and a warning is a reason to look, not proof that the data is wrong.
+
+- **Coverage:** missing chunks between the first and last saved one; chunks short of 30 s or with repeated seconds; radar not online; events still waiting for radar.
+- **Levels:** no-measurement runs (the 00:00 and 12:00 placeholders counted apart); levels outside 25–110 dB; the same level for 30 s or more; steps of 15 dB or more in one second; wrong UTC offsets.
+- **Events:** repeats; SEL that isn't Leq + 10 log10(duration); LAmax that isn't the highest 1 s level; flag 1 seconds outside every event; aircraft events with no aircraft matched, or matched more than 1.5 km away; non-aircraft events with an aircraft within 1 km; LAmax more than 5 s before or 20 s after the closest approach; events whose radar window isn't all saved.
+- **Radar:** repeated positions, gaps within a track, missing heights, implausible heights or speeds.
+
+Flag 1 marks only aircraft (class 1) events: in the data so far, the seconds of class 5 events keep flag 5.
 
 ### The web app
 
@@ -84,7 +99,7 @@ An event is listed in one or two chunks around its time (the one where it starts
 
 ### Output files schema
 
-- **`levels/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `level_db`, `flag` (flag `1` during an event, `5` background, `9` no measurement). `level_db` is blank when there was no measurement.
+- **`levels/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `level_db`, `flag` (flag `1` during an aircraft event, `5` otherwise, `9` no measurement). `level_db` is blank when there was no measurement.
 - **`aircraft/YYYY-MM-DD.csv`**: `time_utc`, `time_local`, `track`, `callsign`, `type`, `registration`, `direction`, `airport`, `origin`, `destination`, `lat`, `lon`, `height_m`, `altitude_m`, `speed_ms`, `distance_m`, `slant_m`.
 - **`events.csv`**: `start_utc`, `start_local`, `lmax_time_local`, `end_local`, `duration_s`, `lmax_db`, `sel_db`, `leq_db`, `epnl_db`, `event_class`, `callsign`, `type`, `direction`, `airport`, `track`, `closest_time_local`, `closest_distance_m`, `closest_height_m`, `closest_slant_m`, `lmax_after_closest_s`, `candidates`.
 

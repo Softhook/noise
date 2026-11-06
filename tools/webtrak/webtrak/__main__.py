@@ -8,6 +8,7 @@ commands:
   fetch      download a past period, in local time
   range      show the period WebTrak holds
   serve      a local web app for starting downloads, watching them and seeing statistics
+  quality    check the saved data for gaps and anything that looks wrong
 
 NMT6, St Pauls Church in Thamesmead, is monitor 106 and is the default. --nmt 106,103 collects
 several monitors from the same downloads.
@@ -379,8 +380,33 @@ def cmd_serve(argv, prog):
     return server.serve(os.path.abspath(args.out), args.site, args.port, open_browser=not args.no_browser)
 
 
+def cmd_quality(argv, prog):
+    from . import quality
+    parser = argparse.ArgumentParser(prog=prog, description=quality.__doc__.split("\n\n")[0],
+                                     epilog="Reads the saved files only: nothing is downloaded or changed.")
+    parser.add_argument("--site", default="lcy")
+    parser.add_argument("--nmt", default=DEFAULT_MONITOR, help="monitor id (default 106, NMT6)")
+    parser.add_argument("--out", default=DEFAULT_OUT, help="data folder (default tools/webtrak/data)")
+    parser.add_argument("--from", dest="start", help="local start, 'YYYY-MM-DD HH:MM' (default: first saved)")
+    parser.add_argument("--to", dest="end", help="local end, 'YYYY-MM-DD HH:MM' (default: last saved)")
+    parser.add_argument("--json", help="also write the full report to this JSON file")
+    args = parser.parse_args(argv)
+    site_dir = os.path.join(args.out, args.site)
+    monitor_dir = os.path.join(site_dir, f"nmt{args.nmt}")
+    if not os.path.isdir(monitor_dir):
+        raise SystemExit(f"nothing saved for monitor {args.nmt} in {site_dir}")
+    start = parse.local_to_utc(args.start) if args.start else None
+    end = parse.local_to_utc(args.end) if args.end else None
+    report = quality.check(monitor_dir, start, end, site_dir=site_dir)
+    print(report.text())
+    if args.json:
+        quality.write_json(report, args.json)
+        print(f"full report written to {args.json}")
+    return 0
+
+
 COMMANDS = {"follow": cmd_follow, "fetch": cmd_fetch, "monitors": cmd_monitors, "range": cmd_range,
-            "serve": cmd_serve}
+            "serve": cmd_serve, "quality": cmd_quality}
 
 
 def main(argv=None):

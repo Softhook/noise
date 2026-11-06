@@ -16,7 +16,7 @@ import unittest
 import urllib.error
 
 from webtrak import __main__ as cli
-from webtrak import client, parse, server, stats, store
+from webtrak import client, parse, quality, server, stats, store
 
 MONITOR = {"id": "106", "name": "St Pauls Church, Thamesmead", "lat": 51.50535, "lon": 0.11075}
 
@@ -630,6 +630,95 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(store.is_locked(holder.dir))
         with self.assertRaises(server.BadRequest):
             self.app.start_job({"kind": "fetch", "nmt": "106", "from": "2026-11-05 08:00", "to": "2026-11-05 09:00"})
+
+
+class QualityTests(unittest.TestCase):
+    """The quality check, on small hand-written monitor folders."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.mdir = os.path.join(self.dir, "nmt106")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def write(self, saved, levels, events=(), aircraft=()):
+        """levels: {seconds after 08:00:00 UTC on 5 Nov 2026: (level or None, flag)}."""
+        base = 1793865600  # 2026-11-05T08:00:00Z, handle 59795520
+        os.makedirs(os.path.join(self.mdir, "levels"))
+        os.makedirs(os.path.join(self.mdir, "aircraft"))
+        with open(os.path.join(self.mdir, "state.json"), "w") as f:
+            json.dump({"saved": [[59795520 + a, 59795520 + b] for a, b in saved], "monitor": MONITOR,
+                       "pending": []}, f)
+        with open(os.path.join(self.mdir, "levels", "2026-11-05.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(store.LEVEL_FIELDS)
+            for t, (level, flag) in sorted(levels.items()):
+                w.writerow([store.iso_utc(base + t), store.iso_local(base + t, 0), "" if level is None else level, flag])
+        with open(os.path.join(self.mdir, "events.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=store.EVENT_FIELDS)
+            w.writeheader()
+            for e in events:
+                row = {k: "" for k in store.EVENT_FIELDS}
+                row.update(start_utc=store.iso_utc(base + e["start"]), start_local=store.iso_local(base + e["start"], 0),
+                           lmax_time_local=store.iso_local(base + e["lmax_t"], 0),
+                           end_local=store.iso_local(base + e["end"], 0), duration_s=e["end"] - e["start"],
+                           lmax_db=e["lmax"], leq_db=e["leq"], event_class=e["class"],
+                           sel_db=round(e["leq"] + 10 * math.log10(e["end"] - e["start"]), 2), epnl_db=0,
+                           candidates=e.get("candidates", 0), track=e.get("track", ""),
+                           closest_slant_m=e.get("slant", ""), lmax_after_closest_s=e.get("lag", ""))
+                w.writerow(row)
+        with open(os.path.join(self.mdir, "aircraft", "2026-11-05.csv"), "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(store.AIRCRAFT_FIELDS)
+            for t, track, height in aircraft:
+                w.writerow([store.iso_utc(base + t), store.iso_local(base + t, 0), track, "KL978", "E190", "PHEZA",
+                            "D", "LCY", "", "", 51.505, 0.11, height, height, 80, 0, height])
+
+    def counts(self, report):
+        return {c["check"]: c["count"] for checks in report.sections.values() for c in checks}
+
+    def test_clean_data_has_no_warnings(self):
+        levels = {t: (50.0 + (t % 3) * 0.1, "5") for t in range(240)}
+        for t in range(100, 110):
+            levels[t] = (60.0 + t - 100, "1")
+        for t in range(110, 120):
+            levels[t] = (69.0 - 2 * (t - 109), "5")  # dying away, not dropping at once
+        self.write([(0, 7)], levels, events=[{"start": 100, "lmax_t": 109, "end": 109, "lmax": 69.0, "leq": 65.0,
+                                               "class": "1", "track": "1", "slant": 700, "lag": 3, "candidates": 1}],
+                   aircraft=[(104, "1", 700), (108, "1", 710)])
+        report = quality.check(self.mdir)
+        self.assertEqual(report.warnings, 0, report.text())
+        json.dumps(report.as_dict())
+
+    def test_problems_are_found(self):
+        levels = {t: (50.0 + (t % 3) * 0.1, "5") for t in range(60)}   # chunks 0 and 1
+        levels.update({t: (50.0 + (t % 3) * 0.1, "5") for t in range(90, 115)})  # chunk 3, 5 s short
+        for t in range(10, 45):
+            levels[t] = (55.0, "5")       # stuck for 35 s
+        levels[50] = (75.0, "5")          # a 1 s spike
+        levels[52] = (None, "9")          # no measurement, not at 00:00 or 12:00
+        levels[95] = (65.0, "1")          # flag 1 with no event
+        events = [{"start": 100, "lmax_t": 105, "end": 110, "lmax": 52.0, "leq": 50.0, "class": "1"},  # unmatched
+                  {"start": 54, "lmax_t": 56, "end": 58, "lmax": 50.2, "leq": 50.0, "class": "5"}]
+        self.write([(0, 1), (3, 3)], levels, events,
+                   aircraft=[(0, "7", 900), (100, "7", 20000), (100, "7", 20000)])
+        c = self.counts(quality.check(self.mdir))
+        self.assertEqual(c["missing chunk ranges"], 1)
+        self.assertEqual(c["saved chunks with fewer than 30 s of levels"], 1)
+        self.assertEqual(c["same level 30 s or more"], 1)
+        self.assertEqual(c["steps of 15 dB or more in 1 s"], 3)  # 50, 51 and 96
+        self.assertEqual(c["other no-measurement runs"], 1)
+        self.assertEqual(c["flag 1 seconds outside every saved event"], 1)
+        self.assertEqual(c["aircraft events with no aircraft matched"], 1)
+        self.assertEqual(c["aircraft events with no flag 1 seconds"], 1)
+        self.assertEqual(c["positions written more than once"], 1)
+        self.assertEqual(c["implausible heights or speeds"], 2)
+        self.assertEqual(c["events whose radar window isn't all saved"], 2)
+
+    def test_nothing_saved(self):
+        os.makedirs(self.mdir)
+        self.assertEqual(quality.check(self.mdir).warnings, 0)
 
 
 if __name__ == "__main__":
