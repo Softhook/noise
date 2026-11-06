@@ -64,7 +64,7 @@ tools/adsb/
   tests/                   unittest tests, on made-up data only
   deploy/                  install script, systemd units and the `adsb` wrapper for the Pi; collect.sh for the laptop
   docs/                    plan, Pi setup, log format, analysis method, the simulated day
-  site.example.json        config template; the location is a placeholder
+  site.example.json        config template; the location is a placeholder, and site.name is what outputs call it
   site.dev.json            config for running the logger on a laptop against the simulator
   Makefile                 development tasks, and the `make pi-*` commands for the Pi
 ```

@@ -108,7 +108,7 @@ def unsynced_periods(entries):
 def logger_was_listening(entries, start, end, max_spacing_s=900):
     """True if the health log shows the logger running, connected and receiving from start to end.
 
-    A gap in the kept data is then a quiet sky near the garden, not lost data. Without health
+    A gap in the kept data is then a quiet sky near the site, not lost data. Without health
     records covering the whole gap, it counts as lost.
     """
     inside = [e for e in entries if start <= e["time"] <= end]

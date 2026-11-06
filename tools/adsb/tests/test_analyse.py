@@ -17,7 +17,7 @@ from adsb.analyse import DEFAULTS, run
 from adsb.atmosphere import geometric_altitude_m, qnh_altitude_m, sound_speed
 from adsb.common import FEET, format_utc, parse_utc
 from adsb.flight import analyse_flight
-from adsb.geometry import Site, closest_approach, garden_side
+from adsb.geometry import Site, closest_approach, site_side
 from adsb.logs import log_paths
 from adsb.tracks import FlightBuilder, parse_point
 from adsb.weather import Weather
@@ -113,10 +113,10 @@ class Corrections(unittest.TestCase):
         flight, _ = flight_from(make_records(geoid=0.0), wx=Weather())
         self.assertEqual(flight["height_source"], "geometric")
 
-    def test_garden_side_suits_the_track_direction(self):
-        self.assertEqual(garden_side(270, 0, -500), "north")
-        self.assertEqual(garden_side(5, 400, 0), "west")
-        self.assertEqual(garden_side(185, -400, 0), "east")
+    def test_site_side_suits_the_track_direction(self):
+        self.assertEqual(site_side(270, 0, -500), "north")
+        self.assertEqual(site_side(5, 400, 0), "west")
+        self.assertEqual(site_side(185, -400, 0), "east")
 
 
 class Streaming(unittest.TestCase):
@@ -172,7 +172,7 @@ class Arrival(unittest.TestCase):
 
     def test_recovers_the_known_offset_side_and_height(self):
         self.assertAlmostEqual(self.flight["lateral_offset_m"], 500.0, delta=0.5)
-        self.assertEqual(self.flight["garden_side"], "north")
+        self.assertEqual(self.flight["site_side"], "north")
         expected = 4000 * math.tan(math.radians(5.5))
         self.assertAlmostEqual(self.flight["height_at_closest_ground_amsl_m"], expected, delta=0.5)
 
@@ -220,7 +220,7 @@ class OtherFlights(unittest.TestCase):
         flight, _ = flight_from(make_records(angle=7, heading_west=False, offset_north=100.0))
         self.assertEqual(flight["label"], "rwy09_departure")
         self.assertEqual(flight["path_trend"], "climbing")
-        self.assertEqual(flight["garden_side"], "south")
+        self.assertEqual(flight["site_side"], "south")
 
     def test_high_overflight_is_other(self):
         flight, _ = flight_from(make_records(angle=0, height_at_site=2500.0))
@@ -504,6 +504,42 @@ class WholeRun(unittest.TestCase):
     def test_site_config_is_checked(self):
         with self.assertRaisesRegex(ValueError, "ground_elevation_m"):
             Site({"site": {"lat": 51.5, "lon": 0.1}})
+
+    def viewer_data(self):
+        with open(os.path.join(self.out, "viewer.html")) as f:
+            html = f.read()
+        return json.loads(html.split('<script id="data" type="application/json">')[1].split("</script>")[0])
+
+    def test_a_private_site_is_named_without_its_position(self):
+        self.write_log("a.jsonl.gz", make_records())
+        _, summary = run(CONFIG, self.logs, self.out, self.weather)
+        self.assertEqual(self.viewer_data()["site"], {"name": "Site", "label": "Site"})
+        self.assertIn("Site: Site\n", summary)
+        config = {**CONFIG, "site": {**CONFIG["site"], "name": "Garden", "public": "yes"}}  # Only true is public
+        _, summary = run(config, self.logs, self.out, self.weather)
+        self.assertEqual(self.viewer_data()["site"], {"name": "Garden", "label": "Garden"})
+        self.assertIn("Site: Garden\n", summary)
+        self.assertNotIn(f"{SITE_LAT:.5f}", summary)
+
+    def test_a_public_site_shows_its_name_label_and_position(self):
+        self.write_log("a.jsonl.gz", make_records())
+        site = {**CONFIG["site"], "name": "NMT6, St Pauls Church, Thamesmead", "label": "NMT6", "public": True}
+        flights, summary = run({**CONFIG, "site": site}, self.logs, self.out, self.weather)
+        self.assertEqual(self.viewer_data()["site"], {
+            "name": "NMT6, St Pauls Church, Thamesmead", "label": "NMT6",
+            "lat": round(SITE_LAT, 5), "lon": round(SITE_LON, 5)})
+        self.assertIn(f"Site: NMT6, St Pauls Church, Thamesmead ({SITE_LAT:.5f}, {SITE_LON:.5f})", summary)
+        self.assertEqual(flights[0]["site_side"], "north")
+
+    def test_converted_logs_expect_no_health_log(self):
+        self.write_log("a.jsonl.gz", make_records() + make_records(start=START + 7200))
+        with open(os.path.join(self.logs, "SOURCE.txt"), "w") as f:
+            f.write("Source: OpenSky Network research database\nNOT the logger's own record.\n")
+        _, summary = run(CONFIG, self.logs, self.out, self.weather)
+        self.assertIn("Source: OpenSky Network research database. Converted, not the logger's own record", summary)
+        self.assertIn("NOTE: no health log, as expected for converted logs", summary)
+        self.assertNotIn("WARNING: no health log", summary)
+        self.assertIn("GAP over 30 minutes, unchecked (no health log, so it may be a quiet sky)", summary)
 
 
 if __name__ == "__main__":

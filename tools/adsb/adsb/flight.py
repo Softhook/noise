@@ -1,4 +1,4 @@
-"""Work out one flight's heights, closest approach to the garden, sound delay, path angle and label."""
+"""Work out one flight's heights, closest approach to the site, sound delay, path angle and label."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import statistics
 
 from .atmosphere import DEFAULT_SOUND_SPEED, geometric_altitude_m, qnh_altitude_m, sound_speed
 from .common import format_utc, most_common, overlaps
-from .geometry import angle_difference, angle_from_vertical, closest_approach, garden_side, linear_fit
+from .geometry import angle_difference, angle_from_vertical, closest_approach, linear_fit, site_side
 
 
 def choose_heights(points, site, weather, settings):
@@ -119,7 +119,7 @@ def interpolate_height(heights, i, j, u):
 def smoothed_closest(points, heights, centre_t, window_s, mic_amsl):
     """Closest approach from straight lines fitted to the positions within window_s of centre_t.
 
-    Taking the nearest of many noisy positions favours those that happen to fall near the garden,
+    Taking the nearest of many noisy positions favours those that happen to fall near the site,
     so it reads short. Fitting lines over about 40 s averages the noise, and the 25 ft altitude steps.
     Returns None if there aren't enough positions, so the caller can fall back to the raw track.
     """
@@ -162,7 +162,7 @@ def raw_slant_closest(points, used, mic_amsl):
 
 
 def closest_point(points, used, mic_amsl, settings, flags):
-    """The flight's closest approach to the garden, along the ground and in three dimensions.
+    """The flight's closest approach to the site, along the ground and in three dimensions.
 
     Uses straight lines fitted around the closest point when there are enough positions, and the
     raw track otherwise or for whatever the fit can't give. Adds track-end and gap flags.
@@ -261,7 +261,7 @@ def analyse_flight(flight_id, code, points, site, weather, settings, unsynced=()
         "db_flags": most_common(p.db_flags for p in points), "label": label,
         "first_seen_utc": format_utc(start), "last_seen_utc": format_utc(end),
         "positions": len(points), "height_source": source,
-        "garden_side": garden_side(heading, closest["x"], closest["y"]), "lateral_offset_m": lateral,
+        "site_side": site_side(heading, closest["x"], closest["y"]), "lateral_offset_m": lateral,
         "closest_ground_time_utc": format_utc(ground_time),
         "height_at_closest_ground_amsl_m": ground_height,
         "closest_slant_time_utc": format_utc(slant_time), "closest_slant_m": slant,

@@ -1,5 +1,6 @@
 {
   "site": {
+    "name": "Garden",
     "lat": 51.5,
     "lon": 0.1,
     "ground_elevation_m": 3.0,

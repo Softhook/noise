@@ -28,9 +28,17 @@ def viewer_track(rows, spacing_s=1.0):
 
 
 def viewer_data(flights, tracks, summary, site, config):
-    """Everything the viewer shows. Deliberately no latitudes or longitudes, so the garden isn't revealed."""
+    """Everything the viewer shows.
+
+    Latitudes and longitudes are left out, so a private site such as the garden isn't revealed. Only a
+    site marked public in site.json (such as a WebTrak monitor) has its own latitude and longitude shown.
+    """
+    about = {"name": site.name, "label": site.label}
+    if site.public:
+        about.update(lat=round(site.lat, 5), lon=round(site.lon, 5))
     return {
         "generated_utc": format_utc(dt.datetime.now(dt.timezone.utc).timestamp()),
+        "site": about,
         "simulated": bool(config.get("simulated")),
         "mic_amsl_m": round(site.mic_amsl, 2),
         "summary": summary,

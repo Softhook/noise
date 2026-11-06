@@ -1,6 +1,7 @@
 {
   "_comment": "For running the logger on a laptop against the simulator (make dev-serve, then make dev-log). The location is the simulator's placeholder, not the garden.",
   "site": {
+    "name": "Simulator site",
     "lat": 51.5,
     "lon": 0.1,
     "ground_elevation_m": 3.0,

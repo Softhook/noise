@@ -36,7 +36,7 @@ from .common import FEET, format_utc
 from .geometry import Site, distance_km
 from .logger import HourlyWriter
 
-SITE = {"lat": 51.5, "lon": 0.1, "ground_elevation_m": 3.0, "mic_height_m": 3.0}
+SITE = {"name": "Simulated site", "lat": 51.5, "lon": 0.1, "ground_elevation_m": 3.0, "mic_height_m": 3.0}
 GEOID_M = 45.0
 RUNWAY_ELEVATION_M = 20 * FEET
 OFFSET_M = 500.0  # Garden north of the RWY 27 centreline
@@ -445,7 +445,7 @@ def write_weather(path, times):
 
 
 TRUTH_COLUMNS = [
-    "hex", "callsign", "type", "kind", "quirk", "start_utc", "true_lateral_m", "true_garden_side",
+    "hex", "callsign", "type", "kind", "quirk", "start_utc", "true_lateral_m", "true_site_side",
     "true_height_at_closest_ground_amsl_m", "true_closest_ground_time", "true_closest_slant_m",
     "true_path_angle_deg", "during_power_cut",
 ]
@@ -459,7 +459,7 @@ def write_truth(path, flights, site, times):
         rows.append({
             "hex": flight.code, "callsign": flight.callsign, "type": flight.type, "kind": flight.kind,
             "quirk": flight.quirk, "start_utc": format_utc(flight.t0), "true_lateral_m": round(ground, 2),
-            "true_garden_side": "north" if y < 0 else "south",
+            "true_site_side": "north" if y < 0 else "south",
             "true_height_at_closest_ground_amsl_m": round(height, 2), "true_closest_ground_time": round(ground_t, 2),
             "true_closest_slant_m": round(slant, 2),
             "true_path_angle_deg": "" if flight.angle is None else round(flight.angle, 3),

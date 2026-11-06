@@ -1,4 +1,4 @@
-"""Positions relative to the garden, and the closest-approach geometry used by the analysis.
+"""Positions relative to the site (the garden, or whatever site.json names), and the closest-approach geometry used by the analysis.
 
 Used on the Pi too (distance_km), so it must only import the standard library.
 """
@@ -25,6 +25,11 @@ class Site:
             if not isinstance(site.get(key), (int, float)):
                 raise ValueError(f"config site.{key} must be a number")
         self.lat, self.lon = float(site["lat"]), float(site["lon"])
+        # What to call the site in the outputs, e.g. "Garden" or "NMT6, St Pauls Church, Thamesmead";
+        # label is the short form for the map. public: whether its latitude and longitude may be shown.
+        self.name = str(site.get("name") or "Site")
+        self.label = str(site.get("label") or self.name)
+        self.public = site.get("public") is True
         self.mic_amsl = float(site["ground_elevation_m"]) + float(site.get("mic_height_m", 3.0))
         geoid = config.get("geoid_height_m")
         self.geoid = None if geoid is None else float(geoid)
@@ -34,7 +39,7 @@ class Site:
         self.metres_per_rad_east = WGS84_A / w * math.cos(math.radians(self.lat))
 
     def local_xy(self, lat, lon):
-        """Metres east and north of the garden. Accurate enough within the analysis radius."""
+        """Metres east and north of the site. Accurate enough within the analysis radius."""
         return (
             math.radians(lon - self.lon) * self.metres_per_rad_east,
             math.radians(lat - self.lat) * self.metres_per_rad_north,
@@ -82,8 +87,8 @@ def angle_from_vertical(vector):
     return math.degrees(math.atan2(math.hypot(vector[0], vector[1]), vector[2]))
 
 
-def garden_side(heading, closest_x, closest_y):
-    """Which side of the track the garden is on, by compass, chosen to suit the track's direction."""
+def site_side(heading, closest_x, closest_y):
+    """Which side of the track the site is on, by compass, chosen to suit the track's direction."""
     if heading is not None and (angle_difference(heading, 0) < 45 or angle_difference(heading, 180) < 45):
         return "east" if closest_x < 0 else "west"
     return "north" if closest_y < 0 else "south"

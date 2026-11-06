@@ -100,7 +100,7 @@ svg .ink { fill: var(--text); }
 .track.other { stroke-width: 1; }
 .hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; pointer-events: stroke; }
 .ring { fill: none; stroke: var(--selected-ring); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
-.garden { fill: var(--text); stroke: var(--surface); stroke-width: 2; }
+.site { fill: var(--text); stroke: var(--surface); stroke-width: 2; }
 .dot { stroke: var(--surface); stroke-width: 2; cursor: pointer; }
 .median { stroke: var(--text); stroke-width: 2; }
 .ref { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 4 3; }
@@ -137,6 +137,7 @@ details summary { cursor: pointer; color: var(--text-2); }
 <body>
 <main>
   <h1>ADS-B flight viewer <span class="badge" id="badge" hidden>Simulated data</span></h1>
+  <p class="sub" id="site"></p>
   <p class="sub" id="subtitle"></p>
   <div class="tiles" id="tiles"></div>
   <ul class="warnings" id="warnings"></ul>
@@ -167,14 +168,14 @@ details summary { cursor: pointer; color: var(--text-2); }
 
   <div class="grid2">
     <section class="panel">
-      <div class="panel-head"><h2>Tracks around the garden</h2><span class="note" id="plan-count"></span></div>
-      <svg id="plan" viewBox="0 0 600 600" role="img" aria-label="Plan view of flight tracks, in kilometres from the garden"></svg>
-      <p class="note">Kilometres east and north of the garden. Rings at 1, 2 and 5 km. Click a track to select it.</p>
+      <div class="panel-head"><h2>Tracks around <span data-site="label">the site</span></h2><span class="note" id="plan-count"></span></div>
+      <svg id="plan" viewBox="0 0 600 600" role="img" aria-label="Plan view of flight tracks, in kilometres from the site"></svg>
+      <p class="note">Kilometres east and north of <span data-site="label">the site</span>. Rings at 1, 2 and 5 km. Click a track to select it.</p>
     </section>
     <section class="panel">
       <div class="panel-head"><h2>Height profile</h2><span class="note">Height above the microphone</span></div>
-      <svg id="profile" viewBox="0 0 600 600" role="img" aria-label="Height above the microphone against distance east of the garden"></svg>
-      <p class="note">Each flight's height against its distance east of the garden. The line at 0 km is abeam the garden.</p>
+      <svg id="profile" viewBox="0 0 600 600" role="img" aria-label="Height above the microphone against distance east of the site"></svg>
+      <p class="note">Each flight's height against its distance east of <span data-site="label">the site</span>. The line at 0 km is abeam <span data-site="label">the site</span>.</p>
     </section>
   </div>
 
@@ -184,7 +185,7 @@ details summary { cursor: pointer; color: var(--text-2); }
       <label class="note">Measure <select id="f-metric">
         <option value="path_angle_deg">Path angle (°)</option>
         <option value="lateral_offset_m">Offset from track (m)</option>
-        <option value="height_at_closest_ground_amsl_m">Height abeam the garden (m AMSL)</option>
+        <option value="height_at_closest_ground_amsl_m" id="metric-height">Height abeam the site (m AMSL)</option>
         <option value="closest_slant_m">Closest distance to microphone (m)</option>
         <option value="sound_delay_s">Sound delay (s)</option>
         <option value="median_qnh_minus_geometric_m">QNH minus geometric height (m)</option>
@@ -222,6 +223,8 @@ const LABELS = { rwy27_arrival: "RWY 27 arrival", rwy09_departure: "RWY 09 depar
 const COLOURS = { rwy27_arrival: "var(--arrival)", rwy09_departure: "var(--departure)", other: "var(--other)" };
 const state = { selected: null, sortKey: "closest_ground_time_utc", sortDir: 1 };
 const $ = (id) => document.getElementById(id);
+// The site the flights are measured from: its name, a short label for the map, and its position if public.
+const SITE = Object.assign({ name: "Site", label: "Site" }, (DATA && DATA.site) || {});
 
 function el(name, attrs, parent) {
   const node = document.createElementNS(SVG, name);
@@ -319,8 +322,8 @@ function drawPlan(flights) {
     shown++;
     drawTrack(layer, "M" + pts.map((p) => `${sx(p[1]).toFixed(1)},${sy(p[2]).toFixed(1)}`).join("L"), f);
   }
-  el("circle", { cx: C, cy: C, r: 6, class: "garden" }, svg);
-  text(svg, C + 10, C + 16, "Garden", { class: "ink" });
+  el("circle", { cx: C, cy: C, r: 6, class: "site" }, svg);
+  text(svg, C + 10, C + 16, SITE.label, { class: "ink" });
   $("plan-count").textContent = `${shown} of ${flights.length} filtered flights drawn`;
 }
 
@@ -357,7 +360,7 @@ function drawProfile(flights) {
   for (let e = -Math.floor(R / xStep) * xStep; e <= R; e += xStep) {
     text(svg, sx(e), B + 18, `${(e / 1000).toLocaleString("en-GB")}`, { "text-anchor": "middle" });
   }
-  text(svg, Rt, B + 36, "km east of the garden", { "text-anchor": "end" });
+  text(svg, Rt, B + 36, `km east of ${SITE.label}`, { "text-anchor": "end" });
   el("line", { x1: sx(0), y1: T, x2: sx(0), y2: B, class: "axisline" }, svg);
   for (const [f, pts] of sets) {
     drawTrack(svg, "M" + pts.map((p) => `${sx(p[1]).toFixed(1)},${sy(p[3]).toFixed(1)}`).join("L"), f);
@@ -459,8 +462,8 @@ function drawTable(flights) {
 const DETAIL = [
   ["callsign", "Callsign"], ["hex", "Hex"], ["type", "Type"], ["registration", "Registration"],
   ["label", "Label"], ["first_seen_utc", "First seen"], ["last_seen_utc", "Last seen"], ["positions", "Positions"],
-  ["height_source", "Height source"], ["garden_side", "Garden is"], ["lateral_offset_m", "Offset from track (m)"],
-  ["closest_ground_time_utc", "Abeam the garden"], ["height_at_closest_ground_amsl_m", "Height abeam (m AMSL)"],
+  ["height_source", "Height source"], ["site_side", `${SITE.label} is`], ["lateral_offset_m", "Offset from track (m)"],
+  ["closest_ground_time_utc", `Abeam ${SITE.label}`], ["height_at_closest_ground_amsl_m", "Height abeam (m AMSL)"],
   ["closest_slant_m", "Closest to microphone (m)"], ["closest_slant_time_utc", "At"],
   ["angle_from_vertical_deg", "Angle from vertical (°)"], ["sound_delay_s", "Sound delay (s)"],
   ["sound_arrival_time_utc", "Sound arrives"], ["heading_deg", "Heading (°)"], ["path_angle_deg", "Path angle (°)"],
@@ -498,7 +501,7 @@ function tiles() {
     ["Flagged flights", DATA.flights.filter((f) => f.flags).length],
   ];
   $("tiles").innerHTML = items.map(([l, v]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v.toLocaleString("en-GB")}</div></div>`).join("");
-  const warnings = DATA.summary.split("\n").filter((l) => /^(WARNING|DAMAGED|GAP|LOGGER)/.test(l));
+  const warnings = DATA.summary.split("\n").filter((l) => /^(WARNING|DAMAGED|GAP|LOGGER|NOTE)/.test(l));
   $("warnings").innerHTML = warnings.map((w) => `<li><span class="icon" aria-hidden="true">!</span><span>${escapeHtml(w)}</span></li>`).join("");
 }
 
@@ -518,6 +521,11 @@ function start() {
   }
   for (const f of DATA.flights) byId.set(f.flight_id, f);
   $("badge").hidden = !DATA.simulated;
+  for (const node of document.querySelectorAll("[data-site]")) node.textContent = SITE[node.dataset.site];
+  $("metric-height").textContent = `Height abeam ${SITE.label} (m AMSL)`;
+  const where = SITE.lat !== undefined ? ` (${SITE.lat.toFixed(5)}, ${SITE.lon.toFixed(5)})` : "";
+  document.title = `ADS-B flight viewer: ${SITE.name}`;
+  $("site").textContent = `${SITE.name}${where}`;
   const times = DATA.flights.map((f) => f.first_seen_utc).filter(Boolean).sort();
   $("subtitle").textContent = times.length
     ? `${times[0].slice(0, 16).replace("T", " ")} to ${times[times.length - 1].slice(0, 16).replace("T", " ")} UTC · microphone at ${fmt(DATA.mic_amsl_m, 1)} m AMSL · generated ${DATA.generated_utc.slice(0, 16).replace("T", " ")} UTC`

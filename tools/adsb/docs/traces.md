@@ -21,7 +21,7 @@ python3 -m adsb analyse --config site.json --logs OUT/adsb --out OUT/results --w
 
 Only positions within the logger's `max_km` of the site are kept (or `--max-km`). `OUT/adsb` must be empty. It gets one `.jsonl.gz` file per UTC hour and a `SOURCE.txt` that names the source, the inputs and the counts. The output says it's **not** the logger's own record, so it can't be mistaken for one. Keep each day in its own folder.
 
-The analysis warns that there's no health log. That's expected: the clock check and the gap checks need the logger's health log, so for this data they aren't available.
+The analysis reads `SOURCE.txt`, names the source in its summary, and notes that there's no health log. That's expected: the clock check and the gap checks need the logger's health log, so for this data they aren't available, and gaps are reported as unchecked.
 
 Each line has the logger's field names. `seen_pos` is 0, `trace_flags` holds readsb's flags for the point (1 stale, 2 new leg, 4 geometric vertical rate, 8 geometric altitude), and `type` is the position's source, such as `adsb_icao` or `mlat`. `flight`, `squawk` and `category` carry forward from the last point that had them; quality fields such as `nic` and `rc` don't, so a point without them isn't filtered on them. See readsb's [trace format](https://github.com/wiedehopf/readsb/blob/dev/README-json.md).
 

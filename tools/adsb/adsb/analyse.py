@@ -1,4 +1,4 @@
-"""Turn ADS-B logs into flights, with corrected heights, offsets from the garden and sound delay.
+"""Turn ADS-B logs into flights, with corrected heights, offsets from the site and sound delay.
 
   python3 -m adsb analyse --config site.json --logs LOG_DIR --out OUT_DIR [--weather eglc_metars.csv]
                           [--from 2026-11-05] [--to 2026-11-06] [--all-positions]
@@ -65,7 +65,7 @@ DEFAULTS = {
 }
 FLIGHT_COLUMNS = [
     "flight_id", "hex", "callsign", "type", "registration", "db_flags", "label", "first_seen_utc",
-    "last_seen_utc", "positions", "height_source", "garden_side", "lateral_offset_m",
+    "last_seen_utc", "positions", "height_source", "site_side", "lateral_offset_m",
     "closest_ground_time_utc", "height_at_closest_ground_amsl_m", "closest_slant_time_utc",
     "closest_slant_m", "angle_from_vertical_deg", "sound_delay_s", "sound_arrival_time_utc",
     "heading_deg", "path_angle_deg", "path_trend", "ground_speed_kt", "qnh_hpa", "temp_c",
@@ -100,8 +100,24 @@ def median_text(values, places=1):
     return f"{statistics.median(values):.{places}f}" if values else "-"
 
 
-def build_summary(flights, report, weather_loaded, geoid_known, health):
-    lines = [
+def read_source(log_dir):
+    """The first line of SOURCE.txt, which converted logs (adsb traces, opensky logs) have, or None."""
+    try:
+        with open(os.path.join(log_dir, "SOURCE.txt")) as f:
+            first = f.readline().strip()
+    except OSError:
+        return None
+    return first[len("Source:"):].strip() if first.startswith("Source:") else first or "unnamed"
+
+
+def build_summary(flights, report, weather_loaded, geoid_known, health, site=None, source=None):
+    lines = []
+    if site is not None:
+        where = f" ({site.lat:.5f}, {site.lon:.5f})" if site.public else ""
+        lines.append(f"Site: {site.name}{where}")
+    if source:
+        lines.append(f"Source: {source}. Converted, not the logger's own record")
+    lines += [
         f"Files read: {report['files']}",
         f"Lines read: {report['lines']}, unreadable: {report['invalid_lines']}",
         f"Flights: {len(flights)}",
@@ -112,7 +128,10 @@ def build_summary(flights, report, weather_loaded, geoid_known, health):
         lines.append("WARNING: no weather file, so there are no QNH heights")
     if not geoid_known:
         lines.append("WARNING: geoid_height_m not set, so there are no geometric heights")
-    if not health["records"]:
+    if not health["records"] and source:
+        lines.append("NOTE: no health log, as expected for converted logs, so there's no clock check, "
+                     "and a gap can't be told from a quiet sky")
+    elif not health["records"]:
         lines.append("WARNING: no health log, so clock problems can't be detected")
     for start, end in health["unsynced"]:
         lines.append(f"WARNING: clock not synchronised from {format_utc(start)} to {format_utc(end)}")
@@ -130,6 +149,9 @@ def build_summary(flights, report, weather_loaded, geoid_known, health):
     for start, end, listening in report["gaps"]:
         if listening:
             lines.append(f"QUIET over 30 minutes, logger running: {format_utc(start)} to {format_utc(end)}")
+        elif not health["records"]:
+            lines.append(f"GAP over 30 minutes, unchecked (no health log, so it may be a quiet sky): "
+                         f"{format_utc(start)} to {format_utc(end)}")
         else:
             lines.append(f"GAP over 30 minutes: {format_utc(start)} to {format_utc(end)}")
     lines.append("")
@@ -216,7 +238,8 @@ def run(config, log_dir, out_dir, weather_path=None, all_positions=False, start=
     for flight in flights:
         flights_out.write(flight)
     flights_out.close()
-    summary = build_summary(flights, report, bool(weather.entries), site.geoid is not None, health)
+    summary = build_summary(flights, report, bool(weather.entries), site.geoid is not None, health, site,
+                            read_source(log_dir))
     with open(os.path.join(out_dir, "summary.txt"), "w") as f:
         f.write(summary)
     write_viewer(os.path.join(out_dir, "viewer.html"), viewer_data(flights, tracks, summary, site, config))

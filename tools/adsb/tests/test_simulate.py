@@ -92,7 +92,7 @@ class SimulatedMorning(unittest.TestCase):
             flight = self.match(truth)
             with self.subTest(truth["callsign"]):
                 self.assertAlmostEqual(flight["lateral_offset_m"], float(truth["true_lateral_m"]), delta=15)
-                self.assertEqual(flight["garden_side"], truth["true_garden_side"])
+                self.assertEqual(flight["site_side"], truth["true_site_side"])
                 # 25 ft altitude steps allow about 4 m.
                 self.assertAlmostEqual(
                     flight["height_at_closest_ground_amsl_m"], float(truth["true_height_at_closest_ground_amsl_m"]), delta=8
