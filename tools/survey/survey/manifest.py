@@ -12,12 +12,12 @@ import glob
 import json
 import os
 
+from .adapters import ADAPTERS
 from .common import parse_time
 
 TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEPLOYMENTS_DIR = os.path.join(TOOLS_DIR, "deployments")
 OUT_DIR = os.path.join(TOOLS_DIR, "survey", "data")
-ADAPTERS = ("adsb", "webtrak")
 
 
 class ManifestError(ValueError):
@@ -47,6 +47,18 @@ def _receptor(rid, spec, base, warnings):
         "mic_height_m": spec.get("mic_height_m"),
         "public": spec.get("public") is True,
     }
+
+
+def _source(name, spec, base):
+    """A source's entry, with its adapter's paths made absolute."""
+    spec = dict(spec)
+    adapter = ADAPTERS.get(str(spec.get("adapter")))
+    if adapter is None:
+        raise ManifestError(f"source {name}: adapter must be one of {', '.join(ADAPTERS)}")
+    for key in adapter.PATHS:
+        if key in spec:
+            spec[key] = os.path.normpath(os.path.join(base, spec[key]))
+    return spec
 
 
 def _pass_receptor(named, receptors, warnings):
@@ -82,17 +94,8 @@ def load(path):
     if not receptors:
         raise ManifestError(f"{path}: no receptors available")
     pass_receptor = _pass_receptor(raw.get("pass_receptor"), receptors, warnings)
-    sources = {}
-    for name, spec in (raw.get("sources") or {}).items():
-        if spec is None:
-            continue  # A source set to null is turned off
-        spec = dict(spec)
-        if spec.get("adapter") not in ADAPTERS:
-            raise ManifestError(f"source {name}: adapter must be one of {', '.join(ADAPTERS)}")
-        for key in ("results", "logs", "tool", "site_dir"):
-            if key in spec:
-                spec[key] = os.path.normpath(os.path.join(base, spec[key]))
-        sources[name] = spec
+    sources = {name: _source(name, spec, base) for name, spec in (raw.get("sources") or {}).items()
+               if spec is not None}  # A source set to null is turned off
     name = raw.get("deployment") or os.path.splitext(os.path.basename(path))[0]
     return {
         "deployment": name,

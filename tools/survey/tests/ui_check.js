@@ -1,14 +1,18 @@
-// Runs the survey app's own script (survey/ui.html) without a browser, so its logic can be tested.
-//     node tests/ui_check.js survey/ui.html < case.json
+// Runs the survey app's own scripts (survey/ui/) without a browser, so their logic can be tested.
+//     node tests/ui_check.js survey/ui/index.html < case.json
+// The scripts are run together, in the order index.html loads them.
 // The page's DOM calls go to do-nothing stand-ins, and its first fetch fails, so it stops before
 // drawing anything. case.json gives a day's data ({data, receptor, sources}); this prints which
 // event each pass was given, and the sources in the page's order.
 "use strict";
 const fs = require("fs");
+const path = require("path");
 const vm = require("vm");
 
-const html = fs.readFileSync(process.argv[2], "utf8");
-const script = html.slice(html.indexOf("<script>") + "<script>".length, html.lastIndexOf("</script>"));
+const page = process.argv[2];
+const html = fs.readFileSync(page, "utf8");
+const script = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)]
+  .map((m) => fs.readFileSync(path.join(path.dirname(page), m[1]), "utf8")).join("\n");
 
 function stand_in() {
   const store = {};

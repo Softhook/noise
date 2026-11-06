@@ -53,13 +53,24 @@ Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `f
 | Module | Does |
 |---|---|
 | `survey/manifest.py` | Reads a manifest: window, receptors (including private ones), sources |
+| `survey/adapters/__init__.py` | The adapter interface, and the registry of adapters by name |
 | `survey/adapters/adsb.py` | Reads `adsb analyse` results: our logger, adsb.lol and OpenSky |
 | `survey/adapters/webtrak.py` | Reads WebTrak's raw chunk cache through `tools/webtrak`'s parser: radar, events, 1 s levels |
-| `survey/geometry.py` | Local coordinates and closest approach, with `at_track_end` |
+| `survey/schema.py` | The common tables' columns, and reading and writing them so a reader never sees half a build |
+| `survey/geometry.py` | Local coordinates, closest approach with `at_track_end`, and positions along a track |
 | `survey/explain.py` | Why a source has no flight in a pass: no data then, outside its area, above its ceiling, or unexplained |
-| `survey/link.py` | Joins flights from different sources into passes, by registration, or by track when there's no registration |
-| `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, the tables |
-| `survey/server.py`, `survey/ui.html` | `python3 -m survey serve`: the app |
+| `survey/link.py` | Joins flights from different sources into passes, by registration, or by track when there's no registration; ranks the sources |
+| `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, the tables, as a list of steps |
+| `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's built tables, read once and kept until the next build |
+| `survey/server.py` | `python3 -m survey serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |
+| `survey/ui/` | The page: `index.html` and `style.css`, `common.js` (state and helpers), `map.js` (plan and profile), `timeline.js`, `passes.js` (table and detail), `main.js` (loading and start-up) |
+
+### Extending it
+
+- **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS`, `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `link.SOURCE_RANK` if it should date passes ahead of others, and a colour and name in `ui/common.js`.
+- **A new core step** (`match`, `resolve`, `checks`): a module of its own, called from `build.build()` between the existing steps, with its table added to `schema.TABLES`.
+- **A new request for the page:** a method on `app.App`, and a line in `server.py`'s `GET_ROUTES` or `POST_ROUTES`.
+- **A new panel on the page:** a script in `ui/`, loaded in `index.html` before `main.js`, and a call from `render()` in `main.js`.
 
 `make test` runs the tests on made-up data, with no network.
 

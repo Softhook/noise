@@ -18,7 +18,8 @@ import threading
 import unittest
 from unittest import mock
 
-from survey import build, explain, link, manifest, schema, server
+from survey import adapters, build, explain, link, manifest, schema, server
+from survey.app import TRACK_SPACING_S, App, BadRequest
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, registration
 from survey.geometry import Frame, closest_approach
@@ -41,6 +42,11 @@ def westbound(t_abeam, north_m=-210.0, span_s=60, speed=70.0, height_at_abeam=33
         lat, lon = at(-s * speed, north_m)
         pts.append((t_abeam + s, lat, lon, height_at_abeam - s * speed * math.tan(math.radians(5.5))))
     return pts
+
+
+def window(start, end, receptors=None, max_km=15):
+    """An adapter's Context, for start to end."""
+    return adapters.Context(start, end, receptors or {}, max_km)
 
 
 def write_csv(path, fields, rows):
@@ -187,7 +193,8 @@ class Adapters(unittest.TestCase):
         folder = os.path.join(self.dir, "results")
         adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0))])
         warnings = []
-        flights, positions, coverage = adsb.read("opensky", {"results": folder}, T0 - 3600, T0 + 3600, warnings)
+        got = adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 + 3600), warnings)
+        flights, positions, coverage = got["flights"], got["positions"], got["coverage"]
         self.assertEqual(len(flights), 1)
         f = flights[0]
         self.assertEqual((f["registration"], f["direction"], f["hex"], f["callsign_kind"]), ("GLCYN", "A", "4006a1", "icao"))
@@ -201,7 +208,7 @@ class Adapters(unittest.TestCase):
         folder = os.path.join(self.dir, "results")
         # A slow 40-minute flight, for one that starts well before the window ends and passes NMT6 well after
         adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0, span_s=1200, speed=5))])
-        flights, positions, _ = adsb.read("opensky", {"results": folder}, T0 - 3600, T0 - 900, [])
+        positions = adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 - 900), [])["positions"]
         self.assertEqual(len(positions), 2401)
         pts = [(p["t"], p["lat"], p["lon"], p["height_m"]) for p in positions]
         self.assertFalse(closest_approach(pts, Frame(*NMT6))[4])  # Not cut short at the window's end
@@ -224,7 +231,7 @@ class Adapters(unittest.TestCase):
             f.write("not json\n")
             for r in records:
                 f.write(json.dumps(r) + "\n")
-        _, _, coverage = adsb.read("adsb", {"results": folder, "logs": logs}, T0 - 3600, T0 + 3600, [])
+        coverage = adsb.read("adsb", {"results": folder, "logs": logs}, window(T0 - 3600, T0 + 3600), [])["coverage"]
         spans = [(parse_time(c["start_utc"]) - T0, parse_time(c["end_utc"]) - T0) for c in coverage]
         self.assertEqual({c["note"] for c in coverage}, {"health log"})
         # Not while the clock was unsynchronised (-1800), in the 20 minutes without records, or from
@@ -242,7 +249,7 @@ class Adapters(unittest.TestCase):
         with open(os.path.join(folder, "flights.csv"), "a") as f:
             f.write(f"2,4006a2,,,,other,{iso(T0)},{iso(T0 + 60)},geometric\n")
         warnings = []
-        adsb.read("opensky", {"results": folder}, T0 - 3600, T0 + 3600, warnings)
+        adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 + 3600), warnings)
         self.assertIn("--all-positions", warnings[0])
 
     def test_a_converted_sources_period_is_its_coverage(self):
@@ -251,7 +258,7 @@ class Adapters(unittest.TestCase):
         os.makedirs(logs)
         with open(os.path.join(logs, "SOURCE.txt"), "w") as f:
             f.write("Source: OpenSky\nPeriod: 2026-11-05T00:00:00Z to 2026-11-06T00:00:00Z\n")
-        _, _, coverage = adsb.read("opensky", {"results": folder, "logs": logs}, T0 - 3600, T0 + 3600, [])
+        coverage = adsb.read("opensky", {"results": folder, "logs": logs}, window(T0 - 3600, T0 + 3600), [])["coverage"]
         self.assertEqual([(c["start_utc"], c["end_utc"], c["note"]) for c in coverage],
                          [(iso(T0 - 3600), iso(T0 + 3600), "queried")])
 
@@ -261,7 +268,8 @@ class Adapters(unittest.TestCase):
                        levels=[(T0 + s, 60 + s / 10) for s in range(0, 30)], events=[(T0 + 3, 72.5)])
         receptors = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1]}}
         spec = {"tool": os.path.join(TOOLS, "webtrak"), "site_dir": site, "monitors": {"nmt6": "106"}}
-        flights, positions, noise, levels, coverage = webtrak.read("webtrak", spec, T0 - 600, T0 + 600, receptors, 15, [])
+        got = webtrak.read("webtrak", spec, window(T0 - 600, T0 + 600, receptors), [])
+        flights, positions, noise, levels, coverage = (got[t] for t in schema.SOURCE_TABLES)
         self.assertEqual([f["registration"] for f in flights], ["GLCYN"])  # The one 40 km away is left out
         self.assertEqual(flights[0]["callsign"], "")  # WebTrak gave only the registration
         self.assertTrue(all(p["height_kind"] == "radar" for p in positions))
@@ -357,8 +365,7 @@ class Linking(unittest.TestCase):
         self.assertEqual(list(unnamed), ["20261105T0900-a"])
 
     def test_sources_are_ranked_ads_b_first_and_webtrak_last(self):
-        ranked = sorted(["webtrak", "fusion", "opensky", "adsb", "adsblol"], key=link.source_rank)
-        self.assertEqual(ranked, ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
+        self.assertEqual(link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"]), ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
 
     def test_two_flights_from_one_source_are_never_one_pass(self):
         fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("opensky", "b", "GLCYN", T0 - 60, T0 + 60)]
@@ -408,10 +415,10 @@ class Explain(unittest.TestCase):
                 f.write("Site: NMT6, St Pauls Church, Thamesmead (51.50535, 0.11075)\n")
             with open(os.path.join(d, "logs", "SOURCE.txt"), "w") as f:
                 f.write("Kept: airborne positions within 5 km either side of NMT6 (a box)\n")
-            got = adsb.limits({"results": os.path.join(d, "results"), "logs": os.path.join(d, "logs")})
+            got = adsb.limits({"results": os.path.join(d, "results"), "logs": os.path.join(d, "logs")}, window(T0, T0 + 1))
             self.assertAlmostEqual(got["ceiling_m"], 3048.0)
             self.assertEqual(got["areas"], [("circle", *NMT6, 15.0), ("box", *NMT6, 5.0)])
-            self.assertEqual(adsb.limits({"results": os.path.join(d, "results"), "ceiling_ft": 5000})["areas"], [("circle", *NMT6, 15.0)])
+            self.assertEqual(adsb.limits({"results": os.path.join(d, "results"), "ceiling_ft": 5000}, window(T0, T0 + 1))["areas"], [("circle", *NMT6, 15.0)])
 
 
 class BuildAndServe(unittest.TestCase):
@@ -468,7 +475,7 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(keys, sorted(keys))
 
     def test_the_app_sees_a_build_made_outside_it(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         app.rebuild({"deployment": "2026-11-05"})
         d = app.deployment("2026-11-05")
         self.assertEqual(len(d.load()["flights"]), 3)
@@ -480,25 +487,26 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(len(d.load()["flights"]), 4)
 
     def test_a_rebuild_is_refused_even_after_the_manifest_is_read_again(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         d = app.deployment("2026-11-05")
         path = os.path.join(self.deployments, "2026-11-05.json")
         with d.lock:  # As if a rebuild were running
             os.utime(path, (os.path.getmtime(path) + 5,) * 2)
             self.assertIsNot(app.deployment("2026-11-05"), d)
-            with self.assertRaises(server.BadRequest):
+            with self.assertRaises(BadRequest):
                 app.rebuild({"deployment": "2026-11-05"})
 
     def test_the_day_says_which_tracks_are_radar_and_classes_events(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         app.rebuild({"deployment": "2026-11-05"})
         day = app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
         self.assertEqual({(f["source"], f["height_kind"]) for f in day["flights"]}, {("opensky", "geometric"), ("webtrak", "radar")})
         self.assertEqual([e["event_class"] for e in day["events"]], ["aircraft"])
         self.assertFalse(any(k.startswith("_") for f in day["flights"] for k in f))
+        self.assertEqual(day["sources"], ["opensky", "webtrak"])
 
     def test_the_server_answers_only_this_computer_and_json_posts(self):
-        server.Handler.app = server.App(self.deployments)
+        server.Handler.app = App(self.deployments)
         httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.server_close)
@@ -515,6 +523,10 @@ class BuildAndServe(unittest.TestCase):
             return r.status
 
         self.assertEqual(ask("GET", "/"), 200)
+        self.assertEqual(ask("GET", "/common.js"), 200)
+        self.assertEqual(ask("GET", "/style.css"), 200)
+        self.assertEqual(ask("GET", "/../app.py"), 404)  # Only the page's own files
+        self.assertEqual(ask("GET", "/nope.js"), 404)
         self.assertEqual(ask("GET", "/api/deployments", host=f"localhost:{port}"), 200)
         self.assertEqual(ask("GET", "/api/deployments", host=f"evil.example:{port}"), 403)  # DNS rebinding
         self.assertEqual(ask("GET", "/api/deployments", host=f"localhost.evil.example:{port}"), 403)
@@ -534,15 +546,15 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(reasons[("20261105T0900-GLCYN", "webtrak")], explain.UNEXPLAINED)
         self.assertEqual(reasons[("20261105T0900-GLCYX", "opensky")], explain.UNEXPLAINED)
         self.assertEqual(summary["unseen"][explain.UNEXPLAINED], 2)
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         day = app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
         self.assertEqual(day["unseen"]["20261105T0900-GLCYN"], {"webtrak": explain.UNEXPLAINED})
 
     def test_the_app_lists_deployments_and_serves_a_day(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         [d] = app.deployments()
         self.assertFalse(d["built"])
-        with self.assertRaises(server.BadRequest):
+        with self.assertRaises(BadRequest):
             app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
         app.rebuild({"deployment": "2026-11-05"})
         [d] = app.deployments()
@@ -555,16 +567,16 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual({f["evidence"] for f in linked}, {"registration"})
         self.assertIn("nmt6", linked[0]["approaches"])
         self.assertTrue(all(len(p) == 4 for pts in day["tracks"].values() for p in pts))
-        self.assertTrue(all(b[0] - a[0] >= server.TRACK_SPACING_S for pts in day["tracks"].values() for a, b in zip(pts, pts[1:])))
+        self.assertTrue(all(b[0] - a[0] >= TRACK_SPACING_S for pts in day["tracks"].values() for a, b in zip(pts, pts[1:])))
         self.assertEqual(day["levels"][0][:2], [T0 - day["start"], "nmt6"])
         self.assertEqual(app.day({"deployment": "2026-11-05", "day": "2026-11-06"})["flights"], [])
-        with self.assertRaises(server.BadRequest):
+        with self.assertRaises(BadRequest):
             app.day({"deployment": "2026-11-05", "day": "yesterday"})
-        with self.assertRaises(server.BadRequest):
+        with self.assertRaises(BadRequest):
             app.deployment("nope")
 
     def test_the_app_reads_a_changed_manifest_again(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         path = os.path.join(self.deployments, "2026-11-05.json")
         self.assertEqual(app.deployments()[0]["description"], "")
         with open(path) as f:
@@ -576,7 +588,7 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(app.deployments()[0]["description"], "Changed")
 
     def test_listing_deployments_reads_only_their_coverage(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         app.rebuild({"deployment": "2026-11-05"})
         d = app.deployment("2026-11-05")
         d.tables = d.stamp = None
@@ -585,22 +597,22 @@ class BuildAndServe(unittest.TestCase):
         self.assertIsNone(d.tables)  # Positions and levels weren't read just to list the days
 
     def test_a_rebuild_blocks_only_its_own_deployment(self):
-        app = server.App(self.deployments)
+        app = App(self.deployments)
         app.rebuild({"deployment": "2026-11-05"})
         d = app.deployment("2026-11-05")
         with d.lock:  # As if a rebuild were running
             self.assertTrue(app.deployments()[0]["built"])  # The list doesn't wait for it
-            with self.assertRaises(server.BadRequest):
+            with self.assertRaises(BadRequest):
                 app.rebuild({"deployment": "2026-11-05"})  # A second rebuild is refused
 
 
 @unittest.skipUnless(shutil.which("node"), "needs node to run the page's script")
 class Page(unittest.TestCase):
-    """The survey app's own script (ui.html), run by tests/ui_check.js without a browser."""
+    """The survey app's own scripts (survey/ui/), run by tests/ui_check.js without a browser."""
 
     def run_page(self, data, receptor="nmt6", sources=()):
         here = os.path.dirname(os.path.abspath(__file__))
-        done = subprocess.run(["node", os.path.join(here, "ui_check.js"), os.path.join(server.PACKAGE_DIR, "ui.html")],
+        done = subprocess.run(["node", os.path.join(here, "ui_check.js"), os.path.join(server.UI_DIR, "index.html")],
                               input=json.dumps({"data": data, "receptor": receptor, "sources": list(sources)}),
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -621,9 +633,10 @@ class Page(unittest.TestCase):
         # gets the one 10 s after it but not the one 50 s after; nothing at another receptor counts
         self.assertEqual(got, {"near": "75", "alone": "68"})
 
-    def test_sources_are_listed_ads_b_first_and_webtrak_last(self):
-        got = self.run_page({"flights": [], "events": []}, sources=["webtrak", "fusion", "opensky", "adsb", "adsblol"])
-        self.assertEqual(got["order"], ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
+    def test_sources_are_listed_in_the_servers_order(self):
+        data = {"flights": [], "events": [], "sources": link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"])}
+        got = self.run_page(data, sources=["webtrak", "zzz", "fusion", "opensky", "adsb", "adsblol"])
+        self.assertEqual(got["order"], ["adsb", "adsblol", "opensky", "fusion", "webtrak", "zzz"])
 
 
 if __name__ == "__main__":

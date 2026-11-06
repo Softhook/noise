@@ -21,7 +21,9 @@ import json
 import os
 import re
 
-from ..common import iso, number, parse_time, registration
+from ..common import iso, number, parse_time, registration, stamp
+
+PATHS = ("results", "logs")
 
 KNOTS_TO_MS = 0.514444
 DIRECTIONS = {"rwy27_arrival": "A", "rwy09_departure": "D"}
@@ -147,7 +149,7 @@ def coverage(name, spec, start, end):
     return rows
 
 
-def limits(spec):
+def limits(spec, context):
     """What the source can see (explain.py's limits): adsb analyse's ceiling, and its radius around
     the site in summary.txt; and, if the logs' SOURCE.txt gives one, the box they were cut to
     (`opensky logs` keeps a box around NMT6, and its results are analysed with NMT6 as the site)."""
@@ -170,23 +172,25 @@ def limits(spec):
     return {"ceiling_m": float(spec.get("ceiling_ft", ANALYSE_CEILING_FT)) * FEET, "areas": areas, "any": False}
 
 
-def read(name, spec, start, end, warnings):
-    """(flights, positions, coverage) rows for the common tables, for flights overlapping start to end."""
+def read(name, spec, context, warnings):
+    """Flights overlapping the window, with their whole tracks, and the source's coverage."""
+    start, end = context.start, context.end
     results = spec["results"]
-    flights, by_id = [], {}
+    flights, by_id, kinds = [], {}, {}
     for row in _rows(os.path.join(results, "flights.csv")):
         first, last = parse_time(row["first_seen_utc"]), parse_time(row["last_seen_utc"])
         if last < start or first > end:
             continue
-        # Stable across reruns of adsb analyse, unlike its flight_id
-        source_id = f"{row['hex']}-{iso(first)[:19].replace('-', '').replace(':', '')}"
+        source_id = f"{row['hex']}-{stamp(first)}"  # Stable across reruns of adsb analyse, unlike its flight_id
         by_id[row["flight_id"]] = source_id
+        kinds[source_id] = row.get("height_source") or ""
+        callsign = (row.get("callsign") or "").strip()
         flights.append({
             "source": name, "source_id": source_id, "first_utc": iso(first), "last_utc": iso(last),
-            "registration": registration(row.get("registration")), "callsign": (row.get("callsign") or "").strip(),
-            "callsign_kind": "icao" if (row.get("callsign") or "").strip() else "", "type": row.get("type") or "",
+            "registration": registration(row.get("registration")), "callsign": callsign,
+            "callsign_kind": "icao" if callsign else "", "type": row.get("type") or "",
             "squawk": "", "direction": DIRECTIONS.get(row.get("label"), ""), "origin": "", "destination": "",
-            "hex": row["hex"], "_height_kind": row.get("height_source") or "",
+            "hex": row["hex"],
         })
     positions, seen = [], set()
     for row in _rows(os.path.join(results, "positions.csv")):
@@ -195,19 +199,15 @@ def read(name, spec, start, end, warnings):
             continue
         # A flight's whole track is kept, even the part outside the window, so that its closest
         # approach isn't cut short (and flagged at_track_end) where the window happens to end
-        t = parse_time(row["emission_time_utc"])
         seen.add(row["flight_id"])
         speed = number(row.get("ground_speed_kt"))
         positions.append({
-            "source": name, "source_id": source_id, "t": round(t, 2), "lat": float(row["lat"]),
-            "lon": float(row["lon"]), "height_m": number(row.get("height_used_amsl_m")),
-            "height_kind": "", "speed_ms": None if speed is None else round(speed * KNOTS_TO_MS, 1),
+            "source": name, "source_id": source_id, "t": round(parse_time(row["emission_time_utc"]), 2),
+            "lat": float(row["lat"]), "lon": float(row["lon"]), "height_m": number(row.get("height_used_amsl_m")),
+            "height_kind": kinds[source_id], "speed_ms": None if speed is None else round(speed * KNOTS_TO_MS, 1),
         })
-    kinds = {f["source_id"]: f.pop("_height_kind") for f in flights}
-    for p in positions:
-        p["height_kind"] = kinds.get(p["source_id"], "")
     missing = len(by_id) - len(seen)
     if missing:
         warnings.append(f"{name}: {missing} of {len(by_id)} flights have no positions; "
                         f"run adsb analyse with --all-positions")
-    return flights, positions, coverage(name, spec, start, end)
+    return {"flights": flights, "positions": positions, "coverage": coverage(name, spec, start, end)}

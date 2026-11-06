@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Survey sources</title>
+<!-- Served by `python3 -m survey serve` (survey/server.py), with the files beside it in ui/. Loads nothing from the network.
+     The scripts are plain ones sharing one global scope, in this order: common.js first, main.js last. -->
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <div class="head">
+    <h1>Survey sources</h1>
+    <span class="tools"><span class="note" id="built"></span><button type="button" id="rebuild">Rebuild</button></span>
+  </div>
+  <p class="sub" id="subtitle">Loading…</p>
+  <ul class="warnings" id="warnings"></ul>
+
+  <div class="filters" role="group" aria-label="Filters">
+    <label>Deployment <select id="f-deployment"></select></label>
+    <label>Day <select id="f-day"></select></label>
+    <label>Receptor <select id="f-receptor"></select></label>
+    <span id="f-sources" role="group" aria-label="Sources" style="display:inline-flex; gap:6px; flex-wrap:wrap"></span>
+    <label>Closest within <select id="f-within">
+      <option value="">any distance</option><option value="500">500 m</option><option value="1000">1 km</option>
+      <option value="2000">2 km</option><option value="3000" selected>3 km</option><option value="5000">5 km</option></select></label>
+    <label>and below <select id="f-below" title="Height above sea level at the closest approach">
+      <option value="">any height</option><option value="304.8">1,000 ft</option><option value="609.6">2,000 ft</option>
+      <option value="914.4" selected>3,000 ft</option><option value="1524">5,000 ft</option><option value="3048">10,000 ft</option></select></label>
+    <label><input type="checkbox" id="f-linked"> In several sources only</label>
+    <label title="Passes a source should have seen, by its hours, area and ceiling, but has no flight in"><input type="checkbox" id="f-unexplained"> Unexplained misses only</label>
+    <label>Search <input type="search" id="f-search" placeholder="Registration, callsign, type"></label>
+  </div>
+
+  <div id="content">
+    <div class="tiles" id="tiles"></div>
+
+    <section class="panel" style="margin-bottom: 12px">
+      <div class="panel-head">
+        <h2>The day at <span data-receptor>the receptor</span></h2>
+        <span class="tools"><span class="note" id="window-note"></span><button type="button" id="window-zoom" hidden>Zoom to window</button><button type="button" id="window-reset" hidden>Clear window</button><button type="button" id="timeline-reset" hidden>Whole day</button></span>
+      </div>
+      <svg id="timeline" viewBox="0 0 1200 230" role="img" aria-label="When each source has data, each pass's closest approach, and the receptor's sound levels through the day"></svg>
+      <p class="note">One lane per source: shaded where it has data, a tick at each pass's closest approach. Below, the 1 s sound level, with each event's LAmax (filled: aircraft events). Scroll to zoom in time, Shift-scroll or Shift-drag to pan, double-click for the whole day. Drag across to choose a time window; the map, profile and table show only that window. Click a tick to select its pass.</p>
+    </section>
+
+    <div class="grid2">
+      <section class="panel">
+        <div class="panel-head"><h2>Tracks around <span data-receptor>the receptor</span></h2>
+          <span class="tools"><span class="note" id="plan-count"></span><button type="button" id="plan-reset" hidden>Reset zoom</button></span></div>
+        <svg id="plan" class="zoomable" viewBox="0 0 600 600" role="img" aria-label="Plan view of tracks around the receptor"></svg>
+        <p class="note">Scroll to zoom, drag to pan, double-click to reset. Radar tracks are dashed. Click a track to select its pass in every source.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Height profile</h2>
+          <span class="tools"><span class="note">Metres above sea level</span><button type="button" id="profile-reset" hidden>Reset zoom</button></span></div>
+        <svg id="profile" class="zoomable" viewBox="0 0 600 600" role="img" aria-label="Height against distance east of the receptor"></svg>
+        <p class="note">Each track's height against its distance east of <span data-receptor>the receptor</span>, within 3 km either side of it. Scroll to zoom, drag to pan, double-click to reset.</p>
+      </section>
+    </div>
+
+    <div class="bottom">
+      <section class="panel">
+        <div class="panel-head"><h2>Passes</h2><span class="note" id="table-count"></span></div>
+        <div class="table-wrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+        <p class="note">Each pass's closest approach to <span data-receptor>the receptor</span> in each source. Grey: the closest point is at the end of that source's track, so the aircraft may have come closer outside its data. Δ height: the first source's height minus the second's. Drag the table, or Shift-scroll, to see columns off to the right. Where a source has no flight, it says why: <i>no data then</i>, <i>outside its area</i> or <i>above its ceiling</i> mean it couldn't have seen the pass; <b class="unexplained">missed</b> means it should have.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Selected pass</h2></div>
+        <div id="detail" class="empty">Click a track, tick or row.</div>
+      </section>
+    </div>
+  </div>
+</main>
+<div id="tooltip" role="tooltip"></div>
+
+<script src="common.js"></script>
+<script src="map.js"></script>
+<script src="timeline.js"></script>
+<script src="passes.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

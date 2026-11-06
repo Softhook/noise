@@ -18,9 +18,10 @@ import gzip
 import os
 import sys
 
-from ..common import iso, registration
+from ..common import iso, registration, stamp
 from ..geometry import Frame, distance_m
 
+PATHS = ("tool", "site_dir")
 TRACK_GAP_S = 600  # A track id seen again after this long is a new flight
 # WebTrak's event class, as the common noise_events table puts it. Class 1 looks like an
 # aircraft-correlated event and 5 a non-aircraft one (tools/webtrak/webtrak/parse.py: an inference).
@@ -34,19 +35,21 @@ def _webtrak(tool):
     return parse
 
 
-def limits(receptors, max_km):
+def limits(spec, context):
     """What the source can see (explain.py's limits): radar at any height, within max_km of any
     receptor, as read() keeps it."""
-    return {"ceiling_m": None, "areas": [("circle", r["lat"], r["lon"], max_km) for r in receptors.values()], "any": True}
+    return {"ceiling_m": None, "areas": [("circle", r["lat"], r["lon"], context.max_km)
+                                         for r in context.receptors.values()], "any": True}
 
 
-def read(name, spec, start, end, receptors, max_km, warnings):
-    """(flights, positions, noise_events, levels, coverage) rows for start to end."""
+def read(name, spec, context, warnings):
+    """Radar flights and positions near the receptors, and the monitors' events and levels, for the window."""
+    start, end, receptors = context.start, context.end, context.receptors
     parse = _webtrak(spec["tool"])
     raw_dir = os.path.join(spec["site_dir"], "raw")
     monitors = {str(mid): rid for rid, mid in (spec.get("monitors") or {}).items() if rid in receptors}
     frames = [Frame(r["lat"], r["lon"]) for r in receptors.values()]
-    limit = max_km * 1000
+    limit = context.max_km * 1000
     first, last = parse.handle_for_utc(start), parse.handle_for_utc(end - 1)
     tracks, events, levels, saved, unreadable = {}, {}, {}, [], 0
     for handle in range(first, last + 1):
@@ -87,7 +90,7 @@ def read(name, spec, start, end, receptors, max_km, warnings):
                 groups.append([p])
         for group in groups:
             head = group[0]
-            source_id = f"{track}-{iso(head.utc)[:19].replace('-', '').replace(':', '')}"
+            source_id = f"{track}-{stamp(head.utc)}"
             reg = registration(head.registration)
             callsign = head.callsign if head.callsign and registration(head.callsign) != reg else ""
             flights.append({
@@ -118,4 +121,5 @@ def read(name, spec, start, end, receptors, max_km, warnings):
             coverage.append({"source": name, "start_utc": iso(parse.utc_for_handle(run[0])),
                              "end_utc": iso(parse.utc_for_handle(run[1]) + parse.WINDOW_S), "note": "saved chunks"})
         run = [handle, handle] if handle is not None else None
-    return flights, positions, noise, level_rows, coverage
+    return {"flights": flights, "positions": positions, "noise_events": noise, "levels": level_rows,
+            "coverage": coverage}

@@ -1,4 +1,4 @@
-"""The common tables: their columns, and reading and writing them as CSV.
+"""The common tables: their columns, and reading and writing them as CSV, safely for a reader.
 
 Every row carries `source` and the source's own id (`source_id`), so any result can be traced
 back. Times are UTC ISO strings; heights are metres above mean sea level with their kind.
@@ -7,7 +7,9 @@ back. Times are UTC ISO strings; heights are metres above mean sea level with th
 from __future__ import annotations
 
 import csv
+import json
 import os
+import shutil
 import tempfile
 
 TABLES = {
@@ -35,6 +37,8 @@ TABLES = {
     # then), "outside its area", "above its ceiling", or "unexplained", when it should have seen it
     "unseen": ["pass_id", "source", "reason"],
 }
+# The tables an adapter may fill. The rest are worked out by the core (build.py).
+SOURCE_TABLES = ("flights", "positions", "noise_events", "levels", "coverage")
 
 
 def write_table(folder, name, rows):
@@ -62,3 +66,46 @@ def read_table(folder, name):
         return []
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
+
+
+def write_tables(folder, tables):
+    """Write every table into a new folder, then put it in place of the old one, so a reader (the
+    survey app, while `make build` runs) sees either the old tables or the new ones, never a mixture."""
+    parent = os.path.dirname(folder)
+    os.makedirs(parent, exist_ok=True)
+    staging = tempfile.mkdtemp(prefix=".common.new.", dir=parent)
+    try:
+        for name, rows in tables.items():
+            write_table(staging, name, rows)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    old = None
+    if os.path.exists(folder):
+        old = tempfile.mkdtemp(prefix=".common.old.", dir=parent)
+        os.rmdir(old)
+        os.rename(folder, old)
+    os.rename(staging, folder)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def write_json(path, data):
+    """Write a JSON file in one step, so a reader never sees half of it."""
+    fd, temp = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(temp, path)
+    except BaseException:
+        if os.path.exists(temp):
+            os.remove(temp)
+        raise
+
+
+def read_json(path):
+    """A JSON file, or None if it isn't there."""
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)

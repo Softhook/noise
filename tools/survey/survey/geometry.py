@@ -1,7 +1,8 @@
-"""Local coordinates around a receptor, and closest approach. The core's own, so tools/adsb can change freely."""
+"""Local coordinates, distances, and positions along a track. The core's own, so tools/adsb can change freely."""
 
 from __future__ import annotations
 
+import bisect
 import math
 
 WGS84_A = 6378137.0
@@ -56,3 +57,23 @@ def closest_approach(points, frame, mic_amsl=None):
 def distance_m(frame, lat, lon):
     x, y = frame.xy(lat, lon)
     return math.hypot(x, y)
+
+
+def apart_m(a, b):
+    """Ground distance between two (lat, lon, ...) points, flat-earth: fine over a few kilometres."""
+    lat = math.radians((a[0] + b[0]) / 2)
+    return math.hypot((a[0] - b[0]) * 111195, (a[1] - b[1]) * 111195 * math.cos(lat))
+
+
+def position_at(points, t, times=None):
+    """(lat, lon, height) interpolated at time t along a time-ordered track of position dicts; the
+    nearest end position outside it. times: the points' times, if already worked out."""
+    times = times or [p["t"] for p in points]
+    i = bisect.bisect_left(times, t)
+    if i == 0 or i == len(points):
+        p = points[0] if i == 0 else points[-1]
+        return p["lat"], p["lon"], p["height_m"]
+    a, b = points[i - 1], points[i]
+    f = 0 if b["t"] == a["t"] else (t - a["t"]) / (b["t"] - a["t"])
+    h = None if a["height_m"] is None or b["height_m"] is None else a["height_m"] + f * (b["height_m"] - a["height_m"])
+    return a["lat"] + f * (b["lat"] - a["lat"]), a["lon"] + f * (b["lon"] - a["lon"]), h

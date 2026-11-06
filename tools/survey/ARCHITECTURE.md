@@ -211,6 +211,7 @@ tools/
       manifest.py                     reads a manifest, including private receptors
       schema.py                       table definitions, reading, writing and validation
       geometry.py                     local coordinates, closest approach to each receptor
+      adapters/__init__.py            the adapter interface and registry (ADAPTERS)
       adapters/adsb.py                reads adsb analyse's flights.csv and positions.csv (--all-positions), for
                                       our logger, adsb.lol or OpenSky (source from the manifest)
       adapters/webtrak.py             reads the raw chunk cache with webtrak.parse, within the windows
@@ -222,7 +223,8 @@ tools/
       lookups/webtrak.py
       link.py  build.py               built
       match.py  resolve.py  checks.py to do
-      server.py  ui.html              the survey app
+      app.py  server.py               the survey app: what the page asks for, and HTTP
+      ui/                             the survey app's page: index.html, style.css, a script per panel
     registry/fleet.csv                registration, type, source, date confirmed
     registry/overrides.csv            pass id, field, value, reason, who
     tests/
@@ -241,7 +243,7 @@ python3 -m survey lookup --manifest ... --pass 20261105T0812-GLCYN        # sett
 
 To **add** one:
 
-1. Write an adapter that fills some of the common tables.
+1. Write an adapter that fills some of the common tables, and add it to `ADAPTERS` (`survey/adapters/__init__.py` gives the interface). A source of a kind that already has an adapter, like adsb.lol, needs no new one.
 2. Give it an entry in the manifest.
 3. If it can answer identity questions, give it a lookup and a place in `resolve`'s order.
 

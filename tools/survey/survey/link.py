@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import bisect
 import datetime as dt
-import math
 import statistics
 
 from .common import parse_time
+from .geometry import apart_m, position_at
 
 OVERLAP_SLACK_S = 120
 TRACK_TIME_S = 30
@@ -51,28 +51,14 @@ def source_rank(source):
     return (1, 0, source)
 
 
+def ranked(sources):
+    """Sources in rank order: the order the survey app lists them in, everywhere."""
+    return sorted(sources, key=source_rank)
+
+
 def _overlap(a, b):
     return parse_time(a["first_utc"]) - OVERLAP_SLACK_S <= parse_time(b["last_utc"]) and \
         parse_time(b["first_utc"]) - OVERLAP_SLACK_S <= parse_time(a["last_utc"])
-
-
-def _position_at(points, t, times=None):
-    """(lat, lon, height) interpolated at time t from a time-ordered track; the nearest position
-    outside it."""
-    times = times or [p["t"] for p in points]
-    i = bisect.bisect_left(times, t)
-    if i == 0 or i == len(points):
-        p = points[0] if i == 0 else points[-1]
-        return p["lat"], p["lon"], p["height_m"]
-    a, b = points[i - 1], points[i]
-    f = 0 if b["t"] == a["t"] else (t - a["t"]) / (b["t"] - a["t"])
-    h = None if a["height_m"] is None or b["height_m"] is None else a["height_m"] + f * (b["height_m"] - a["height_m"])
-    return a["lat"] + f * (b["lat"] - a["lat"]), a["lon"] + f * (b["lon"] - a["lon"]), h
-
-
-def _apart_m(a, b):
-    lat = math.radians((a[0] + b[0]) / 2)
-    return math.hypot((a[0] - b[0]) * 111195, (a[1] - b[1]) * 111195 * math.cos(lat))
 
 
 def separation_m(ta, tb):
@@ -89,41 +75,39 @@ def separation_m(ta, tb):
         i = bisect.bisect_left(times_b, p["t"])
         if i < len(tb) and times_b[i] == p["t"]:
             q = tb[i]
-            apart.append(_apart_m((p["lat"], p["lon"]), (q["lat"], q["lon"])))
+            apart.append(apart_m((p["lat"], p["lon"]), (q["lat"], q["lon"])))
         elif 0 < i < len(tb) and times_b[i] - times_b[i - 1] <= MAX_INTERPOLATE_S:
-            apart.append(_apart_m((p["lat"], p["lon"]), _position_at(tb, p["t"], times_b)))
+            apart.append(apart_m((p["lat"], p["lon"]), position_at(tb, p["t"], times_b)))
     return statistics.median(apart) if apart else None
 
 
-def link(flights, tracks, approaches, receptor):
-    """Rows for the passes table. tracks: {(source, source_id): [position dicts, time-ordered]};
-    approaches: {(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end)};
-    receptor: the pass receptor (manifest.load's pass_receptor)."""
-    keys = [(f["source"], f["source_id"]) for f in flights]
-    by_key = dict(zip(keys, flights))
-    parent = {k: k for k in keys}
-    members = {k: [k] for k in keys}  # Each pass's flights, kept on its root
-    evidence = {}
+def _evidence(a, b, tracks, approaches, receptor):
+    """(strength, apart_m, kind) if flights a and b may be the same aircraft movement, else None.
+    Lower strength is stronger evidence."""
+    ka, kb = (a["source"], a["source_id"]), (b["source"], b["source_id"])
+    if a["registration"] and a["registration"] == b["registration"]:
+        apart = separation_m(tracks[ka], tracks[kb]) if ka in tracks and kb in tracks else None
+        if apart is not None and apart > REGISTRATION_TRACK_M:
+            return None  # The same registration on two different aircraft
+        return 0, apart or 0.0, "registration"
+    if a["registration"] and b["registration"]:
+        return None  # Different registrations: never the same aircraft
+    ca, cb = approaches.get((*ka, receptor)), approaches.get((*kb, receptor))
+    if not ca or not cb or abs(ca[0] - cb[0]) > TRACK_TIME_S:
+        return None
+    t = (ca[0] + cb[0]) / 2
+    pa, pb = position_at(tracks[ka], t), position_at(tracks[kb], t)
+    apart = apart_m(pa, pb)
+    if apart > TRACK_DISTANCE_M:
+        return None
+    if pa[2] is not None and pb[2] is not None and abs(pa[2] - pb[2]) > TRACK_HEIGHT_M:
+        return None
+    return 1, apart, "track"
 
-    def root(k):
-        while parent[k] != k:
-            parent[k] = parent[parent[k]]
-            k = parent[k]
-        return k
 
-    def join(a, b, why):
-        ra, rb = root(a), root(b)
-        if ra == rb or {k[0] for k in members[ra]} & {k[0] for k in members[rb]}:
-            return
-        if len({by_key[k]["registration"] for k in members[ra] + members[rb]} - {""}) > 1:
-            return
-        parent[rb] = ra
-        members[ra] += members.pop(rb)
-        evidence[a] = evidence.get(a) or why
-        evidence[b] = evidence.get(b) or why
-
-    # Every pair that could be linked, with how strong the evidence is and how well the tracks agree
-    candidates = []
+def candidates(flights, tracks, approaches, receptor):
+    """Every pair of flights that could be linked, best first: [(strength, apart_m, key_a, key_b, kind)]."""
+    found = []
     ordered = sorted(flights, key=lambda f: f["first_utc"])
     for i, a in enumerate(ordered):
         for b in ordered[i + 1:]:
@@ -131,41 +115,67 @@ def link(flights, tracks, approaches, receptor):
                 break
             if a["source"] == b["source"] or not _overlap(a, b):
                 continue
-            ka, kb = (a["source"], a["source_id"]), (b["source"], b["source_id"])
-            if a["registration"] and a["registration"] == b["registration"]:
-                apart = separation_m(tracks[ka], tracks[kb]) if ka in tracks and kb in tracks else None
-                if apart is not None and apart > REGISTRATION_TRACK_M:
-                    continue  # The same registration on two different aircraft
-                candidates.append((0, apart or 0.0, ka, kb, "registration"))
-            elif not (a["registration"] and b["registration"]):
-                ca, cb = approaches.get((*ka, receptor)), approaches.get((*kb, receptor))
-                if not ca or not cb or abs(ca[0] - cb[0]) > TRACK_TIME_S:
-                    continue
-                t = (ca[0] + cb[0]) / 2
-                pa, pb = _position_at(tracks[ka], t), _position_at(tracks[kb], t)
-                apart = _apart_m(pa, pb)
-                if apart > TRACK_DISTANCE_M:
-                    continue
-                if pa[2] is not None and pb[2] is not None and abs(pa[2] - pb[2]) > TRACK_HEIGHT_M:
-                    continue
-                candidates.append((1, apart, ka, kb, "track"))
-    for _, _, ka, kb, why in sorted(candidates):
-        join(ka, kb, why)
+            got = _evidence(a, b, tracks, approaches, receptor)
+            if got:
+                found.append((got[0], got[1], (a["source"], a["source_id"]), (b["source"], b["source_id"]), got[2]))
+    return sorted(found)
+
+
+class _Groups:
+    """Flights joined into passes (union-find), refusing any join that would put two flights from
+    one source, or two registrations, in one pass."""
+
+    def __init__(self, flights):
+        self.flight = {(f["source"], f["source_id"]): f for f in flights}
+        self.parent = {k: k for k in self.flight}
+        self.members = {k: [k] for k in self.flight}  # Each pass's flights, kept on its root
+        self.evidence = {}
+
+    def root(self, k):
+        while self.parent[k] != k:
+            self.parent[k] = self.parent[self.parent[k]]
+            k = self.parent[k]
+        return k
+
+    def join(self, a, b, why):
+        ra, rb = self.root(a), self.root(b)
+        if ra == rb or {k[0] for k in self.members[ra]} & {k[0] for k in self.members[rb]}:
+            return
+        if len({self.flight[k]["registration"] for k in self.members[ra] + self.members[rb]} - {""}) > 1:
+            return
+        self.parent[rb] = ra
+        self.members[ra] += self.members.pop(rb)
+        self.evidence[a] = self.evidence.get(a) or why
+        self.evidence[b] = self.evidence.get(b) or why
+
+
+def _pass_name(group, flight, approaches, receptor):
+    """A pass's id before de-duplication: its lead flight's closest approach to the receptor, to the
+    minute (or its first time, without one), and its registration (or the lead's source id)."""
+    lead = sorted(group, key=lambda k: (source_rank(k[0]), (*k, receptor) not in approaches, k[1]))
+    dated = [k for k in lead if (*k, receptor) in approaches]
+    t = approaches[(*dated[0], receptor)][0] if dated else parse_time(flight[lead[0]]["first_utc"])
+    regs = sorted({flight[k]["registration"] for k in group} - {""})
+    name = regs[0] if regs else lead[0][1]
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y%m%dT%H%M") + "-" + name
+
+
+def link(flights, tracks, approaches, receptor):
+    """Rows for the passes table. tracks: {(source, source_id): [position dicts, time-ordered]};
+    approaches: {(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end)};
+    receptor: the pass receptor (manifest.load's pass_receptor)."""
+    groups = _Groups(flights)
+    for _, _, ka, kb, why in candidates(flights, tracks, approaches, receptor):
+        groups.join(ka, kb, why)
 
     rows, used = [], {}
-    groups = sorted(members.values(), key=lambda g: min((source_rank(k[0]), k[1]) for k in g))
-    for group in groups:
-        lead = sorted(group, key=lambda k: (source_rank(k[0]), (*k, receptor) not in approaches, k[1]))
-        dated = [k for k in lead if (*k, receptor) in approaches]
-        t = approaches[(*dated[0], receptor)][0] if dated else parse_time(by_key[lead[0]]["first_utc"])
-        regs = sorted({by_key[k]["registration"] for k in group} - {""})
-        name = regs[0] if regs else lead[0][1]
-        pass_id = dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y%m%dT%H%M") + "-" + name
+    for group in sorted(groups.members.values(), key=lambda g: min((source_rank(k[0]), k[1]) for k in g)):
+        pass_id = _pass_name(group, groups.flight, approaches, receptor)
         # Two passes can't share an id: the same airframe twice in a minute, in flights that didn't link
         used[pass_id] = used.get(pass_id, 0) + 1
         if used[pass_id] > 1:
             pass_id += f"-{used[pass_id]}"
         for k in sorted(group):
             rows.append({"pass_id": pass_id, "source": k[0], "source_id": k[1],
-                         "evidence": evidence.get(k, "") if len(group) > 1 else ""})
+                         "evidence": groups.evidence.get(k, "") if len(group) > 1 else ""})
     return sorted(rows, key=lambda r: (r["pass_id"], r["source"]))

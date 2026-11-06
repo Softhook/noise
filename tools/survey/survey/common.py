@@ -25,6 +25,11 @@ def iso(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def stamp(t):
+    """A compact UTC time to the second (20261105T085900), for building stable source ids."""
+    return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
+
+
 def day_of(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%d")
 
