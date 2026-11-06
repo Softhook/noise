@@ -79,6 +79,10 @@ POSITION_COLUMNS = [
 ]
 
 
+# Latitude and longitude keep 6 decimal places (about 0.1 m); 3 would snap tracks to a ~70 x 110 m grid
+COORDINATE_COLUMNS = {"lat", "lon"}
+
+
 class CsvOut:
     def __init__(self, path, columns):
         self.file = open(path, "w", newline="")
@@ -88,7 +92,8 @@ class CsvOut:
         self.rows = 0
 
     def write(self, row):
-        self.writer.writerow({key: "" if row.get(key) is None else rounded(row[key]) for key in self.columns})
+        self.writer.writerow({key: "" if row.get(key) is None else rounded(row[key], 6 if key in COORDINATE_COLUMNS else 3)
+                              for key in self.columns})
         self.rows += 1
 
     def close(self):

@@ -15,8 +15,8 @@ def number(value):
     return float(value)
 
 
-def rounded(value):
-    return round(value, 3) if isinstance(value, float) else value
+def rounded(value, digits=3):
+    return round(value, digits) if isinstance(value, float) else value
 
 
 def overlaps(intervals, start, end):

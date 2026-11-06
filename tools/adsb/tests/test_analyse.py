@@ -404,6 +404,18 @@ class WholeRun(unittest.TestCase):
         self.assertAlmostEqual(float(rows[0]["lateral_offset_m"]), 500, delta=1)
         self.assertTrue(os.path.exists(os.path.join(self.out, "positions.csv")))
 
+    def test_positions_keep_metre_precision_coordinates(self):
+        records = make_records()
+        self.write_log("a.jsonl.gz", records)
+        run(CONFIG, self.logs, self.out, self.weather)
+        with open(os.path.join(self.out, "positions.csv"), newline="") as f:
+            positions = list(csv.DictReader(f))
+        given = {(round(r["lat"], 6), round(r["lon"], 6)) for r in records}
+        self.assertTrue(positions)
+        # 3 decimal places would move them by up to ~55 m and snap tracks to a grid
+        for p in positions:
+            self.assertIn((float(p["lat"]), float(p["lon"])), given)
+
     def test_warns_about_missing_inputs_and_unsynchronised_clock(self):
         self.write_log("a.jsonl.gz", make_records())
         with open(os.path.join(self.logs, "health", "d.jsonl"), "w") as f:
