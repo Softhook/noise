@@ -24,6 +24,7 @@ from .passes import CSV_FIELDS, passes_near
 
 PAD_S = 5 * 60  # Read this long either side of the period; aircraft cross the query box in 1-3 minutes
 BOX_MARGIN_M = 2000  # Query beyond --radius, so a closest approach near the edge has points either side
+QUERY_BOX_M = 3000 + BOX_MARGIN_M  # The box's half-side for any --radius up to 3000 m, so their queries are cached alike
 MATCH_S = 90  # Closest approaches this close in time are taken to be the same flight
 EVENT_S = 60  # An NMT6 event this close in time to a closest approach is listed with it
 
@@ -103,7 +104,7 @@ def add_arguments(parser):
 
 def run(args, client=None):
     begin, end = parse_time(args.begin), parse_time(args.end)
-    box = box_around(NMT6, args.radius + BOX_MARGIN_M)
+    box = box_around(NMT6, max(QUERY_BOX_M, args.radius + BOX_MARGIN_M))
     states = trino.fetch_states(begin - PAD_S, end + PAD_S, box, client)
     passes = passes_near(states, begin, end, args.radius, args.geoid)
 

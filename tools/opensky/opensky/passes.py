@@ -43,12 +43,13 @@ def positions(states):
     """One aircraft's airborne positions, each once, at the time it was received, in time order.
 
     A state vector repeats the last position until a new one arrives, so states with the same
-    lastposupdate are the same position.
+    lastposupdate are the same position. Trino's query already sends each position and only airborne
+    ones, but a position can be in two hour partitions.
     """
     points, seen = [], set()
     for s in sorted(states, key=lambda s: s["time"]):
         t = number(s["lastposupdate"]) or float(s["time"])
-        if s["onground"] or number(s["lat"]) is None or number(s["lon"]) is None or t in seen:
+        if s.get("onground") or number(s["lat"]) is None or number(s["lon"]) is None or t in seen:
             continue
         seen.add(t)
         points.append({**s, "t": t})

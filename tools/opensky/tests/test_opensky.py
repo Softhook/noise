@@ -43,15 +43,15 @@ class FakeFrame:
 
 
 class FakeTrino:
-    """Records each query and answers with the states whose time falls in its range."""
+    """Records each query and answers with the states in its hour partition."""
 
     def __init__(self, states):
         self.states, self.calls = states, []
 
     def query(self, sql, cached=True):
         self.calls.append((sql, cached))
-        lo, hi = (int(v) for v in sql.split("time BETWEEN ")[1].split("\n")[0].split(" AND "))
-        return FakeFrame(s for s in self.states if lo <= s["time"] <= hi)
+        hour = int(sql.split("WHERE hour = ")[1].split("\n")[0])
+        return FakeFrame(s for s in self.states if hour <= s["time"] < hour + 3600)
 
 
 class TestCommon(unittest.TestCase):
@@ -97,6 +97,8 @@ class TestTrino(unittest.TestCase):
     def test_hour_partitions(self):
         self.assertEqual(trino.hour_partitions(T0 + 60, T0 + 3600 + 60), [T0, T0 + 3600])
         self.assertEqual(trino.hour_partitions(T0, T0 + 3599), [T0])
+        self.assertEqual(trino.hour_partitions(T0 - 300, T0 + 3600), [T0 - 3600, T0])  # Not the next hour
+        self.assertEqual(trino.hour_partitions(T0 + 5, T0 + 5), [T0])
 
     def test_every_query_filters_on_its_hour_partition(self):
         client = FakeTrino([])
@@ -109,12 +111,30 @@ class TestTrino(unittest.TestCase):
             self.assertIn("lat BETWEEN", sql)
             self.assertIn("lon BETWEEN", sql)
 
-    def test_each_query_covers_only_its_own_hour(self):
-        client = FakeTrino([])
-        trino.fetch_states(T0 - 300, T0 + 300, self.BOX, client, log=io.StringIO())
-        (first, _), (second, _) = client.calls
-        self.assertIn(f"time BETWEEN {int(T0 - 300)} AND {int(T0 - 1)}\n", first)
-        self.assertIn(f"time BETWEEN {int(T0)} AND {int(T0 + 300)}\n", second)
+    def test_drops_ground_states_and_repeated_positions_in_the_query(self):
+        sql = trino.states_sql(int(T0), self.BOX)
+        self.assertIn("AND NOT onground\n", sql)
+        self.assertIn("GROUP BY icao24, lastposupdate", sql)
+        self.assertNotIn("ORDER BY", sql)
+
+    def test_overlapping_periods_send_the_same_queries(self):
+        # So pyopensky's cache, keyed on the SQL, serves every hour a previous run fetched
+        a, b = FakeTrino([]), FakeTrino([])
+        trino.fetch_states(T0 + 60, T0 + 3600 + 60, self.BOX, a, log=io.StringIO())
+        trino.fetch_states(T0 + 1800, T0 + 3600 + 1200, self.BOX, b, log=io.StringIO())
+        self.assertEqual(a.calls, b.calls)
+
+    def test_rows_are_cut_to_the_period(self):
+        states = [state(T0 + 10, 0), state(T0 + 100, 0), state(T0 + 3000, 0)]
+        rows = trino.fetch_states(T0 + 50, T0 + 2000, self.BOX, FakeTrino(states), log=io.StringIO())
+        self.assertEqual([r["time"] for r in rows], [T0 + 100])
+
+    def test_hours_not_yet_started_are_not_queried(self):
+        with mock.patch("opensky.trino.time.time", return_value=T0 + 1800):
+            client = FakeTrino([])
+            trino.fetch_states(T0 - 300, T0 + 3 * 3600, self.BOX, client, log=io.StringIO())
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual([cached for _, cached in client.calls], [False, False])
 
     def test_only_settled_hours_are_cached(self):
         with mock.patch("opensky.trino.time.time", return_value=T0 + 3600 + trino.SETTLED_S + 1):
@@ -133,6 +153,11 @@ class TestPasses(unittest.TestCase):
         states = [state(T0, 0), state(T0 + 1, 0, lastposupdate=float(T0)), state(T0 + 2, 50, onground=True),
                   state(T0 + 3, 100, lat=float("nan"))]
         self.assertEqual([p["t"] for p in passes.positions(states)], [T0])
+
+    def test_positions_without_an_onground_column_are_airborne(self):
+        # Trino's query drops ground states and leaves the column out
+        rows = [{k: v for k, v in state(T0, 0).items() if k != "onground"}]
+        self.assertEqual([p["t"] for p in passes.positions(rows)], [T0])
 
     def test_positions_are_timed_by_when_they_were_received(self):
         points = passes.positions([state(T0 + 5, 0, lastposupdate=float(T0 + 3))])
@@ -238,6 +263,20 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(written, ["nmt6-trino-2026-11-05T0900.csv"])
         self.assertIn("In both: 0. WebTrak only: 0. OpenSky only: 1.", out.getvalue())
         self.assertTrue(all("hour = " in sql for sql, _ in client.calls))
+
+    def test_radii_up_to_3000_m_share_a_query_box(self):
+        def sqls(radius):
+            args = argparse.Namespace(begin="2026-11-05T09:00Z", end="2026-11-05T10:00Z", radius=radius, geoid=45)
+            client = FakeTrino([])
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(compare, "OUT_DIR", tmp), \
+                    mock.patch("opensky.webtrak.radar_passes", return_value=[]), \
+                    mock.patch("opensky.webtrak.events", return_value=[]), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                compare.run(args, client)
+            return [sql for sql, _ in client.calls]
+
+        self.assertEqual(sqls(1500), sqls(3000))
+        self.assertNotEqual(sqls(3000), sqls(4000))  # A larger radius widens the box
 
 
 if __name__ == "__main__":

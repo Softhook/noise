@@ -16,7 +16,7 @@ make test     # made-up data and a fake Trino client; no network, no pyopensky n
 
 `make compare` runs `.venv/bin/python -m opensky compare --from ... --to ...`.
 
-For each hour of the period, it runs one query on `state_vectors_data4` for every aircraft in a box about 5 km either side of NMT6, whichever airport it uses. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It keeps each position once, at the time OpenSky received it, and drops aircraft on the ground. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
+For each hour of the period, it runs one query on `state_vectors_data4` for every airborne aircraft in a box 5 km either side of NMT6, whichever airport it uses. Each query asks for the whole hour, and OpenSky sends each position once, at the time it received it. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
 
 For each pass it gives:
 - the closest ground distance,
@@ -29,7 +29,7 @@ For each pass it gives:
 
 | Module | Does |
 |---|---|
-| `opensky/trino.py` | The `state_vectors_data4` query, one hour partition at a time, and the caching rule |
+| `opensky/trino.py` | The `state_vectors_data4` query, one whole hour partition at a time, and the caching rule |
 | `opensky/passes.py` | State vectors into one closest approach per aircraft pass |
 | `opensky/geometry.py` | Distances from NMT6, closest approach, the query box |
 | `opensky/webtrak.py` | WebTrak's saved radar tracks and NMT6 events |
@@ -61,18 +61,20 @@ If they're blank, pyopensky opens a browser to log in. Never put them in this re
 
 There are no API credits. Instead, OpenSky limits the load on its shared server, and it suspends accounts that keep ignoring [its guidelines](https://openskynetwork.github.io/opensky-api/trino.html). `opensky/trino.py` keeps to them, and the tests check it:
 
-- **Partition filter:** every query filters on the `hour` partition, as well as on time and a small latitude/longitude box. Trino rejects queries without one.
+- **Partition filter:** every query filters on the `hour` partition, as well as on a small latitude/longitude box. Trino rejects queries without one.
 - **Size:** one query per hour, run one at a time. Each user may have at most 2 queries running and 2 queued. A query may run for at most 30 minutes and scan at most 100 GB.
-- **Caching:** pyopensky saves each result (in `~/Library/Caches/opensky` on a Mac, kept for 90 days), so a rerun doesn't query again. It only caches hours that ended more than a day ago. OpenSky may still be processing more recent hours, and a saved partial result would never be refreshed, so those are queried again on every run.
+- **Caching:** pyopensky saves each result (in `~/Library/Caches/opensky` on a Mac, kept for 90 days), keyed on the query's text. Each query covers a whole hour in the same box, whatever `--from`, `--to` and `--radius` (up to 3000 m) are, so any later run that needs that hour reads it from the cache; the rows are cut to the period here. It only caches hours that ended more than a day ago. OpenSky may still be processing more recent hours, and a saved partial result would never be refreshed, so those are queried again on every run.
 - **Stale states:** `time - lastcontact <= 15` drops the states OpenSky keeps for up to 300 s after it last heard an aircraft.
 
-Three hours near NMT6 (08:01–11:01) take five queries, a few seconds each, including the 5 minutes either side, and return about 8,000 state vectors.
+- **Less to send:** OpenSky drops ground states (the box takes in London City's runway, about half the rows) and repeated positions, and sends only the columns the tool uses, unsorted. Hours that haven't started aren't queried.
+
+Three hours near NMT6 (08:01–11:01) take five whole-hour queries, about 5 seconds each, including the 5 minutes either side, and return about 4,800 positions (about 1,000 an hour, against 2,500 state vectors an hour before OpenSky dropped ground states and repeats). A later run of any period within those hours takes under a second.
 
 Some periods are missing from OpenSky's data because of outages. Two of them fall in 2026: 2 January 19:00 to 3 January 18:00, and 24 January 08:00–17:00 UTC. Its processing changed on 13–14 August 2026, so results from before and after then may differ.
 
 ### Things to know about the data
 
-- **Repeated positions:** a state vector repeats the last position until a new one arrives. The tool uses `lastposupdate` as each position's time and keeps each position once.
+- **Repeated positions:** a state vector repeats the last position until a new one arrives. The query groups states by `lastposupdate`, which the tool uses as each position's time, keeping the first state's heights and the most receivers that heard any of them.
 - **GPS height:** `geoaltitude` is height above the WGS84 ellipsoid. Subtract the geoid height (about 45 m in London) to get height above sea level, as WebTrak gives.
 - **Pressure altitude:** `baroaltitude` is pressure altitude (1013.25 hPa) and needs a QNH correction, as `tools/adsb` does. On 5 November it read about 90–100 m below GPS height near NMT6.
 - **Aircraft without ADS-B:** the state vectors only include aircraft that send ADS-B. `readsb_mlat_sv` has multilateration (MLAT) positions, worked out from the timing of signals at several receivers, for some aircraft that send no position. The tool doesn't query it yet.
