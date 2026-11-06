@@ -30,7 +30,7 @@ These targets are our proposals, to be tested in the trial.
 | Unattended running | 37 days, restarting by itself after a fault or power cut | Matches the survey length |
 | Noise from the Pi | None measurable at the microphone | Must not affect the survey |
 
-Capture is measured against other sources, in the [survey's](../../survey/ARCHITECTURE.md) coverage check: WebTrak's radar tracks while we use it, and [adsb.lol's public archive](traces.md) through the 37-day survey, when WebTrak is only asked about single flights. adsb.lol is also ADS-B, so only WebTrak or the airport's records show aircraft that don't transmit.
+Capture is measured against other sources, in the [survey's](../../survey/ARCHITECTURE.md) coverage check: WebTrak's radar tracks while we use it, and [adsb.lol's public archive](traces.md) and [OpenSky's research database](../../opensky/README.md) through the 37-day survey, when WebTrak is only asked about single flights. adsb.lol and OpenSky are also ADS-B, so only WebTrak or the airport's records show aircraft that don't transmit, though OpenSky's MLAT positions may cover some of them.
 
 ## Elements
 
@@ -186,12 +186,16 @@ Our own ADS-B log would make matching their events to flights straightforward.
 
 ## Other ADS-B sources: OpenSky and a home receiver
 
-On 6 November 2026 we compared the [OpenSky Network](../../opensky/README.md) with WebTrak near NMT6 for 08:01–11:01 UTC on 5 November. All 19 London City flights within 3 km were in both. Their times of closest approach agree to within about 2 s, and their distances usually agree to within about 100 m. But OpenSky's free API gives simplified tracks, with points up to 112 s apart and heights rounded to 1000 ft, so it can identify flights but can't give their heights.
+On 6 November 2026 we compared the [OpenSky Network](../../opensky/README.md) with WebTrak's radar near NMT6, for 08:01–11:01 UTC on 5 November, in two ways.
 
-- **OpenSky's research database** (access applied for) has positions about once a second and full-resolution heights. It is likely to be close to our own receiver for most flights. But its coverage is only what its volunteers heard, so a missed pass can't be detected, and its clock and publication terms aren't ours. It's a cross-check and gap-filler, not a replacement for the garden Pi.
-- **A home receiver about 15 km away** gets the same messages, at the same accuracy. But it sees aircraft over Thamesmead only 1–3° above its horizon, so buildings may block the lowest arrivals. Its coverage can be measured against WebTrak before relying on it.
+- **OpenSky's free REST API** found all 19 London City flights within 3 km, with times of closest approach within about 2 s. But its tracks are simplified, with points up to 112 s apart and heights in 1000 ft steps, so it can identify flights but not give their heights.
+- **OpenSky's research database (Trino)**, with our research access, makes OpenSky a real second source. `tools/opensky/nmt6_trino.py` queries `state_vectors_data4` for every aircraft in a small box around NMT6. It runs one query per hour partition, as OpenSky's guidelines require, and uses no API credits. It found 33 of WebTrak's 34 aircraft; the missing one, a KC-135 tanker at 10.7 km, sent no ADS-B position. Positions were about 1 s apart, closest-approach times within about 3 s, and 28–60 receivers heard each London City flight. For the 19 London City departures at 550–800 m, GPS heights agreed with WebTrak's radar altitude to within about ±20 m, with a median difference of about −3 m. One small jet differed by 34 m. That meets the 30 m height target above.
 
-The garden Pi stays the main source. See [`tools/opensky`](../../opensky/README.md) for the details and next steps.
+**Decision:** use OpenSky's research database as the main outside source of ADS-B for the survey, alongside adsb.lol. It covers periods before the Pi is installed, fills gaps when the Pi is down, and is an independent check on the Pi's coverage. Its data goes back to 2013. The garden Pi stays the main record. It's the only source whose completeness can be checked, from its health log, and whose clock is our own GPS. OpenSky's coverage is whatever its volunteers' receivers heard, and its research licence limits what we can publish.
+
+A **home receiver about 15 km away** would get the same messages, at the same accuracy. But it would see aircraft over Thamesmead only 1–3° above its horizon, so buildings may block the lowest arrivals. Its coverage would need measuring against WebTrak before relying on it.
+
+See [`tools/opensky`](../../opensky/README.md) for setup, OpenSky's query rules, the full comparison and next steps.
 
 ## Risks
 
@@ -199,7 +203,7 @@ The garden Pi stays the main source. See [`tools/opensky`](../../opensky/README.
 |---|---|---|
 | A fault goes unnoticed | Weeks of lost data | Automatic restarts, health log, close-pass counts on the status page, and regular visits |
 | The Pi hangs, or the stick or readsb stops | Lost data until the next visit | The watchdog reboots a hung Pi, or one whose SSD has stopped working. The status page warns as soon as readsb stops sending, or the logger or readsb isn't running |
-| A bug in our logger loses flights | Lost data that the health log doesn't show | Close-pass counts on the status page; adsb.lol's archive for an independent check |
+| A bug in our logger loses flights | Lost data that the health log doesn't show | Close-pass counts on the status page; adsb.lol's archive and OpenSky's research database for an independent check |
 | Clock wrong after a power cut | Events matched to the wrong flight | Clock checked every 10 s until synchronised, a new data file when that changes, and flights in unsynchronised periods flagged, using each boot's uptime because the clock starts behind. The status page checks the clock directly and against the phone's. The check against closest approach is still to build |
 | Fusion and Pi in different time zones, or a time zone lost in export | Every event an hour out | Fusion set to UTC with summer time off, times kept as UTC in ISO format, and the matcher refuses an unknown time zone |
 | Height left uncorrected | Errors of up to about 250 m on a 30 hPa day | QNH correction with temperature and METAR rounding allowed for, compared with geometric height. Geometric height rejected when it shows the sea-level fault |
@@ -223,5 +227,5 @@ The garden Pi stays the main source. See [`tools/opensky`](../../opensky/README.
 - [ ] Can the airport supply flight records for checking types and capture?
 - [ ] Which geoid model should we use, and what is the geoid height at the garden? The [Iowa Environmental Mesonet](https://mesonet.agron.iastate.edu/request/download.phtml) archive works for EGLC METARs, with QNH and temperature.
 - [ ] Do these targets suit the analysis? Review them after the trial.
-- [ ] Once OpenSky research access is approved, do its heights near NMT6 agree with WebTrak's radar?
+- [x] Do OpenSky's heights near NMT6 agree with WebTrak's radar? Yes, from the research database: within about ±20 m for London City flights on 5 November (see [`tools/opensky`](../../opensky/README.md)). Still to check over more periods and both runways.
 - [ ] What share of NMT6 passes does a home receiver about 15 km away catch, and at what heights does it start missing them?

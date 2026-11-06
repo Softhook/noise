@@ -196,7 +196,7 @@ def webtrak_passes(begin, end, radius):
                         tracks[row["track"]] = {"t": t, "closest_utc": row["time_utc"], "callsign": row["callsign"],
                                                 "type": row["type"], "direction": row["direction"],
                                                 "airport": row["airport"], "distance_m": d,
-                                                "height_m": row["height_m"]}
+                                                "height_m": row["height_m"], "altitude_m": row["altitude_m"]}
         day += dt.timedelta(days=1)
     return sorted(tracks.values(), key=lambda p: p["t"])
 
