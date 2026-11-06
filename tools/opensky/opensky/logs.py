@@ -66,11 +66,38 @@ def hour_name(t):
     return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H")
 
 
-def write_logs(recs, out_dir, begin, end, db_name="none"):
-    """The hourly files and SOURCE.txt. Returns the number of hourly files."""
+SOURCE_FIRST_LINE = "Source: OpenSky Network research database (Trino), state_vectors_data4"
+
+
+def clear_previous(out_dir):
+    """Remove the hourly files of an earlier `opensky logs` run in out_dir, so a period can be redone.
+
+    Only a folder whose SOURCE.txt says `opensky logs` wrote it is cleared, and only its .jsonl.gz
+    files and SOURCE.txt, so the logger's own logs or anything else can never be removed.
+    """
+    try:
+        with open(os.path.join(out_dir, "SOURCE.txt")) as f:
+            ours = f.readline().strip() == SOURCE_FIRST_LINE
+    except OSError:
+        ours = False
+    if not ours:
+        raise SystemExit(f"{out_dir} holds log files that `opensky logs` didn't write; choose an empty folder")
+    for name in os.listdir(out_dir):
+        if name.endswith(".jsonl.gz"):
+            os.remove(os.path.join(out_dir, name))
+    os.remove(os.path.join(out_dir, "SOURCE.txt"))
+
+
+def write_logs(recs, out_dir, begin, end, db_name="none", replace=False):
+    """The hourly files and SOURCE.txt. Returns the number of hourly files.
+
+    out_dir must hold no log files, unless replace is set and an earlier `opensky logs` run wrote them.
+    """
     os.makedirs(out_dir, exist_ok=True)
     if any(name.endswith(".jsonl.gz") for name in os.listdir(out_dir)):
-        raise SystemExit(f"{out_dir} already holds log files; choose an empty folder")
+        if not replace:
+            raise SystemExit(f"{out_dir} already holds log files; choose an empty folder, or use --replace")
+        clear_previous(out_dir)
     hours = collections.defaultdict(list)
     for r in recs:
         hours[hour_name(r["now"])].append(r)
@@ -82,7 +109,7 @@ def write_logs(recs, out_dir, begin, end, db_name="none"):
     typed = {r["hex"] for r in recs if r.get("t")}
     with open(os.path.join(out_dir, "SOURCE.txt"), "w") as f:
         f.write(
-            "Source: OpenSky Network research database (Trino), state_vectors_data4\n"
+            f"{SOURCE_FIRST_LINE}\n"
             "NOT the logger's own record. Converted by `opensky logs`.\n"
             f"Converted: {made}\n"
             f"Period: {iso(begin)} to {iso(end)}\n"
@@ -98,6 +125,8 @@ def add_arguments(parser):
     parser.add_argument("--from", dest="begin", required=True, help="UTC, e.g. 2026-10-28T00:00Z")
     parser.add_argument("--to", dest="end", required=True)
     parser.add_argument("--out", required=True, help="an empty folder for the hourly files")
+    parser.add_argument("--replace", action="store_true",
+                        help="replace the files of an earlier `opensky logs` run in --out (and nothing else)")
     parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/aircraft-db)")
 
 
@@ -111,6 +140,6 @@ def run(args, client=None, db=None, db_path="given"):
     for r in recs:
         callsigns.setdefault(r["hex"], r.get("flight", ""))
     aircraft.report_unknown(db, callsigns.items())
-    count = write_logs(recs, args.out, begin, end, os.path.basename(db_path))
+    count = write_logs(recs, args.out, begin, end, os.path.basename(db_path), getattr(args, "replace", False))
     print(f"{len(recs):,} positions from {len({r['hex'] for r in recs}):,} aircraft "
           f"-> {count} hourly files in {os.path.relpath(args.out)}")

@@ -1,0 +1,99 @@
+"""Read a deployment's manifest: its period, receptors and sources. See ARCHITECTURE.md, Manifest.
+
+Paths in a manifest are relative to the manifest file. A receptor whose location is private (the
+garden) gives `"config"`: the path to a git-ignored site.json (tools/adsb's format). If that file
+isn't there, the receptor is left out and a warning given, so a manifest in git never needs the
+garden's location in it.
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import os
+
+from .common import parse_time
+
+TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEPLOYMENTS_DIR = os.path.join(TOOLS_DIR, "deployments")
+OUT_DIR = os.path.join(TOOLS_DIR, "survey", "data")
+ADAPTERS = ("adsb", "webtrak")
+
+
+class ManifestError(ValueError):
+    pass
+
+
+def _receptor(rid, spec, base, warnings):
+    spec = dict(spec)
+    if "config" in spec:
+        path = os.path.normpath(os.path.join(base, spec.pop("config")))
+        if not os.path.exists(path):
+            warnings.append(f"receptor {rid}: {os.path.relpath(path)} not found, so it's left out")
+            return None
+        with open(path) as f:
+            site = json.load(f)["site"]
+        spec = {**site, **spec}
+    for key in ("lat", "lon"):
+        if not isinstance(spec.get(key), (int, float)):
+            raise ManifestError(f"receptor {rid}: {key} must be a number")
+    return {
+        "id": rid,
+        "name": str(spec.get("name") or rid),
+        "label": str(spec.get("label") or spec.get("name") or rid),
+        "lat": float(spec["lat"]),
+        "lon": float(spec["lon"]),
+        "ground_elevation_m": spec.get("ground_elevation_m"),
+        "mic_height_m": spec.get("mic_height_m"),
+        "public": spec.get("public") is True,
+    }
+
+
+def load(path):
+    """The manifest as a dict, with absolute paths, parsed times and the receptors that are available."""
+    path = os.path.abspath(path)
+    base = os.path.dirname(path)
+    with open(path) as f:
+        raw = json.load(f)
+    warnings = []
+    try:
+        start, end = (parse_time(t) for t in raw["window_utc"])
+    except (KeyError, ValueError, TypeError) as error:
+        raise ManifestError(f"{path}: window_utc must be two UTC times: {error}") from None
+    if end <= start:
+        raise ManifestError(f"{path}: window_utc ends before it starts")
+    receptors = {}
+    for rid, spec in (raw.get("receptors") or {}).items():
+        receptor = _receptor(rid, spec, base, warnings)
+        if receptor:
+            receptors[rid] = receptor
+    if not receptors:
+        raise ManifestError(f"{path}: no receptors available")
+    sources = {}
+    for name, spec in (raw.get("sources") or {}).items():
+        if spec is None:
+            continue  # A source set to null is turned off
+        spec = dict(spec)
+        if spec.get("adapter") not in ADAPTERS:
+            raise ManifestError(f"source {name}: adapter must be one of {', '.join(ADAPTERS)}")
+        for key in ("results", "logs", "tool", "site_dir"):
+            if key in spec:
+                spec[key] = os.path.normpath(os.path.join(base, spec[key]))
+        sources[name] = spec
+    name = raw.get("deployment") or os.path.splitext(os.path.basename(path))[0]
+    return {
+        "deployment": name,
+        "description": raw.get("description", ""),
+        "path": path,
+        "start": start,
+        "end": end,
+        "max_km": float(raw.get("max_km", 15)),
+        "receptors": receptors,
+        "sources": sources,
+        "out_dir": os.path.join(OUT_DIR, name),
+        "warnings": warnings,
+    }
+
+
+def all_manifests(folder=None):
+    return sorted(glob.glob(os.path.join(folder or DEPLOYMENTS_DIR, "*.json")))

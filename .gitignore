@@ -14,3 +14,4 @@ tools/adsb/data/
 tools/webtrak/data/
 tools/opensky/data/
 tools/opensky/.venv/
+tools/survey/data/

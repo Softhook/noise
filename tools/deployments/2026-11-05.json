@@ -1,0 +1,32 @@
+{
+  "deployment": "2026-11-05",
+  "description": "OpenSky for the whole UTC day (5 km either side of NMT6, below 10,000 ft) and whatever WebTrak radar and NMT6 levels are saved. No garden data yet.",
+  "window_utc": ["2026-11-05T00:00:00Z", "2026-11-06T00:00:00Z"],
+  "max_km": 15,
+  "receptors": {
+    "nmt6": {
+      "name": "NMT6, St Pauls Church, Thamesmead",
+      "label": "NMT6",
+      "lat": 51.50535,
+      "lon": 0.11075,
+      "ground_elevation_m": 3.0,
+      "mic_height_m": 3.0,
+      "public": true
+    },
+    "garden": {"config": "../adsb/site.json", "name": "Garden", "label": "Garden"}
+  },
+  "sources": {
+    "adsb": null,
+    "opensky": {
+      "adapter": "adsb",
+      "results": "../opensky/data/2026-11-05/results",
+      "logs": "../opensky/data/2026-11-05/adsb"
+    },
+    "webtrak": {
+      "adapter": "webtrak",
+      "tool": "../webtrak",
+      "site_dir": "../webtrak/data/lcy",
+      "monitors": {"nmt6": "106"}
+    }
+  }
+}

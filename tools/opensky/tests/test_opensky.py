@@ -325,6 +325,30 @@ class TestLogs(unittest.TestCase):
                 with contextlib.redirect_stderr(io.StringIO()):
                     logs.run(args, client, DB)
 
+    def test_replace_redoes_an_earlier_run_but_nothing_else(self):
+        client = FakeTrino(flyover(T0 + 600, span_s=60))
+        quiet = contextlib.ExitStack()
+        quiet.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        quiet.enter_context(contextlib.redirect_stderr(io.StringIO()))
+        with tempfile.TemporaryDirectory() as out, quiet:
+            stale = os.path.join(out, "2026-11-05T07.jsonl.gz")  # From an earlier, longer period
+            args = argparse.Namespace(begin="2026-11-05T09:00Z", end="2026-11-05T10:00Z", out=out, replace=True)
+            logs.run(args, client, DB)
+            with gzip.open(stale, "wt") as f:
+                f.write("{}\n")
+            open(os.path.join(out, "notes.txt"), "w").close()
+            logs.run(args, client, DB)
+            self.assertEqual(sorted(os.listdir(out)), ["2026-11-05T09.jsonl.gz", "SOURCE.txt", "notes.txt"])
+            # The logger's own files, or anyone else's, are never removed
+            with open(os.path.join(out, "SOURCE.txt"), "w") as f:
+                f.write("Source: adsb.lol prod 2026-11-05\n")
+            with self.assertRaises(SystemExit):
+                logs.run(args, client, DB)
+            os.remove(os.path.join(out, "SOURCE.txt"))
+            with self.assertRaises(SystemExit):
+                logs.run(args, client, DB)
+            self.assertIn("2026-11-05T09.jsonl.gz", os.listdir(out))
+
 
 class TestAircraft(unittest.TestCase):
     def setUp(self):

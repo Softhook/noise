@@ -11,8 +11,23 @@ From `tools/opensky`:
 ```bash
 make setup    # once: .venv with pyopensky
 make compare FROM=2026-11-05T08:01Z TO=2026-11-05T11:01Z    # ARGS="--radius 3000 --geoid 45" to change them
+make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z     # the flights in the ADS-B viewer (below)
 make test     # made-up data and a fake Trino client; no network, no pyopensky needed
 ```
+
+### Viewing a day in the ADS-B viewer
+
+1. Once: `make setup`, and set up your OpenSky login (see [Setup](#setup)).
+2. From `tools/opensky`, run `make viewer` with the period in UTC, for example one whole day:
+
+   ```bash
+   make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z
+   ```
+
+   This takes a minute or two the first time (one OpenSky query per hour), and seconds after that, from the cache. It ends by printing the file to open.
+3. Open `data/2026-10-28/results/viewer.html` in a browser, for example with `open data/2026-10-28/results/viewer.html`. The flights are built into the file, so there's nothing to load or upload, and it works offline.
+
+Each period goes in a folder named after its `FROM` date, so a period of several days goes in the first day's folder. Add `DIR=data/somewhere` to choose another. Running `make viewer` again for the same folder replaces that folder's OpenSky files and rebuilds the viewer. The viewer holds OpenSky's data, so keep it private, under OpenSky's research terms. See [In the ADS-B viewer](#in-the-ads-b-viewer) for what goes into it, and [the viewer's guide](../adsb/docs/analysis.md#the-viewer) for how to use it.
 
 `make compare` runs `.venv/bin/python -m opensky compare --from ... --to ...`.
 
@@ -82,6 +97,8 @@ Some periods are missing from OpenSky's data because of outages. Two of them fal
 ```bash
 make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z    # data/2026-10-28/adsb, then data/2026-10-28/results/viewer.html
 ```
+
+`make viewer` runs three steps: `opensky logs` (with `--replace`, which only ever removes the files of an earlier `opensky logs` run), `adsb metars`, then `adsb analyse --all-positions`. It keeps every flight's positions, not just the arrivals and departures, so the [survey app](../survey/README.md) can read the same folder and show OpenSky alongside WebTrak and, later, the garden's logger.
 
 - It uses the same whole-hour queries as `compare`, so hours already fetched come from the cache.
 - Heights go in as feet, as readsb gives them. `alt_geom` is OpenSky's `geoaltitude`, which `adsb analyse` corrects with the config's geoid height, and `alt_baro` is pressure altitude. `make viewer` also downloads EGLC METARs (`adsb metars`), so QNH heights are worked out too, and `QNH minus geometric` compares the two.

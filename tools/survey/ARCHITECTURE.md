@@ -2,7 +2,7 @@
 
 The Thamesmead survey has several data sources that each know part of the story: the Fusion in the garden measures the sound, the ADS-B logger in the garden records the aircraft, WebTrak gives NMT6's levels and the airport's radar, adsb.lol's public archive gives other receivers' ADS-B, and the airport may give us its own records. This document describes how they fit together so that any source can be added or removed without changing the rest.
 
-**Status:** a plan. Nothing in `tools/survey` is written yet. Phase 0 is built first (see [Phases](#phases)).
+**Status:** part of Phase 0 is built (see [README.md](README.md)): the manifest, the common tables, the `adsb` and `webtrak` adapters, closest approaches, `link`, and the survey app (`python3 -m survey serve`), which shows every source together. `checks`, `match`, `resolve`, the lookups and the fleet registry are still to do. OpenSky now stands in for the Pi until the Pi has real data.
 
 ## Why
 
@@ -38,10 +38,11 @@ So the design has one rule: **each source plugs in through an adapter, and the c
 
 1. **Collectors** are the existing tools: [`tools/adsb`](../adsb/README.md), [`tools/webtrak`](../webtrak/README.md) and [`tools/fusion`](../fusion). They don't know about each other or about this package. The Pi side stays standard-library only and is never changed for the sake of the core.
    - [adsb.lol's daily archive](../adsb/docs/traces.md), not shown in the diagram, comes in through `tools/adsb` too. `adsb traces` turns its track files into logs, and `adsb analyse` turns those into flights and positions, as for our logger. The same `adsb` adapter then reads it, with the source named in the manifest (`adsb` or `adsblol`).
+   - [OpenSky's research database](../opensky/README.md), also not shown, comes in the same way. `opensky logs` turns its Trino state vectors into logs, with each aircraft's type from tar1090-db, and `adsb analyse` does the rest. Unlike adsb.lol, it can be queried for any window rather than downloaded a day at a time, and it gives positions about once a second. It only covers the box it was queried for: today, 5 km either side of NMT6.
 2. **Adapters** turn one source's own output into the [common tables](#common-tables). There is one adapter per source. Removing a source means removing it from the deployment's manifest.
 3. **The core** links flights across sources, matches noise events to them and settles each one's identity, using only the common tables. It never imports `adsb`, `webtrak` or `fusion`.
 4. **Lookups** answer a question about one flight when the core can't settle it from what it has. They are optional, limited by a budget, and their answers are kept.
-5. **Products** are the analyses, reports and viewers. They read the core's outputs, not the sources.
+5. **Products** are the analyses, reports and viewers. They read the core's outputs, not the sources. The main one is the **survey app** (`python3 -m survey serve`). For any day of a deployment, it shows every source's tracks and heights around a chosen receptor, and the receptor's levels and events, with each pass linked across sources. It's a local web app on the pattern of WebTrak's own, so it can choose the deployment, day and sources itself. Each collector keeps its own downloads (the WebTrak app, `make viewer` for OpenSky).
 
 ### Dependency rules
 
@@ -122,8 +123,8 @@ Written to `data/<deployment>/` (git-ignored):
 
 | File | Contents |
 |---|---|
-| `common/*.csv` | the common tables, as the adapters wrote them |
-| `passes.csv` | one row per pass: its source flights, the evidence and confidence |
+| `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
+| `build.json` | when it was built, the counts per source, and the warnings |
 | `event_matches.csv` | noise event → pass, per receptor, with geometry and predicted sound arrival |
 | `identity.csv` | resolved type and registration per pass, with their sources |
 | `checks.txt` | the checks above |
@@ -206,11 +207,12 @@ tools/
   survey/
     ARCHITECTURE.md                   this file
     survey/
-      __main__.py                     build | lookup | check
+      __main__.py                     build | serve (later: lookup | check)
+      manifest.py                     reads a manifest, including private receptors
       schema.py                       table definitions, reading, writing and validation
       geometry.py                     local coordinates, closest approach to each receptor
       adapters/adsb.py                reads adsb analyse's flights.csv and positions.csv (--all-positions), for
-                                      our logger or adsb.lol (source from the manifest)
+                                      our logger, adsb.lol or OpenSky (source from the manifest)
       adapters/webtrak.py             reads the raw chunk cache with webtrak.parse, within the windows
       adapters/fusion.py              reads the Fusion export, once its format is settled
       adapters/airport.py             reads airport records, once we know their format
@@ -218,7 +220,9 @@ tools/
       lookups/fleet.py
       lookups/airport.py
       lookups/webtrak.py
-      link.py  match.py  resolve.py  checks.py
+      link.py  build.py               built
+      match.py  resolve.py  checks.py to do
+      server.py  ui.html              the survey app
     registry/fleet.csv                registration, type, source, date confirmed
     registry/overrides.csv            pass id, field, value, reason, who
     tests/
@@ -227,7 +231,8 @@ tools/
 Commands:
 
 ```bash
-python3 -m survey build  --manifest ../deployments/2026-11-phase0.json   # adapters, link, match, resolve, checks
+python3 -m survey build  --manifest ../deployments/2026-11-phase0.json   # adapters, link (later match, resolve, checks)
+python3 -m survey serve                                                   # the survey app, at http://127.0.0.1:8766
 python3 -m survey check  --manifest ...                                   # checks only, on an existing build
 python3 -m survey lookup --manifest ... --pass 20261105T0812-GLCYN        # settle one pass by hand
 ```
@@ -256,7 +261,9 @@ The test that WebTrak really is removable: from Phase 1 on, build each deploymen
 
 Phase 0 is fetched after the fact, from windows chosen once the Pi's health log shows they're clean (clock synchronised, no gaps), and with a spread of weather for the height check. The 3.8 hours saved for 5 Nov 2026 held 31 LCY movements, so three such windows give about a hundred LCY passes and many more overflights, which is enough to measure the clock offset, position and height differences.
 
-Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them.
+Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them. OpenSky gives a real ADS-B source in the meantime. On 5 November 2026, all 19 WebTrak passes within 3 km of NMT6 and below 3,000 m linked to their OpenSky flights by registration.
+
+A closest approach that falls at the first or last position of a source's track is flagged `at_track_end`, as `adsb analyse` does. The aircraft may have come closer outside that source's data, at the edge of OpenSky's box or where WebTrak's saved chunks start or stop. Such approaches are left out of comparisons between sources.
 
 ## Prior work
 
