@@ -12,10 +12,16 @@ Which registrations: those of flights in the built deployments (`make build` fir
 within --km of a receptor and below --ft, as the survey app's passes table starts with, so
 the list is the aircraft the survey is about rather than every one in a source's area.
 
-A row's register says where it came from: a code from registers.py (uk, ch), or `manual`, for an
-entry a person checked by hand (a register that can't be asked online, such as Germany's), which
-is never overwritten. A registration its register doesn't have gets a row with status `not found`,
-so it isn't asked again; resolve ignores those rows.
+A row's register says where it came from: a code from registers.py (uk, ch, ie, lu), or `manual`,
+for an entry a person checked by hand (a register that can't be asked online, such as Germany's),
+which is never overwritten. A registration its register doesn't have gets a row with status
+`not found`, which resolve ignores; it's asked again once it's NOT_FOUND_DAYS old, as the aircraft
+may have been registered since (or be missing from a register's old file).
+
+A recheck never throws away what a register said before. An aircraft no longer on its register
+keeps its entry, with status `left the register`, since the survey's passes are from when it was.
+A mark now on another airframe (another serial number) keeps the earlier airframe's entry, and the
+note says what the mark is on now: a person decides which the passes were.
 """
 
 from __future__ import annotations
@@ -39,6 +45,8 @@ FIELDS = ["registration", "mark", "status", "icao_type", "model", "marketing_nam
           "approach_epndb", "lateral_epndb", "flyover_epndb", "register", "register_ref", "checked_utc", "note"]
 MANUAL = "manual"
 NOT_FOUND = "not found"
+LEFT = "left the register"
+NOT_FOUND_DAYS = 30
 # The survey app's passes table starts at 3 km and 3,000 ft
 DEFAULT_KM = 3.0
 DEFAULT_FT = 3000.0
@@ -100,24 +108,60 @@ def seen(manifests, km=DEFAULT_KM, ft=DEFAULT_FT):
     return counts, notes
 
 
-def to_check(regs, entries, recheck=False):
+def stale_miss(entry, now=None):
+    """Whether entry is a `not found` row old enough to ask about again (or with no date)."""
+    if entry.get("status") != NOT_FOUND:
+        return False
+    age = registers.days_between(entry.get("checked_utc"), now or registers.today())
+    return age is None or age >= NOT_FOUND_DAYS
+
+
+def to_check(regs, entries, recheck=False, now=None):
     """(ask, no_register): the registrations to ask their register about, and those no register
     in registers.REGISTERS covers and that aren't in the table yet. A manual entry is never asked
-    about; any other is asked about again only with recheck."""
+    about; a `not found` one again once it's NOT_FOUND_DAYS old (now: today, YYYY-MM-DD); any
+    other again only with recheck."""
     ask, no_register = [], []
     for reg in sorted(regs):
         entry = entries.get(reg)
-        if entry and (entry.get("register") == MANUAL or not recheck):
+        if entry and (entry.get("register") == MANUAL or not (recheck or stale_miss(entry, now))):
             continue
         (ask if registers.nationality(reg) else no_register).append(reg)
     return ask, no_register
 
 
+def found(entry):
+    """Whether entry is a register's answer about an aircraft (not a miss, not a manual row)."""
+    return bool(entry) and entry.get("status") != NOT_FOUND and entry.get("register") != MANUAL
+
+
+def serial(entry):
+    return registration((entry or {}).get("serial_number"))
+
+
+def merge(reg, old, got, name, now):
+    """The entry to keep, given what the table had (old) and the register's answer (got, or None
+    if the register doesn't have reg), and a line for the log. Never drops a found entry."""
+    if got is None:
+        if found(old):
+            kept = dict(old, status=LEFT, note=f"not on the {name} register when rechecked on {now}; "
+                                               f"kept what it said before ({old.get('checked_utc')})")
+            return kept, f"{reg}: no longer on the register; kept its {old.get('icao_type') or 'entry'}"
+        return ({"registration": reg, "status": NOT_FOUND, "register": registers.REGISTERS[registers.nationality(reg)][0],
+                 "checked_utc": now, "note": f"not on the {name} register"}, f"{reg}: not on the register")
+    if found(old) and serial(old) and serial(got) and serial(old) != serial(got):
+        kept = dict(old, note=f"on {now} {got['mark']} is serial {got['serial_number']} "
+                              f"({got['icao_type'] or got['model']}): another airframe; kept the earlier one's entry")
+        return kept, (f"{got['mark']}: now another airframe (serial {old.get('serial_number')} -> {got['serial_number']}, "
+                      f"{old.get('icao_type')} -> {got['icao_type'] or got['model']}); kept the earlier, check it by hand")
+    return got, f"{got['mark']}: {got['icao_type'] or 'no type'}  {got['model']}  ({got['status']})"
+
+
 def check(regs, entries, http=None, log=sys.stderr):
-    """Ask each registration's register, and put the answers in entries. Returns the registrations
-    that couldn't be asked (LookupFailed), which keep any entry they had."""
+    """Ask each registration's register, and put the answers in entries (see merge). Returns the
+    registrations that couldn't be asked (LookupFailed), which keep any entry they had."""
     http = http or registers.Http()
-    failed = []
+    failed, now = [], registers.today()
     for reg in regs:
         try:
             got = registers.look_up(reg, http)
@@ -125,15 +169,18 @@ def check(regs, entries, http=None, log=sys.stderr):
             failed.append(reg)
             print(f"{reg}: couldn't ask its register: {error}", file=log)
             continue
-        if got is None:
-            code, name, _ = registers.REGISTERS[registers.nationality(reg)]
-            got = {"registration": reg, "status": NOT_FOUND, "register": code,
-                   "checked_utc": registers.today(), "note": f"not on the {name} register"}
-            print(f"{reg}: not on the register", file=log)
-        else:
-            print(f"{got['mark']}: {got['icao_type'] or 'no type'}  {got['model']}  ({got['status']})", file=log)
-        entries[reg] = got
+        code, name, _ = registers.REGISTERS[registers.nationality(reg)]
+        when = registers.file_date(http, code)
+        entries[reg], line = merge(reg, entries.get(reg), got, f"{name}{f' file of {when}' if when else ''}", now)
+        print(line, file=log)
+    for note in getattr(http, "notes", []):
+        print(f"Note: {note}", file=log)
     return failed
+
+
+def untyped(entries):
+    """The registrations of entries a register gave but with no type (a model MODEL_TYPES lacks)."""
+    return sorted(r for r, e in entries.items() if found(e) and not e.get("icao_type"))
 
 
 def main(args):
@@ -161,6 +208,10 @@ def main(args):
         failed = check(ask, entries)
     finally:
         write(entries, args.fleet)  # Keep what was found, even if stopped part-way
+    left = untyped(entries)
+    if left:
+        print(f"{len(left)} entries give no type (see their note; add the model to registers.MODEL_TYPES and "
+              f"recheck, or add a `{MANUAL}` row):\n  " + " ".join(left), file=sys.stderr)
     print(f"-> {os.path.relpath(args.fleet)}", file=sys.stderr)
     return 1 if failed else 0
 

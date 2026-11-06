@@ -49,6 +49,8 @@ from .common import registration
 USER_AGENT = "thamesmead-noise-survey/0.1 (personal, non-commercial noise research)"
 PAUSE_S = 1.0
 TIMEOUT_S = 30
+# A downloaded register's file older than this is reported: an aircraft registered since isn't in it
+STALE_DAYS = 62
 
 
 class LookupFailed(Exception):
@@ -58,12 +60,14 @@ class LookupFailed(Exception):
 
 class Http:
     """Requests to the registers, at most one every PAUSE_S. files: what a downloaded register's
-    read gave, by register, kept for the run so each file is downloaded once."""
+    read gave, by register, kept for the run so each file is downloaded once. notes: what a person
+    should know about the run's answers (a stale file), each once."""
 
     def __init__(self, pause_s=PAUSE_S):
         self.pause_s = pause_s
         self.last = 0.0
         self.files = {}
+        self.notes = []
 
     def get(self, url, body=None, accept="application/json"):
         """The response's bytes."""
@@ -114,7 +118,10 @@ def epndb(text):
 
 
 def kg(text):
-    got = re.search(r"\d+", (text or "").replace(",", ""))
+    """A mass in kg, from a number or from text ("45,990 kg"), or None."""
+    if isinstance(text, (int, float)) and not isinstance(text, bool):
+        return int(text)
+    got = re.search(r"\d+", str(text or "").replace(",", ""))
     return int(got.group(0)) if got else None
 
 
@@ -212,6 +219,8 @@ def swiss(reg, http):
 # A register's model (as Ireland's and Luxembourg's files give it) -> ICAO type designator, for
 # the models that fly near the survey. First match wins. From the EASA type certificates (file 10
 # for the ERJ 190, file 18 for the BD-500) and ICAO Doc 8643. A model not here gets no type.
+# A designator of None: the model alone can't say which type it is, so it gets no type either,
+# and the reason goes in the entry's note.
 MODEL_TYPES = [
     (r"^BD-500-1A10\b", "BCS1"),  # A220-100
     (r"^BD-500-1A11\b", "BCS3"),  # A220-300
@@ -220,33 +229,51 @@ MODEL_TYPES = [
     (r"^ERJ ?190-300", "E290"),  # E190-E2
     (r"^ERJ ?190-400", "E295"),  # E195-E2
     (r"^DHC-8-40[0-2]\b", "DH8D"),  # Dash 8-400
-    (r"^ATR 72-212 ?A\b", "AT76"),
+    (r"^DHC-8-1\d\d\b", "DH8A"),
+    (r"^DHC-8-2\d\d\b", "DH8B"),
+    (r"^DHC-8-3\d\d\b", "DH8C"),
+    # The ATR 72-500 (AT75) and 72-600 (AT76) are both model 72-212A: only a model that also
+    # names its version says which
+    (r"^ATR 72-212 ?A\b.*\b600\b", "AT76"),
+    (r"^ATR 72-212 ?A\b.*\b500\b", "AT75"),
+    (r"^ATR 72-212 ?A\b", None),
+    (r"^A319-1\d\dN$", "A19N"),
     (r"^A319-1\d\d$", "A319"),
     (r"^A320-2\d\dN$", "A20N"),
     (r"^A320-2\d\d$", "A320"),
     (r"^A321-2\d\dNX?$", "A21N"),
+    (r"^A321-[12]\d\d$", "A321"),
 ]
+AMBIGUOUS = {r"^ATR 72-212 ?A\b": "model 72-212A is both the ATR 72-500 (AT75) and the 72-600 (AT76), so no type"}
+
+
+def model_match(model):
+    """(designator or None, pattern) of the first MODEL_TYPES entry a model matches, or (None, None)."""
+    model = re.sub(r"\s+", " ", (model or "").strip().upper())
+    return next(((code, pattern) for pattern, code in MODEL_TYPES if re.search(pattern, model)), (None, None))
 
 
 def icao_type(model):
     """The ICAO type designator MODEL_TYPES gives a model, or ""."""
-    model = re.sub(r"\s+", " ", (model or "").strip().upper())
-    return next((code for pattern, code in MODEL_TYPES if re.search(pattern, model)), "")
+    return model_match(model)[0] or ""
 
 
 def file_entry(reg, mark, model, register, ref, note, **more):
-    """An entry from a downloaded register's row: the fleet table's columns."""
-    code = icao_type(model)
-    return {"registration": reg, "mark": mark, "status": "registered", "icao_type": code, "model": model,
+    """An entry from a downloaded register's row: the fleet table's columns. ref: the file's URL."""
+    code, pattern = model_match(model)
+    if not code:
+        note += "; " + AMBIGUOUS.get(pattern, "model not in registers.MODEL_TYPES, so no type")
+    return {"registration": reg, "mark": mark, "status": "registered", "icao_type": code or "", "model": model,
             "marketing_name": "", "manufacturer": "", "serial_number": "", "year_built": "", "icao24": "",
             "engines": "", "mtow_kg": None, "noise_standard": "", "approach_epndb": None, "lateral_epndb": None,
             "flyover_epndb": None, "register": register, "register_ref": ref, "checked_utc": today(),
-            "note": note if code else f"{note}; model not in registers.MODEL_TYPES, so no type", **more}
+            "note": note, **more}
 
 
-def downloaded(reg, http, code, read):
-    """reg's entry in a downloaded register, or None. read(http) -> {registration: entry}, called
-    once a run per register (Http.files)."""
+def downloaded(reg, http, code, read, now=None):
+    """reg's entry in a downloaded register, or None. read(http) -> (the file's date, YYYY-MM-DD;
+    {registration: entry}), called once a run per register (Http.files). A file more than
+    STALE_DAYS old (now: today, YYYY-MM-DD) is reported once in Http.notes."""
     files = getattr(http, "files", None)
     if files is None:
         files = http.files = {}
@@ -255,9 +282,31 @@ def downloaded(reg, http, code, read):
             files[code] = read(http)
         except LookupFailed as error:
             files[code] = error  # So the rest of the run doesn't download it again
+        else:
+            age = days_between(files[code][0], now or today())
+            if age is not None and age > STALE_DAYS:
+                notes = getattr(http, "notes", None)
+                if notes is None:
+                    notes = http.notes = []
+                notes.append(f"{code} register's newest file is from {files[code][0]}, {age} days ago: an aircraft "
+                             f"registered since then shows as not found, so recheck when a newer file comes out")
     if isinstance(files[code], LookupFailed):
         raise files[code]
-    return files[code].get(reg)
+    return files[code][1].get(reg)
+
+
+def file_date(http, code):
+    """The date of the file a downloaded register's lookups used this run, or None."""
+    got = (getattr(http, "files", None) or {}).get(code)
+    return got[0] if isinstance(got, tuple) else None
+
+
+def days_between(start, end):
+    """Days from one YYYY-MM-DD date to another, or None if either isn't one."""
+    try:
+        return (dt.date.fromisoformat(end[:10]) - dt.date.fromisoformat(start[:10])).days
+    except (TypeError, ValueError):
+        return None
 
 
 # Ireland: the IAA's "All registered aircraft" Excel file, issued each month at
@@ -280,9 +329,10 @@ def iaa_newest(http):
             if url and issued and "all-registered" in url.group(1):
                 title = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", row)).strip()
                 day, month, year = issued.groups()
-                if url.group(1) not in files:
+                link = html.unescape(url.group(1))
+                if link not in files:
                     found += 1
-                files[html.unescape(url.group(1))] = (f"{year}-{month}-{day}", title)
+                files[link] = (f"{year}-{month}-{day}", title)
         if not found and page:
             break  # Past the last page
     if not files:
@@ -291,16 +341,36 @@ def iaa_newest(http):
     return issued, title, url
 
 
+XLSX_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+XLSX_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
+
+def first_sheet(z):
+    """The path in an Excel file of its first sheet, as the workbook orders them (sheet1.xml
+    needn't be the first). sheet1.xml if the workbook doesn't say."""
+    names = z.namelist()
+    if "xl/workbook.xml" not in names or "xl/_rels/workbook.xml.rels" not in names:
+        return "xl/worksheets/sheet1.xml"
+    sheet = ET.fromstring(z.read("xl/workbook.xml")).find(f"{XLSX_NS}sheets/{XLSX_NS}sheet")
+    if sheet is None:
+        return "xl/worksheets/sheet1.xml"
+    for rel in ET.fromstring(z.read("xl/_rels/workbook.xml.rels")):
+        if rel.get("Id") == sheet.get(XLSX_REL):
+            target = rel.get("Target") or ""
+            return target.lstrip("/") if target.startswith("/") else "xl/" + target
+    return "xl/worksheets/sheet1.xml"
+
+
 def xlsx_rows(data):
     """The first sheet of an Excel file, as lists of cell text, by column. Standard library only."""
-    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    ns = XLSX_NS
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
         shared = []
         if "xl/sharedStrings.xml" in z.namelist():
             shared = ["".join(t.text or "" for t in si.iter(f"{ns}t"))
                       for si in ET.fromstring(z.read("xl/sharedStrings.xml")).findall(f"{ns}si")]
-        sheet = ET.fromstring(z.read("xl/worksheets/sheet1.xml"))
+        sheet = ET.fromstring(z.read(first_sheet(z)))
     except (zipfile.BadZipFile, KeyError, ET.ParseError) as error:
         raise LookupFailed(f"not a readable Excel file: {error}") from None
     rows = []
@@ -321,7 +391,7 @@ def xlsx_rows(data):
     return rows
 
 
-def iaa_entries(rows, as_at):
+def iaa_entries(rows, as_at, url=""):
     """{registration: entry} from the IAA file's rows. Its header row starts "Registration Mark"."""
     header = next((i for i, r in enumerate(rows) if r and r[0].lower().startswith("registration mark")), None)
     if header is None:
@@ -342,7 +412,7 @@ def iaa_entries(rows, as_at):
         count, engine = col(row, "no. of engines"), " ".join(filter(None, [col(row, "engine manufacturer"), col(row, "engine model")]))
         reg = registration(mark)
         out[reg] = file_entry(
-            reg, mark.upper(), col(row, "aircraft model"), "ie", as_at, f"IAA register as at {as_at}",
+            reg, mark.upper(), col(row, "aircraft model"), "ie", url, f"IAA register as at {as_at}",
             manufacturer=col(row, "aircraft producer"), serial_number=col(row, "aircraft serial"),
             year_built=col(row, "year of manufacture"), mtow_kg=kg(col(row, "mtow")),
             engines=f"{count} x {engine}" if count and engine else engine)
@@ -352,7 +422,7 @@ def iaa_entries(rows, as_at):
 def read_ireland(http):
     issued, title, url = iaa_newest(http)
     as_at = re.search(r"\d{1,2} \w+ \d{4}", title)
-    return iaa_entries(xlsx_rows(http.bytes(url)), as_at.group(0) if as_at else issued)
+    return issued, iaa_entries(xlsx_rows(http.bytes(url)), as_at.group(0) if as_at else issued, url)
 
 
 def ireland(reg, http):
@@ -363,6 +433,8 @@ def ireland(reg, http):
 # data.public.lu's dataset, whose API lists its files.
 
 LU_DATASET = "https://data.public.lu/api/1/datasets/releve-luxembourgeois-des-immatriculations/"
+# Each page's date and number ("Thursday, October 15, 2026      Page 1 sur 21"), never part of a row
+LU_PAGE_LINE = re.compile(r"\bPage \d+ sur \d+\s*$")
 
 
 def lu_newest(http):
@@ -389,10 +461,10 @@ def pdf_text(data):
     return done.stdout.decode("utf-8", "replace")
 
 
-def lu_entries(text, as_at):
+def lu_entries(text, as_at, url=""):
     """{registration: entry} from the relevé's text. Its columns are where each page's header row
     (Immat, Constructeur, Type d'aéronef, SN aéronef, Propriétaire) puts them; a model too long for
-    its column carries on in the lines below, until a blank line."""
+    its column carries on in the lines below, until a blank line or a page's date line."""
     out = {}
     for page in text.split("\f"):
         lines = page.splitlines()
@@ -405,7 +477,7 @@ def lu_entries(text, as_at):
             raise LookupFailed(f"a page of Luxembourg's register has an unexpected header: {head!r}")
         current = None
         for line in lines:
-            if not line.strip():
+            if not line.strip() or LU_PAGE_LINE.search(line):
                 current = None
                 continue
             if re.match(r"LX-[A-Z0-9]+\b", line):
@@ -417,14 +489,14 @@ def lu_entries(text, as_at):
                 more = line[at["model"]:at["serial"]].strip()
                 if more:
                     current["model"] += " " + more
-    return {reg: file_entry(reg, r["mark"], r["model"], "lu", as_at, f"DAC relevé of {as_at}",
+    return {reg: file_entry(reg, r["mark"], r["model"], "lu", url, f"DAC relevé of {as_at}",
                             manufacturer=r["maker"], serial_number=r["serial"][0] if r["serial"] else "")
             for reg, r in out.items()}
 
 
 def read_luxembourg(http):
     issued, url = lu_newest(http)
-    return lu_entries(pdf_text(http.bytes(url)), issued)
+    return issued, lu_entries(pdf_text(http.bytes(url)), issued, url)
 
 
 def luxembourg(reg, http):

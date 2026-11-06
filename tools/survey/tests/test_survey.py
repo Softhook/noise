@@ -909,6 +909,43 @@ class Fleet(unittest.TestCase):
         self.assertEqual(fleet.to_check(regs, entries), (["GLCYO", "HBAZH"], ["PHEZF"]))
         self.assertEqual(fleet.to_check(regs, entries, recheck=True), (["GLCYN", "GLCYO", "HBAZH"], ["PHEZF"]))
 
+    def test_a_miss_is_asked_about_again_once_its_old(self):
+        entries = {"GLCYQ": {"registration": "GLCYQ", "register": "uk", "status": fleet.NOT_FOUND, "checked_utc": "2026-10-01"},
+                   "GLCYR": {"registration": "GLCYR", "register": "uk", "status": fleet.NOT_FOUND, "checked_utc": "2026-11-01"},
+                   "GLCYN": {"registration": "GLCYN", "register": "uk", "status": "registered", "checked_utc": "2020-01-01"}}
+        self.assertEqual(fleet.to_check(list(entries), entries, now="2026-11-06"), (["GLCYQ"], []))
+
+    def test_a_recheck_keeps_an_aircraft_that_has_left_the_register(self):
+        entries = {"GLCYN": registers.look_up("GLCYN", FakeRegister(GINFO))}
+        fleet.check(["GLCYN"], entries, FakeRegister({"search": []}), log=io.StringIO())
+        e = entries["GLCYN"]
+        self.assertEqual((e["status"], e["icao_type"], e["register"]), (fleet.LEFT, "E190", "uk"))
+        self.assertIn("rechecked", e["note"])
+        self.assertEqual(fleet.known_type(e), "E190")  # Its passes keep the register's type
+
+    def test_a_mark_now_on_another_airframe_keeps_the_earlier_entry(self):
+        old = registers.look_up("HBAZH", FakeRegister(BAZL))
+        entries, log = {"HBAZH": dict(old)}, io.StringIO()
+        newer = json.loads(json.dumps(BAZL))
+        for answer in newer.values():
+            if isinstance(answer, dict) and "details" in answer:
+                answer["icaoCode"], answer["details"]["serialNumber"] = "E295", "19020999"
+        fleet.check(["HBAZH"], entries, FakeRegister(newer), log=log)
+        e = entries["HBAZH"]
+        self.assertEqual((e["icao_type"], e["serial_number"]), ("E290", old["serial_number"]))
+        self.assertIn("19020999", e["note"])
+        self.assertIn("another airframe", log.getvalue())
+        # The same airframe again is simply updated
+        fleet.check(["HBAZH"], entries, FakeRegister(BAZL), log=io.StringIO())
+        self.assertEqual(entries["HBAZH"]["note"], "")
+
+    def test_entries_with_no_type_are_listed(self):
+        entries = {"EIABS": {"status": "registered", "register": "ie", "icao_type": ""},
+                   "EIHLA": {"status": "registered", "register": "ie", "icao_type": "BCS1"},
+                   "GLCYQ": {"status": fleet.NOT_FOUND, "register": "uk", "icao_type": ""},
+                   "PHEZE": {"status": "", "register": fleet.MANUAL, "icao_type": ""}}
+        self.assertEqual(fleet.untyped(entries), ["EIABS"])
+
     def test_checking_keeps_answers_misses_and_what_it_had_when_a_register_fails(self):
         old = {"registration": "HBAZH", "icao_type": "E290", "register": "ch"}
         entries = {"HBAZH": dict(old)}
@@ -981,9 +1018,40 @@ class DownloadedRegisters(unittest.TestCase):
     def test_models_map_to_icao_types(self):
         for model, code in [("BD-500-1A10", "BCS1"), ("BD-500-1A11", "BCS3"), ("ERJ 190-100 LR", "E190"),
                             ("ERJ 190-300", "E290"), ("ERJ 190-400", "E295"), ("DHC-8-402", "DH8D"),
-                            ("ATR 72-212 A", "AT76"), ("A320-251N", "A20N"), ("A320-214", "A320"),
-                            ("A321-271NX", "A21N"), ("BD-700-1A10 GLOBAL EXPRESS XRS", "")]:
+                            ("A320-251N", "A20N"), ("A320-214", "A320"), ("A321-271NX", "A21N"), ("A321-231", "A321"),
+                            ("A319-151N", "A19N"), ("A319-111", "A319"), ("DHC-8-311", "DH8C"), ("DHC-8-102", "DH8A"),
+                            ("ATR 72-212 A (600)", "AT76"), ("ATR 72-212A 500", "AT75"),
+                            ("BD-700-1A10 GLOBAL EXPRESS XRS", "")]:
             self.assertEqual(registers.icao_type(model), code, model)
+
+    def test_a_model_shared_by_two_types_gives_none_and_says_why(self):
+        # The ATR 72-500 and 72-600 are both model 72-212A
+        self.assertEqual(registers.icao_type("ATR 72-212 A"), "")
+        e = registers.file_entry("EIFAV", "EI-FAV", "ATR 72-212A", "ie", "", "IAA register as at 30 September 2025")
+        self.assertEqual(e["icao_type"], "")
+        self.assertIn("AT75", e["note"])
+        self.assertNotIn("not in registers.MODEL_TYPES", e["note"])
+
+    def test_a_mass_is_read_from_a_number_or_text(self):
+        self.assertEqual([registers.kg(v) for v in (45990, 45990.0, "45,990 kg", "", None)], [45990, 45990, 45990, None, None])
+
+    def test_the_first_sheet_is_the_workbooks_first_not_sheet1(self):
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        rel = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("xl/workbook.xml", f'<workbook {ns} {rel}><sheets><sheet name="Register" sheetId="2" r:id="rId7"/>'
+                                          f'<sheet name="Cover" sheetId="1" r:id="rId1"/></sheets></workbook>')
+            z.writestr("xl/_rels/workbook.xml.rels",
+                       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                       '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>'
+                       '<Relationship Id="rId7" Target="/xl/worksheets/sheet2.xml"/></Relationships>')
+            z.writestr("xl/worksheets/sheet1.xml", f'<worksheet {ns}><sheetData><row r="1"><c r="A1" t="inlineStr">'
+                                                   f'<is><t>Cover</t></is></c></row></sheetData></worksheet>')
+            z.writestr("xl/worksheets/sheet2.xml", f'<worksheet {ns}><sheetData><row r="1"><c r="B1" t="inlineStr">'
+                                                   f'<is><t>Registration Mark</t></is></c></row></sheetData></worksheet>')
+        self.assertEqual(registers.xlsx_rows(out.getvalue()), [["", "Registration Mark"]])
+        self.assertEqual(registers.xlsx_rows(xlsx([["A"]])), [["A"]])  # No workbook.xml: sheet1.xml
 
     def test_the_irish_file_is_read_without_owners(self):
         rows = registers.xlsx_rows(xlsx([
@@ -993,8 +1061,9 @@ class DownloadedRegisters(unittest.TestCase):
             ["EJ-ADMI", "GULFSTREAM", "GULFSTREAM GVI", "LAND AEROPLANE", "", "", "", "", "", "", "", "PRIVATE INDIVIDUAL", "CORK"],
             ["EI-ABS", "BOEING", "B75N1", "", "", "1338", "", "75-2634", "", "", "1", "PRIVATE INDIVIDUAL", "DUBLIN"],
             ["Total", "3"]]))
-        got = registers.iaa_entries(rows, "30 September 2025")
+        got = registers.iaa_entries(rows, "30 September 2025", "https://www.iaa.ie/x.xlsx")
         self.assertEqual(sorted(got), ["EIABS", "EIHLA", "EJADMI"])
+        self.assertEqual(got["EIHLA"]["register_ref"], "https://www.iaa.ie/x.xlsx")  # The file, not its date
         e = got["EIHLA"]
         self.assertEqual((e["mark"], e["icao_type"], e["model"], e["mtow_kg"], e["engines"], e["register"]),
                          ("EI-HLA", "BCS1", "BD-500-1A10", 54885, "2 x PRATT & WHITNEY PW1521G", "ie"))
@@ -1022,16 +1091,23 @@ class DownloadedRegisters(unittest.TestCase):
         self.assertNotIn("SOLEIL", json.dumps(got))
         self.assertNotIn("LUXAIR", json.dumps(got))
 
+    def test_a_luxembourg_pages_date_line_isnt_part_of_a_model(self):
+        text = ("Immat        Constructeur            Type d'aéronef   SN aéronef   Propriétaire\n"
+                "LX-LQA       BOMBARDIER INC.         DHC-8-402        4468         ROI SOLEIL S.A.\n"
+                "Thursday, October 15, 2026                  Page 1 sur 21\n")
+        self.assertEqual(registers.lu_entries(text, "2026-10-15")["LXLQA"]["model"], "DHC-8-402")
+
     def test_a_downloaded_register_is_read_once_a_run_even_when_it_fails(self):
         http, calls = registers.Http(pause_s=0), []
 
         def read(h):
             calls.append(1)
-            return {"LXLEC": {"icao_type": "E295"}}
+            return "2026-10-15", {"LXLEC": {"icao_type": "E295"}}
 
-        self.assertEqual(registers.downloaded("LXLEC", http, "lu", read), {"icao_type": "E295"})
-        self.assertIsNone(registers.downloaded("LXLQA", http, "lu", read))
+        self.assertEqual(registers.downloaded("LXLEC", http, "lu", read, now="2026-11-06"), {"icao_type": "E295"})
+        self.assertIsNone(registers.downloaded("LXLQA", http, "lu", read, now="2026-11-06"))
         self.assertEqual(len(calls), 1)
+        self.assertEqual((registers.file_date(http, "lu"), http.notes), ("2026-10-15", []))  # Recent: no note
 
         def fails(h):
             calls.append(1)
@@ -1041,6 +1117,21 @@ class DownloadedRegisters(unittest.TestCase):
             with self.assertRaises(registers.LookupFailed):
                 registers.downloaded(reg, http, "ie", fails)
         self.assertEqual(len(calls), 2)
+
+    def test_an_old_register_file_is_reported_once(self):
+        http = registers.Http(pause_s=0)
+        for reg in ("EIHLA", "EIHLB"):
+            registers.downloaded(reg, http, "ie", lambda h: ("2025-10-01", {}), now="2026-11-06")
+        self.assertEqual(len(http.notes), 1)
+        self.assertIn("2025-10-01, 401 days ago", http.notes[0])
+
+    def test_a_miss_in_an_old_file_says_the_files_date(self):
+        http = registers.Http(pause_s=0)
+        http.files["ie"] = ("2025-10-01", {})
+        entries, log = {}, io.StringIO()
+        fleet.check(["EIHLZ"], entries, http, log=log)
+        self.assertEqual(entries["EIHLZ"]["status"], fleet.NOT_FOUND)
+        self.assertIn("file of 2025-10-01", entries["EIHLZ"]["note"])
 
     def test_irish_and_luxembourg_marks_go_to_their_registers(self):
         self.assertEqual([registers.REGISTERS[registers.nationality(r)][0] for r in ("EIHLA", "EJADMI", "LXLEC")],

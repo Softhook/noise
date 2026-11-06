@@ -1,6 +1,6 @@
 registration,mark,status,icao_type,model,marketing_name,manufacturer,serial_number,year_built,icao24,engines,mtow_kg,noise_standard,approach_epndb,lateral_epndb,flyover_epndb,register,register_ref,checked_utc,note
-EIHLA,EI-HLA,registered,BCS1,BD-500-1A10,,AIRBUS CANADA LIMITED PARTNERSHIP,50068,2023,,2 x PRATT & WHITNEY PW1521G,54885,,,,,ie,30 September 2025,2026-11-06,IAA register as at 30 September 2025
-EIHLB,EI-HLB,registered,BCS1,BD-500-1A10,,AIRBUS CANADA LIMITED PARTNERSHIP,50070,2023,,2 x PRATT & WHITNEY PW1521G,54885,,,,,ie,30 September 2025,2026-11-06,IAA register as at 30 September 2025
+EIHLA,EI-HLA,registered,BCS1,BD-500-1A10,,AIRBUS CANADA LIMITED PARTNERSHIP,50068,2023,,2 x PRATT & WHITNEY PW1521G,54885,,,,,ie,https://www.iaa.ie/docs/default-source/publications/aircraft-registration/all-registered---september---2025---adjusted.xlsx?sfvrsn=cf3fe6_3,2026-11-06,IAA register as at 30 September 2025
+EIHLB,EI-HLB,registered,BCS1,BD-500-1A10,,AIRBUS CANADA LIMITED PARTNERSHIP,50070,2023,,2 x PRATT & WHITNEY PW1521G,54885,,,,,ie,https://www.iaa.ie/docs/default-source/publications/aircraft-registration/all-registered---september---2025---adjusted.xlsx?sfvrsn=cf3fe6_3,2026-11-06,IAA register as at 30 September 2025
 GLCAB,G-LCAB,registered,E190,ERJ 190-100 LR,EMBRAER 190,EMBRAER SA,19000465,2011,407777,2 x GENERAL ELECTRIC CO CF34-10E5A1 G07,45990,"ICAO Annex 16, Chapter 3",92.5,93.0,81.4,uk,70390,2026-11-06,
 GLCAC,G-LCAC,registered,E190,ERJ 190-100 LR,EMBRAER 190,EMBRAER SA,19000513,2012,40799B,2 x GENERAL ELECTRIC CO CF34-10E5A1 G07,45990,"ICAO Annex 16, Chapter 3",92.5,93.0,81.4,uk,71070,2026-11-06,
 GLCAD,G-LCAD,registered,E190,ERJ 190-100 LR,EMBRAER 190,EMBRAER SA,19000535,2012,40799C,2 x GENERAL ELECTRIC CO CF34-10E5A1 G07,45990,"ICAO Annex 16, Chapter 3",92.5,93.0,81.4,uk,71071,2026-11-06,
@@ -30,8 +30,8 @@ HBAZJ,HB-AZJ,registered,E295,ERJ 190-400,E195-E2,YABORÃ INDÚSTRIA AERONÁUTICA
 HBAZK,HB-AZK,registered,E295,ERJ 190-400,E195-E2,YABORÃ INDÚSTRIA AERONÁUTICA S.A.,19020058,2021,,2 x PW1921G,61500,"ICAO Annex 16, Vol. 1, Chapter 14",91.7,86.1,79.6,ch,1334892,2026-11-06,
 HBAZL,HB-AZL,registered,E295,ERJ 190-400,E195-E2,YABORÃ INDÚSTRIA AERONÁUTICA S.A.,19020059,2021,,2 x PW1921G,61500,"ICAO Annex 16, Vol. 1, Chapter 14",91.7,86.1,79.6,ch,1334903,2026-11-06,
 HBJAA,HB-JAA,registered,FA8X,FALCON 7X,Falcon 8X,DASSAULT AVIATION,525,2026,,3 x PW307D,33112,"ICAO Annex 16, Vol. 1, Chapter 4",90.6,88.7,,ch,1378998,2026-11-06,
-LXLEC,LX-LEC,registered,E295,ERJ 190-400,,EMBRAER S.A.,19020218,,,,,,,,,lu,2026-10-15,2026-11-06,DAC relevé of 2026-10-15
-LXLGN,LX-LGN,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4426,,,,,,,,,lu,2026-10-15,2026-11-06,DAC relevé of 2026-10-15
-LXLQA,LX-LQA,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4468,,,,,,,,,lu,2026-10-15,2026-11-06,DAC relevé of 2026-10-15
-LXLQB,LX-LQB,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4512,,,,,,,,,lu,2026-10-15,2026-11-06,DAC relevé of 2026-10-15
-LXLQD,LX-LQD,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4525,,,,,,,,,lu,2026-10-15,2026-11-06,DAC relevé of 2026-10-15
+LXLEC,LX-LEC,registered,E295,ERJ 190-400,,EMBRAER S.A.,19020218,,,,,,,,,lu,https://download.data.public.lu/resources/releve-luxembourgeois-des-immatriculations/20261015-062958/releve-aeronefs-15-10-2026.pdf,2026-11-06,DAC relevé of 2026-10-15
+LXLGN,LX-LGN,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4426,,,,,,,,,lu,https://download.data.public.lu/resources/releve-luxembourgeois-des-immatriculations/20261015-062958/releve-aeronefs-15-10-2026.pdf,2026-11-06,DAC relevé of 2026-10-15
+LXLQA,LX-LQA,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4468,,,,,,,,,lu,https://download.data.public.lu/resources/releve-luxembourgeois-des-immatriculations/20261015-062958/releve-aeronefs-15-10-2026.pdf,2026-11-06,DAC relevé of 2026-10-15
+LXLQB,LX-LQB,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4512,,,,,,,,,lu,https://download.data.public.lu/resources/releve-luxembourgeois-des-immatriculations/20261015-062958/releve-aeronefs-15-10-2026.pdf,2026-11-06,DAC relevé of 2026-10-15
+LXLQD,LX-LQD,registered,DH8D,DHC-8-402,,BOMBARDIER INC.,4525,,,,,,,,,lu,https://download.data.public.lu/resources/releve-luxembourgeois-des-immatriculations/20261015-062958/releve-aeronefs-15-10-2026.pdf,2026-11-06,DAC relevé of 2026-10-15
