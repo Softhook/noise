@@ -108,3 +108,31 @@ An event is listed in one or two chunks around its time (the one where it starts
 WebTrak data is provided for personal and non-commercial community engagement. This tool sets an honest user-agent header, asks for compressed replies and stores data locally.
 
 There is no published rate limit, and the server sends no rate-limit headers, but it serves WebTrak for many airports. Following live (one chunk every 30 s) is what an open browser tab does. A historical fetch is much heavier: a day is 2,880 requests (about 4½ hours at the default 2 s, as WebTrak takes about 3.5 s to answer each) and a month about 86,000. For long periods, fetch only what lines up with the garden measurements, run it overnight UK time, and consider asking London City Airport for the NMT6 data directly.
+
+### What the server sees
+
+Every request is built in `Client._request` (`webtrak/client.py`) and sends:
+
+| Header | Value |
+|---|---|
+| `User-Agent` | `thamesmead-noise-survey/0.1 (personal, non-commercial noise research)`: the project and its purpose, but no name, email or URL |
+| `Referer` | `https://eu.webtrak.aero/lcy` (the site being looked at) |
+| `Accept-Encoding` | `gzip` |
+
+`urllib` adds `Host` and `Connection: close` itself, and `Content-Type` on POSTs. There are no cookies, sessions, tokens or account details, so requests are anonymous and not linked to each other. Beyond the headers, the server sees:
+
+- **The IP address.** This is the real identifier: it's tied to the ISP and roughly to a location.
+- **That it's a script.** Python's TLS handshake and a fresh connection for every request look nothing like a browser.
+- **The pattern.** `.mobile` chunks in time order, at steady 1–2 s intervals, for hours at a time.
+
+So WebTrak can tell this is an automated research tool from one IP, but nothing ties it to a person unless they trace the IP. If we're happy to be contacted, a contact address can go in the user-agent (`USER_AGENT` in `client.py`), e.g. `thamesmead-noise-survey/0.1 (+mailto:…; non-commercial noise research)`, which is the usual courtesy for research scrapers.
+
+### Why we don't disguise it as a browser
+
+We considered making the scraper look like a person using a browser (a browser user-agent, random timing) and decided against it:
+
+- **It would only hide the scraper.** The point of a browser disguise is to stop Envirosuite seeing automated traffic. That would also stop them throttling it, which they may reasonably want to do.
+- **It wouldn't work.** A day of history is 2,880 requests and a month about 86,000, far more than any person sends. The TLS handshake gives Python away anyway.
+- **It's riskier for the project.** If they object to an honest scraper, they can block it or get in touch. A disguised one looks like evasion, which matters if we later want London City Airport's cooperation.
+
+If requests start failing (403s, 429s, blocks), the fix is slower `--delay`, shorter fetch periods or overnight runs, not camouflage. A small random jitter on the delay, keeping the honest user-agent, would be fine if we want requests to arrive less regularly.
