@@ -127,6 +127,19 @@ class Geometry(unittest.TestCase):
         after = [p for p in westbound(T0) if p[0] > T0 + 20]  # The track starts after passing NMT6
         self.assertTrue(closest_approach(after, frame)[4])
 
+    def test_a_hole_in_a_track_isnt_interpolated_across(self):
+        # The source lost the aircraft for 60 s around NMT6: a line across the hole would put the
+        # closest approach abeam, 210 m away, though no position was ever there
+        frame = Frame(*NMT6)
+        holed = [p for p in westbound(T0) if abs(p[0] - T0) > 30]
+        t, ground, _, _, edge = closest_approach(holed, frame)
+        self.assertGreater(ground, 2000)
+        self.assertTrue(edge)  # At the hole's edge, so it may have come closer
+        # A short gap is still interpolated
+        t, ground, _, _, edge = closest_approach([p for p in westbound(T0) if abs(p[0] - T0) > 10], frame)
+        self.assertAlmostEqual(ground, 210, delta=2)
+        self.assertFalse(edge)
+
 
 class Manifests(unittest.TestCase):
     def setUp(self):
@@ -194,7 +207,7 @@ class Adapters(unittest.TestCase):
         adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0))])
         warnings = []
         got = adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 + 3600), warnings)
-        flights, positions, coverage = got["flights"], got["positions"], got["coverage"]
+        flights, positions, coverage = got["flights"], list(got["positions"]), got["coverage"]
         self.assertEqual(len(flights), 1)
         f = flights[0]
         self.assertEqual((f["registration"], f["direction"], f["hex"], f["callsign_kind"]), ("GLCYN", "A", "4006a1", "icao"))
@@ -208,7 +221,7 @@ class Adapters(unittest.TestCase):
         folder = os.path.join(self.dir, "results")
         # A slow 40-minute flight, for one that starts well before the window ends and passes NMT6 well after
         adsb_results(folder, [("4006a1", "G-LCYN", "CFE1", "E190", westbound(T0, span_s=1200, speed=5))])
-        positions = adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 - 900), [])["positions"]
+        positions = list(adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 - 900), [])["positions"])
         self.assertEqual(len(positions), 2401)
         pts = [(p["t"], p["lat"], p["lon"], p["height_m"]) for p in positions]
         self.assertFalse(closest_approach(pts, Frame(*NMT6))[4])  # Not cut short at the window's end
@@ -249,7 +262,8 @@ class Adapters(unittest.TestCase):
         with open(os.path.join(folder, "flights.csv"), "a") as f:
             f.write(f"2,4006a2,,,,other,{iso(T0)},{iso(T0 + 60)},geometric\n")
         warnings = []
-        adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 + 3600), warnings)
+        got = adsb.read("opensky", {"results": folder}, window(T0 - 3600, T0 + 3600), warnings)
+        list(got["positions"])  # The warning comes once the positions have been read
         self.assertIn("--all-positions", warnings[0])
 
     def test_a_converted_sources_period_is_its_coverage(self):
@@ -286,11 +300,9 @@ def flight(source, sid, reg, first, last):
 
 class Linking(unittest.TestCase):
     def tracks_and_approaches(self, flights, points):
-        tracks = {(f["source"], f["source_id"]): [{"t": t, "lat": la, "lon": lo, "height_m": h} for t, la, lo, h in pts]
-                  for f, pts in zip(flights, points)}
+        tracks = {(f["source"], f["source_id"]): list(pts) for f, pts in zip(flights, points)}
         frame = Frame(*NMT6)
-        approaches = {(*k, "nmt6"): closest_approach([(p["t"], p["lat"], p["lon"], p["height_m"]) for p in v], frame)
-                      for k, v in tracks.items()}
+        approaches = {(*k, "nmt6"): closest_approach(v, frame) for k, v in tracks.items()}
         return tracks, approaches
 
     def passes(self, flights, points):
@@ -321,6 +333,20 @@ class Linking(unittest.TestCase):
         # Too far apart in space, or in time, they don't
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0, north_m=1500)])), 2)
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0 + 50)])), 2)
+
+    def test_tracks_link_without_a_registration_far_from_the_receptor(self):
+        # 12 km north of NMT6, so their closest approaches to it say little; the tracks still agree
+        fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("webtrak", "b", "", T0 - 60, T0 + 60)]
+        self.assertEqual(len(self.passes(fs, [westbound(T0, north_m=12000), westbound(T0 + 2, north_m=12100)])), 1)
+        # But not one far below the other
+        self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0, height_at_abeam=900)])), 2)
+
+    def test_a_registration_with_too_few_positions_together_isnt_checked(self):
+        # The tracks overlap by only two seconds: too little to say they agree
+        fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0), flight("webtrak", "b", "GLCYN", T0 - 1, T0 + 60)]
+        track = westbound(T0)
+        groups = self.passes(fs, [[p for p in track if p[0] <= T0], [p for p in track if p[0] >= T0 - 1]])
+        self.assertEqual(list(groups.values()), [[("opensky", link.UNCHECKED), ("webtrak", link.UNCHECKED)]])
 
     def test_the_same_registration_on_two_different_tracks_doesnt_link(self):
         fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("webtrak", "b", "GLCYN", T0 - 60, T0 + 60)]
@@ -403,6 +429,14 @@ class Explain(unittest.TestCase):
         # Data for only the last 10 s of the pass isn't enough to have seen it
         self.assertEqual(explain.why_unseen(pts, self.limits(), [(T0 + 50, T0 + 600)]), explain.NO_DATA)
 
+    def test_coverage_runs_are_merged(self):
+        cov = explain.Coverage([(T0 + 100, T0 + 200), (T0, T0 + 50), (T0 + 40, T0 + 60)])
+        self.assertEqual((cov.starts, cov.ends), ([T0, T0 + 100], [T0 + 60, T0 + 200]))
+        self.assertIn(T0 + 55, cov)
+        self.assertNotIn(T0 + 80, cov)
+        self.assertNotIn(T0 - 1, cov)
+        self.assertIn(T0 + 200, cov)
+
     def test_outside_its_area(self):
         far = [(t, lat + 0.2, lon, h) for t, lat, lon, h in westbound(T0)]  # About 22 km north
         self.assertEqual(explain.why_unseen(far, self.limits(), [(T0 - 600, T0 + 600)]), explain.OUTSIDE)
@@ -484,7 +518,10 @@ class BuildAndServe(unittest.TestCase):
         build.build(m, log=io.StringIO())
         self.assertFalse(os.path.exists(os.path.join(out, "common", "stale.csv")))
         self.assertEqual(sorted(os.listdir(out)), ["build.json", "common"])  # Nothing temporary left
-        self.assertEqual(sorted(os.listdir(os.path.join(out, "common"))), sorted(f"{n}.csv" for n in schema.TABLES))
+        self.assertEqual(sorted(os.listdir(os.path.join(out, "common"))),
+                         sorted(n if n in schema.PARTITIONED else f"{n}.csv" for n in schema.TABLES))
+        # The daily tables have a file per day
+        self.assertEqual(schema.table_days(os.path.join(out, "common"), "positions"), ["2026-11-05"])
         positions = schema.read_table(os.path.join(out, "common"), "positions")
         keys = [(p["source"], p["source_id"], float(p["t"])) for p in positions]
         self.assertEqual(keys, sorted(keys))
@@ -592,6 +629,25 @@ class BuildAndServe(unittest.TestCase):
         with self.assertRaises(BadRequest):
             app.deployment("nope")
 
+    def test_a_flight_across_midnight_has_its_whole_track_on_the_next_day(self):
+        midnight = parse_time("2026-11-06T00:00:00Z")
+        adsb_results(os.path.join(self.dir, "results"), [("4006a3", "G-LCYP", "CFE3", "E190", westbound(midnight + 30))])
+        path = os.path.join(self.deployments, "2026-11-05.json")
+        with open(path) as f:
+            spec = json.load(f)
+        spec["window_utc"] = ["2026-11-05T00:00:00Z", "2026-11-07T00:00:00Z"]
+        with open(path, "w") as f:
+            json.dump(spec, f)
+        app = App(self.deployments)
+        app.rebuild({"deployment": "2026-11-05"})
+        common = os.path.join(self.dir, "out", "2026-11-05", "common")
+        self.assertEqual(schema.table_days(common, "positions"), ["2026-11-05"])  # Filed by the day it started
+        day = app.day({"deployment": "2026-11-05", "day": "2026-11-06"})
+        [track] = day["tracks"].values()
+        self.assertEqual(len(track), 61)  # Every 2 s, from 23:59:30 to 00:01:30
+        self.assertLess(track[0][0], midnight)
+        self.assertEqual(day["flights"][0]["height_kind"], "geometric")
+
     def test_the_app_reads_a_changed_manifest_again(self):
         app = App(self.deployments)
         path = os.path.join(self.deployments, "2026-11-05.json")
@@ -671,14 +727,16 @@ class Page(unittest.TestCase):
             return {"pass_id": pass_id, "source": "opensky", "first_utc": iso(t - 60),
                     "approaches": {"nmt6": {"t": iso(t), "ground_m": ground, "height_m": 300}}}
 
-        def e(t, db, receptor="nmt6"):
-            return {"receptor": receptor, "lmax_utc": iso(t), "lmax_db": str(db)}
+        def e(t, db, receptor="nmt6", source="webtrak"):
+            return {"source": source, "receptor": receptor, "lmax_utc": iso(t), "lmax_db": str(db)}
 
         data = {"flights": [f("far", T0, 2000), f("near", T0 + 10, 150), f("alone", T0 + 600, 900), f("quiet", T0 + 1200, 500)],
-                "events": [e(T0 + 15, 75), e(T0 + 30, 70), e(T0 + 610, 68), e(T0 + 650, 80), e(T0 + 1200, 90, "garden")]}
-        got = self.run_page(data)["events"]
+                "events": [e(T0 + 15, 75), e(T0 + 30, 70), e(T0 + 610, 68), e(T0 + 650, 80), e(T0 + 1200, 90, "garden"),
+                           e(T0 + 1201, 85, source="fusion")]}
+        got = self.run_page(data, sources=["webtrak", "opensky"])["events"]
         # Both events near T0 go to "near", which came 150 m from NMT6, not to "far" as well; "alone"
-        # gets the one 10 s after it but not the one 50 s after; nothing at another receptor counts
+        # gets the one 10 s after it but not the one 50 s after; nothing at another receptor counts,
+        # nor an event from a source that's switched off
         self.assertEqual(got, {"near": "75", "alone": "68"})
 
     def test_sources_are_listed_in_the_servers_order(self):

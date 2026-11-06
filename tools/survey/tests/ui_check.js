@@ -3,7 +3,8 @@
 // The scripts are run together, in the order index.html loads them.
 // The page's DOM calls go to do-nothing stand-ins, and its first fetch fails, so it stops before
 // drawing anything. case.json gives a day's data ({data, receptor, sources}); this prints which
-// event each pass was given, and the sources in the page's order.
+// event each pass was given, and the sources in the page's order. case.json's sources are also
+// the ones switched on.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -38,6 +39,7 @@ const ui = context.__ui;
 
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 ui.state.data = input.data;
+ui.state.sources = new Set(input.sources);  // The sources switched on
 const owner = ui.assignEvents(input.receptor);
 process.stdout.write(JSON.stringify({
   events: Object.fromEntries([...owner].map(([pass, e]) => [pass, e.lmax_db])),

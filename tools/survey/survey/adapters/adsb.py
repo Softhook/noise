@@ -26,6 +26,7 @@ from ..common import iso, number, parse_time, registration, stamp
 PATHS = ("results", "logs")
 
 KNOTS_TO_MS = 0.514444
+HEIGHT_KINDS = ("geometric", "qnh")  # adsb analyse's height_source, as the positions table keeps it
 DIRECTIONS = {"rwy27_arrival": "A", "rwy09_departure": "D"}
 PERIOD = re.compile(r"^Period: (\S+) to (\S+)")
 SITE = re.compile(r"^Site: .*\(([-\d.]+), ([-\d.]+)\)$")
@@ -173,7 +174,8 @@ def limits(spec, context):
 
 
 def read(name, spec, context, warnings):
-    """Flights overlapping the window, with their whole tracks, and the source's coverage."""
+    """Flights overlapping the window, with their whole tracks, and the source's coverage.
+    Positions come as a generator, read from positions.csv as the build takes them."""
     start, end = context.start, context.end
     results = spec["results"]
     flights, by_id, kinds = [], {}, {}
@@ -183,7 +185,8 @@ def read(name, spec, context, warnings):
             continue
         source_id = f"{row['hex']}-{stamp(first)}"  # Stable across reruns of adsb analyse, unlike its flight_id
         by_id[row["flight_id"]] = source_id
-        kinds[source_id] = row.get("height_source") or ""
+        kind = row.get("height_source") or ""
+        kinds[source_id] = kind if kind in HEIGHT_KINDS else ""  # adsb analyse's "none": no height
         callsign = (row.get("callsign") or "").strip()
         flights.append({
             "source": name, "source_id": source_id, "first_utc": iso(first), "last_utc": iso(last),
@@ -192,7 +195,13 @@ def read(name, spec, context, warnings):
             "squawk": "", "direction": DIRECTIONS.get(row.get("label"), ""), "origin": "", "destination": "",
             "hex": row["hex"],
         })
-    positions, seen = [], set()
+    return {"flights": flights, "positions": _positions(name, results, by_id, kinds, warnings),
+            "coverage": coverage(name, spec, start, end)}
+
+
+def _positions(name, results, by_id, kinds, warnings):
+    """The positions of the flights in by_id, as rows; then a warning if any flight had none."""
+    seen = set()
     for row in _rows(os.path.join(results, "positions.csv")):
         source_id = by_id.get(row["flight_id"])
         if source_id is None:
@@ -201,13 +210,12 @@ def read(name, spec, context, warnings):
         # approach isn't cut short (and flagged at_track_end) where the window happens to end
         seen.add(row["flight_id"])
         speed = number(row.get("ground_speed_kt"))
-        positions.append({
+        yield {
             "source": name, "source_id": source_id, "t": round(parse_time(row["emission_time_utc"]), 2),
             "lat": float(row["lat"]), "lon": float(row["lon"]), "height_m": number(row.get("height_used_amsl_m")),
             "height_kind": kinds[source_id], "speed_ms": None if speed is None else round(speed * KNOTS_TO_MS, 1),
-        })
+        }
     missing = len(by_id) - len(seen)
     if missing:
         warnings.append(f"{name}: {missing} of {len(by_id)} flights have no positions; "
                         f"run adsb analyse with --all-positions")
-    return {"flights": flights, "positions": positions, "coverage": coverage(name, spec, start, end)}

@@ -2,12 +2,13 @@
 
     python3 -m survey build --manifest ../deployments/2026-11-05.json
 
-Writes data/<deployment>/common/*.csv and build.json (counts, coverage and warnings), which the
+Writes data/<deployment>/common/ (a CSV per table, and a folder of daily CSVs for positions and
+levels) and build.json (counts, coverage and warnings), which the
 survey app reads. The sources' own files are only ever read.
 
 The steps, each a function here, in order:
-    read_sources   each source's adapter -> the source tables, and what each source can see
-    group_tracks   positions -> one time-ordered track per flight
+    read_sources   each source's adapter -> the source tables, a time-ordered track per flight,
+                   and what each source can see
     approaches     each flight's closest approach to each receptor
     link           flights -> passes (link.py)
     unseen         why a source has no flight in a pass (explain.py)
@@ -25,7 +26,7 @@ import shutil
 import sys
 
 from . import adapters, explain, link, manifest, schema
-from .common import iso, rounded
+from .common import day_of, iso, rounded
 from .geometry import Frame, closest_approach
 
 
@@ -57,30 +58,65 @@ def clear_leftovers(m):
 
 
 def read_sources(m, warnings, log):
-    """({table: rows} for schema.SOURCE_TABLES, {source: limits}) from every source in the manifest."""
+    """Every source in the manifest, through its adapter: (tables, tracks, levels, limits).
+
+    tables: {"flights", "noise_events", "coverage": rows}; tracks: {(source, source_id): track},
+    each a time-ordered list of (t, lat, lon, height_m, height_kind, speed_ms); levels: [(source,
+    receptor, t, level_db, flag)]; limits: {source: what it can see}. Positions and levels are
+    turned into tuples as each adapter gives them, so a long deployment's millions of rows are
+    never all held as dicts."""
     context = adapters.context(m)
-    tables = {name: [] for name in schema.SOURCE_TABLES}
-    limits = {}
+    tables = {name: [] for name in ("flights", "noise_events", "coverage")}
+    tracks, levels, limits = {}, [], {}
     for name, spec in m["sources"].items():
         adapter = adapters.ADAPTERS[spec["adapter"]]
         got = adapter.read(name, spec, context, warnings)
-        for table, rows in got.items():
+        counts = {}
+        for table in tables:
+            rows = list(got.get(table, ()))
             tables[table] += rows
+            counts[table] = len(rows)
+        counts["positions"] = 0
+        for p in got.get("positions", ()):
+            tracks.setdefault((p["source"], p["source_id"]), []).append(
+                (p["t"], p["lat"], p["lon"], p["height_m"], p["height_kind"], p["speed_ms"]))
+            counts["positions"] += 1
+        before = len(levels)
+        levels += ((lv["source"], lv["receptor"], lv["t"], lv["level_db"], lv["flag"]) for lv in got.get("levels", ()))
+        counts["levels"] = len(levels) - before
         limits[name] = adapter.limits(spec, context)
-        counts = ", ".join(f"{len(got.get(t, []))} {t.replace('_', ' ')}"
-                           for t in ("flights", "positions", "noise_events", "levels"))
-        print(f"{name}: {counts}", file=log)
-    return tables, limits
-
-
-def group_tracks(positions):
-    """{(source, source_id): [position dicts, time-ordered]}"""
-    tracks = {}
-    for p in positions:
-        tracks.setdefault((p["source"], p["source_id"]), []).append(p)
+        print(f"{name}: " + ", ".join(f"{counts[t]} {t.replace('_', ' ')}"
+                                      for t in ("flights", "positions", "noise_events", "levels")), file=log)
     for points in tracks.values():
-        points.sort(key=lambda p: p["t"])
-    return tracks
+        points.sort(key=lambda p: p[0])
+    levels.sort(key=lambda lv: (lv[2], lv[0], lv[1]))
+    return tables, tracks, levels, limits
+
+
+def position_parts(tracks, flights):
+    """The positions table, as {day: rows}: each track whole, in the file for the day of its
+    flight's first_utc (schema.PARTITIONED), tracks in key order."""
+    first = {(f["source"], f["source_id"]): f["first_utc"][:10] for f in flights}
+    by_day = {}
+    for key in sorted(tracks):
+        by_day.setdefault(first.get(key) or day_of(tracks[key][0][0]), []).append(key)
+
+    def rows(keys):
+        for key in keys:
+            for t, lat, lon, height, kind, speed in tracks[key]:
+                yield {"source": key[0], "source_id": key[1], "t": t, "lat": lat, "lon": lon,
+                       "height_m": height, "height_kind": kind, "speed_ms": speed}
+
+    return {day: rows(keys) for day, keys in by_day.items()}
+
+
+def level_parts(levels):
+    """The levels table, as {day: rows}, by each level's own time."""
+    by_day = {}
+    for source, receptor, t, db, flag in levels:
+        by_day.setdefault(day_of(t), []).append(
+            {"source": source, "receptor": receptor, "t": t, "level_db": db, "flag": flag})
+    return by_day
 
 
 def approaches(tracks, receptors):
@@ -92,7 +128,7 @@ def approaches(tracks, receptors):
         if r["ground_elevation_m"] is not None:
             mic = float(r["ground_elevation_m"]) + float(r["mic_height_m"] or 0)
         for key, points in tracks.items():
-            got = closest_approach([(p["t"], p["lat"], p["lon"], p["height_m"]) for p in points], frame, mic)
+            got = closest_approach(points, frame, mic)
             if got:
                 found[(*key, r["id"])] = got
     return found
@@ -105,10 +141,11 @@ def approach_rows(found):
 
 
 def receptor_rows(receptors):
-    return [{key: r[key] for key in schema.TABLES["receptors"]} for r in receptors.values()]
+    return [{**{key: r[key] for key in schema.TABLES["receptors"]}, "public": "1" if r["public"] else ""}
+            for r in receptors.values()]
 
 
-def summarise(m, tables, warnings):
+def summarise(m, tables, tracks, warnings):
     """build.json: when, what went in, and what came out."""
     linked = {}
     for row in tables["passes"]:
@@ -125,7 +162,7 @@ def summarise(m, tables, warnings):
         "window_utc": [iso(m["start"]), iso(m["end"])],
         "receptors": list(m["receptors"]),
         "sources": {name: {"adapter": spec["adapter"], "flights": count("flights", name),
-                           "positions": count("positions", name)}
+                           "positions": sum(len(pts) for (s, _), pts in tracks.items() if s == name)}
                     for name, spec in m["sources"].items()},
         "passes": len(linked),
         "passes_in_several_sources": sum(1 for s in linked.values() if len(s) > 1),
@@ -144,16 +181,16 @@ def build(m, log=None, wait=True):
 
 def _build(m, log):
     warnings = list(m["warnings"])
-    tables, limits = read_sources(m, warnings, log)
+    tables, tracks, levels, limits = read_sources(m, warnings, log)
 
-    tracks = group_tracks(tables["positions"])
     tables["flights"] = [f for f in tables["flights"] if (f["source"], f["source_id"]) in tracks]
     found = approaches(tracks, m["receptors"])
     passes = link.link(tables["flights"], tracks, found, m["pass_receptor"])
     tables.update({
         "receptors": receptor_rows(m["receptors"]),
-        # In track order, so a reader can take each track's positions as they come
-        "positions": [p for _, points in sorted(tracks.items()) for p in points],
+        # By day, and in track order within a day, so a reader can take each track's positions as they come
+        "positions": position_parts(tracks, tables["flights"]),
+        "levels": level_parts(levels),
         "approaches": approach_rows(found),
         "passes": passes,
         "unseen": explain.unseen_rows(passes, tracks, limits, tables["coverage"]),
@@ -161,7 +198,7 @@ def _build(m, log):
 
     out = os.path.join(m["out_dir"], "common")
     schema.write_tables(out, {name: tables[name] for name in schema.TABLES})
-    summary = summarise(m, tables, warnings)
+    summary = summarise(m, tables, tracks, warnings)
     schema.write_json(os.path.join(m["out_dir"], "build.json"), summary)
     for w in warnings:
         print(f"WARNING: {w}", file=log)

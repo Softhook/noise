@@ -63,7 +63,7 @@ CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`), except the
 | `noise_events` | source, receptor, start, LAmax time, end, LAmax, SEL, Leq, class (`aircraft`, `other` or `unknown`, as the source classed it), later the metric (e.g. LAS or 1 s LAeq) and trigger flags | fusion (garden), webtrak (nmt6), airport (nmt6) |
 | `levels` | source, receptor, t, level, flag | fusion, webtrak |
 | `coverage` | source, start, end, note: when the source has data | each adapter: from `SOURCE.txt`'s period, the logger's health log, or WebTrak's saved chunks |
-| `clock` | source, start, end, synchronised, offset if known | adsb health log, Fusion event log |
+| `clock` (to do) | source, start, end, synchronised, offset if known | adsb health log, Fusion event log |
 
 Normalisation is the adapters' job:
 
@@ -71,6 +71,8 @@ Normalisation is the adapters' job:
 - **Callsign:** kept as given, with its kind. WebTrak gives the IATA form (`BA8721`) and ADS-B the ICAO form (`CFE…`), so callsigns can't be used to join flights unless a table of airline codes is added.
 - **Type:** ICAO type designator (`E190`, `E290`, `BCS1`, `A20N`).
 - **Height:** metres above mean sea level. WebTrak's height above the aerodrome is converted with the aerodrome's elevation, and its kind is recorded as `radar`, because we don't know how WebTrak derives it.
+
+`positions` and `levels` have a row for every second or so, so each is kept as a file per UTC day (`positions/2026-11-05.csv`). A flight's positions all go in the file for the day it started, so its track is never split. A reader can then take one day without reading the whole deployment.
 
 The core computes **closest approach to every receptor** from `positions`, so NMT6 is just another receptor, and an NMT6 event can be matched to an ADS-B track as well as to WebTrak's.
 
@@ -81,9 +83,11 @@ The core computes **closest approach to every receptor** from `positions`, so NM
 `link` groups the flights from different sources that are the same aircraft movement into a **pass**. Evidence, from strongest to weakest:
 
 1. the same registration, with overlapping times, and tracks that agree: where both sources have positions at the same time, their median separation is under 2 km;
-2. tracks that come close in space and time: closest approaches to the pass receptor within 30 s, and the aircraft within 500 m and 200 m in height then.
+2. with no registration to compare, tracks that agree closely: where both have positions at the same time, a median separation under 500 m, and a median height difference under 200 m when both have heights. This doesn't depend on any receptor, so it works as well for a pass far from every receptor, or one whose track is cut off at the edge of a source's area.
 
-The first check means a registration sent by mistake doesn't join two different aircraft. Tracks are only compared where both have positions, never across a hole in one of them, such as where an aircraft left OpenSky's box and came back. Every possible link is found first, then they're made best first: registration links before track links, closer tracks before further ones. A registration link whose tracks couldn't be compared, because the two have no positions at the same times, ranks between them, with the evidence `registration, tracks not compared`. So a flight joins its best match, not the first one found. Each link records its evidence. Squawks aren't used: the ADS-B sources don't carry them here.
+Tracks are only compared at three or more times at which both have positions.
+
+The first check means a registration sent by mistake doesn't join two different aircraft. Tracks are only compared where both have positions, never across a hole in one of them, such as where an aircraft left OpenSky's box and came back. Every possible link is found first, then they're made best first: registration links before track links, closer tracks before further ones. A registration link whose tracks couldn't be compared, because the two have too few positions at the same times, ranks between them, with the evidence `registration, tracks not compared`. So a flight joins its best match, not the first one found. Each link records its evidence. Squawks aren't used: the ADS-B sources don't carry them here.
 
 A pass id is stable across reruns, so notes and overrides keep pointing at the same pass: the UTC time of the closest approach to the pass receptor, to the minute, and the registration, or a source id if there's no registration (e.g. `20261105T0812-GLCYN`). The pass receptor is the manifest's `pass_receptor`, or else its first public receptor. A private one like the garden may be missing on another computer, and the ids must come out the same wherever the build runs. The time and the source id come from the pass's flight in the highest-ranked source: the garden's ADS-B, then adsb.lol, OpenSky, any others, and WebTrak last. So adding or removing WebTrak never changes an id. Adding a higher-ranked source can, so build with every ADS-B source a deployment will have before writing overrides against its passes.
 
@@ -168,35 +172,31 @@ One JSON file per deployment, in `tools/deployments/`, kept in git. It names the
 ```json
 {
   "deployment": "2026-11-phase0",
+  "description": "Phase 0: the garden's logger, OpenSky and WebTrak",
   "window_utc": ["2026-11-20T06:00:00Z", "2026-11-23T22:00:00Z"],
+  "max_km": 15,
+  "pass_receptor": "nmt6",
   "receptors": {
-    "garden": {"lat": 51.5, "lon": 0.1, "ground_elevation_m": 3.0, "mic_height_m": 3.0},
-    "nmt6": {"lat": 51.50535, "lon": 0.11075, "ground_elevation_m": null, "mic_height_m": null}
+    "nmt6": {"name": "NMT6, St Pauls Church, Thamesmead", "label": "NMT6", "lat": 51.50535, "lon": 0.11075,
+             "ground_elevation_m": 3.0, "mic_height_m": 3.0, "public": true},
+    "garden": {"config": "../adsb/site.json", "name": "Garden", "label": "Garden"}
   },
   "sources": {
-    "adsb": {"results": "../adsb/data/phase0"},
-    "webtrak": {
-      "role": "source",
-      "cache": "../webtrak/data/lcy",
-      "windows": [["2026-11-20T06:30:00Z", "2026-11-20T09:30:00Z"]]
-    },
+    "adsb": {"adapter": "adsb", "results": "../adsb/data/phase0/results", "logs": "../adsb/data/phase0/logs"},
+    "opensky": {"adapter": "adsb", "results": "../opensky/data/phase0/results", "logs": "../opensky/data/phase0/adsb"},
+    "webtrak": {"adapter": "webtrak", "tool": "../webtrak", "site_dir": "../webtrak/data/lcy", "monitors": {"nmt6": "106"}},
     "fusion": null,
     "airport": null
-  },
-  "lookups": {
-    "airport": {"mode": "off"},
-    "webtrak": {"mode": "cache-only", "max_requests": 0}
   }
 }
 ```
 
-WebTrak's `role` is one of:
+- `adapter` names the source's adapter (`survey/adapters/`), and the rest of its entry is that adapter's. Paths are relative to the manifest, and a source set to `null` is turned off.
+- A private receptor (the garden) gives `config`, the git-ignored `site.json` that holds its location, so the manifest in git never does.
+- `max_km` is how far from a receptor WebTrak's radar is kept. An `adsb` source takes its own `max_km` and `ceiling_ft` if its `adsb analyse` run used other than 15 km and 10,000 ft.
+- WebTrak is read wherever it has saved chunks in the window: there's no separate list of windows.
 
-- `source`: its tracks and NMT6 events come in through the adapter, for the listed windows;
-- `lookup`: it's only asked about single passes;
-- left out: not used at all.
-
-The airport can play the same roles.
+Still to be built: WebTrak and the airport as lookups only (asked about single passes, rather than read as sources), and a `lookups` section setting each lookup's mode and budget (see [Lookups](#lookups)).
 
 ## Layout
 
@@ -265,7 +265,7 @@ Phase 0 is fetched after the fact, from windows chosen once the Pi's health log 
 
 Phase 0 is tested before the Pi has any real data. We make ADS-B logs from the real 5 Nov WebTrak tracks, with a known clock offset, position noise and height bias, and some aircraft dropped, and check that `link` and `checks` recover them. OpenSky gives a real ADS-B source in the meantime. On 5 November 2026, all 19 WebTrak passes within 3 km of NMT6 and below 3,000 ft linked to their OpenSky flights by registration.
 
-A closest approach that falls at the first or last position of a source's track is flagged `at_track_end`, as `adsb analyse` does. The aircraft may have come closer outside that source's data, at the edge of OpenSky's box or where WebTrak's saved chunks start or stop. Such approaches are left out of comparisons between sources.
+A closest approach that falls at the first or last position of a source's track, or either side of a gap of over 30 s in it, is flagged `at_track_end`, as `adsb analyse` does for the ends. The aircraft may have come closer where that source has no positions: outside OpenSky's box, where WebTrak's saved chunks start or stop, or in a gap. A track is never interpolated across such a gap. Such approaches are left out of comparisons between sources.
 
 ## Prior work
 

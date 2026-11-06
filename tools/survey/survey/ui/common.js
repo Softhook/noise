@@ -3,7 +3,7 @@
 
 const SVG = "http://www.w3.org/2000/svg";
 const $ = (id) => document.getElementById(id);
-const COLOUR_SLOTS = ["adsb", "webtrak", "opensky"];  // Fixed colour slots; anything else is "other"
+const COLOUR_SLOTS = ["adsb", "webtrak", "opensky", "adsblol"];  // Fixed colour slots (style.css); anything else is "other"
 const SOURCE_NAMES = { adsb: "Garden ADS-B", webtrak: "WebTrak radar", opensky: "OpenSky", adsblol: "adsb.lol" };
 const colourOf = (source) => `var(--src-${COLOUR_SLOTS.includes(source) ? source : "other"})`;
 const sourceName = (s) => SOURCE_NAMES[s] || s;
@@ -85,7 +85,7 @@ function flightTip(f) {
   const rows = [h("div", {}, key(f.source, colourOf(f.source), isRadar(f.source)), " ",
     h("b", { text: f.registration || f.callsign || f.source_id }), ` · ${f.type || "unknown type"}`)];
   rows.push(h("div", { class: "row", text: `${sourceName(f.source)}${f.callsign ? " · " + f.callsign : ""}${f.direction ? " · " + ({ A: "arrival", D: "departure", O: "other" }[f.direction] || f.direction) : ""}` }));
-  if (a) rows.push(h("div", { class: "row", text: `Closest ${hms(toT(a.t))} · ${fmt(a.ground_m, 0)} m away · ${fmt(a.height_m, 0)} m up${a.at_track_end ? " (track end)" : ""}` }));
+  if (a) rows.push(h("div", { class: "row", text: `Closest ${hms(toT(a.t))} · ${fmt(a.ground_m, 0)} m away · ${fmt(a.height_m, 0)} m up${a.at_track_end ? " (edge of its data)" : ""}` }));
   for (const [s, why] of Object.entries(unseenOf(f.pass_id))) {
     if (state.sources.has(s)) rows.push(h("div", { class: "row" + (why === "unexplained" ? " unexplained" : ""), text: `Not in ${sourceName(s)}: ${why === "unexplained" ? "should have seen it" : why}` }));
   }
@@ -118,8 +118,9 @@ function projectTracks() {
 const receptor = () => state.data.receptors.find((r) => r.id === $("f-receptor").value) || state.data.receptors[0];
 const trackKey = (f) => `${f.source}|${f.source_id}`;
 
-// The flights shown: chosen sources, search, "several sources", and the time window.
-function shownFlights() {
+// The flights shown: chosen sources, search, "several sources", and the time window (or another
+// window, or null for none: the timeline shows the whole day's ticks whatever the window).
+function shownFlights(timeWindow = state.window) {
   const d = state.data, search = $("f-search").value.trim().toLowerCase(), r = $("f-receptor").value;
   const within = Number($("f-within").value) || Infinity, below = Number($("f-below").value) || Infinity;
   const near = within < Infinity || below < Infinity;
@@ -137,9 +138,9 @@ function shownFlights() {
     if ($("f-linked").checked && passSources.get(f.pass_id).size < 2) return false;
     if ($("f-unexplained").checked && !unexplained(f.pass_id)) return false;
     if (search && ![f.registration, f.callsign, f.type, f.pass_id].some((v) => (v || "").toLowerCase().includes(search))) return false;
-    if (state.window) {
+    if (timeWindow) {
       const pts = local[trackKey(f)];
-      if (!pts || pts[pts.length - 1][0] < state.window[0] || pts[0][0] > state.window[1]) return false;
+      if (!pts || pts[pts.length - 1][0] < timeWindow[0] || pts[0][0] > timeWindow[1]) return false;
     }
     return true;
   });

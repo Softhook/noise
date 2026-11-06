@@ -17,7 +17,7 @@ function render() {
   if (!state.data) return;
   const flights = shownFlights(), passes = passesOf(flights);
   state.eventOf = assignEvents($("f-receptor").value);
-  drawTimeline(shownFlightsIgnoringWindow());
+  drawTimeline(shownFlights(null));
   drawPlan(flights);
   drawProfile(flights);
   drawTable(passes);

@@ -166,7 +166,7 @@ const pending = new Set();
 function redraw(chart) {
   if (!pending.size) requestAnimationFrame(() => {
     const flights = shownFlights();
-    if (pending.has("timeline")) drawTimeline(shownFlightsIgnoringWindow());
+    if (pending.has("timeline")) drawTimeline(shownFlights(null));
     if (pending.has("plan")) drawPlan(flights);
     if (pending.has("profile")) drawProfile(flights);
     pending.clear();

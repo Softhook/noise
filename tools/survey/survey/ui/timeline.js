@@ -202,10 +202,3 @@ function setupTimeline() {
     setTimeView(a - day0 - pad, b - day0 + pad);
   });
 }
-function shownFlightsIgnoringWindow() {
-  const w = state.window;
-  state.window = null;
-  const all = shownFlights();
-  state.window = w;
-  return all;
-}

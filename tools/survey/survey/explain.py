@@ -12,6 +12,7 @@ north). With "any", the aircraft need be in only one of the areas, otherwise in 
 
 from __future__ import annotations
 
+import bisect
 import math
 
 from .common import parse_time
@@ -55,11 +56,32 @@ def _span(points, keep):
                if ka and kb and b[0] - a[0] <= MAX_STEP_S)
 
 
+class Coverage:
+    """When a source has data, merged into separate runs, so a time is looked up by bisection
+    rather than against every row: the logger's health log gives a row per run between outages."""
+
+    def __init__(self, spans):
+        self.starts, self.ends = [], []
+        for a, b in sorted(spans):
+            if self.ends and a <= self.ends[-1]:
+                self.ends[-1] = max(self.ends[-1], b)
+            else:
+                self.starts.append(a)
+                self.ends.append(b)
+
+    def __contains__(self, t):
+        i = bisect.bisect_right(self.starts, t) - 1
+        return i >= 0 and t <= self.ends[i]
+
+
 def why_unseen(points, limits, coverage):
     """Why a source didn't see a pass. points: time-ordered [(t, lat, lon, height_m or None)], from
-    the sources that did see it; coverage: [(start, end)] when this source has data; limits: from
-    prepare(). Returns one of REASONS, the first that holds for all but MIN_VISIBLE_S of the pass."""
-    covered = [any(a <= p[0] <= b for a, b in coverage) for p in points]
+    the sources that did see it; coverage: when this source has data, a Coverage or [(start, end)];
+    limits: from prepare(). Returns one of REASONS, the first that holds for all but MIN_VISIBLE_S
+    of the pass."""
+    if not isinstance(coverage, Coverage):
+        coverage = Coverage(coverage)
+    covered = [p[0] in coverage for p in points]
     if _span(points, covered) < MIN_VISIBLE_S:
         return NO_DATA
     inside = [c and in_area(limits, p[1], p[2]) for p, c in zip(points, covered)]
@@ -74,7 +96,7 @@ def why_unseen(points, limits, coverage):
 
 def unseen_rows(passes, tracks, limits, coverage):
     """Rows for the unseen table: each pass, and each source that has no flight in it, with why.
-    passes: the passes table's rows; tracks: {(source, source_id): [position dicts, time-ordered]};
+    passes: the passes table's rows; tracks: {(source, source_id): track (geometry.py)};
     limits: {source: limits}; coverage: the coverage table's rows."""
     members = {}
     for row in passes:
@@ -82,13 +104,15 @@ def unseen_rows(passes, tracks, limits, coverage):
     when = {}
     for c in coverage:
         when.setdefault(c["source"], []).append((parse_time(c["start_utc"]), parse_time(c["end_utc"])))
+    when = {source: Coverage(spans) for source, spans in when.items()}
+    empty = Coverage([])
     ready = {source: prepare(lim) for source, lim in limits.items()}
     rows = []
     for pass_id, keys in sorted(members.items()):
         seen = {k[0] for k in keys}
-        points = sorted((p["t"], p["lat"], p["lon"], p["height_m"]) for k in keys for p in tracks.get(k, []))
+        points = sorted((p[:4] for k in keys for p in tracks.get(k, [])), key=lambda p: p[0])
         for source, lim in ready.items():
             if source not in seen:
                 rows.append({"pass_id": pass_id, "source": source,
-                             "reason": why_unseen(points, lim, when.get(source, []))})
+                             "reason": why_unseen(points, lim, when.get(source, empty))})
     return rows

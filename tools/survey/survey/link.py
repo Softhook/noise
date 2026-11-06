@@ -1,14 +1,16 @@
 """Link flights from different sources that are the same aircraft movement into passes.
 
-Evidence, strongest first (ARCHITECTURE.md, Link):
-1. `registration`: the same registration, with overlapping times, and tracks that agree: where
-   both have positions at the same time, their median separation is under REGISTRATION_TRACK_M,
-   so a registration sent by mistake doesn't join two different aircraft;
+Evidence, strongest first (ARCHITECTURE.md, Link). Two tracks are compared only where both have
+positions at the same time (compare()), and only with at least MIN_COMPARED such times:
+1. `registration`: the same registration, with overlapping times, and tracks that agree: their
+   median separation is under REGISTRATION_TRACK_M, so a registration sent by mistake doesn't
+   join two different aircraft;
    `registration, tracks not compared` (UNCHECKED): the same registration, with overlapping
-   times, but no times at which both have positions, so the tracks couldn't be compared;
-2. `track`: no registration to compare, but the closest approaches to the pass receptor came
-   within TRACK_TIME_S of each other, and the aircraft were within TRACK_DISTANCE_M of each other
-   then, and within TRACK_HEIGHT_M in height when both have one.
+   times, but too few times at which both have positions to compare the tracks;
+2. `track`: no registration to compare, but the tracks agree closely: a median separation under
+   TRACK_DISTANCE_M, and a median height difference under TRACK_HEIGHT_M when both have heights.
+   This doesn't depend on any receptor, so a pass far from every receptor links as well as one
+   overhead, and a track cut off at the edge of a source's area still compares where it overlaps.
 
 Every candidate pair is found first, and then joined best first: registration links before track
 links, and closer tracks before further ones. So a flight joins the best match on offer, not the
@@ -30,18 +32,21 @@ import datetime as dt
 import statistics
 
 from .common import parse_time
-from .geometry import apart_m, position_at
+from .geometry import MAX_INTERPOLATE_S, apart_m, position_at
 
 OVERLAP_SLACK_S = 120
-TRACK_TIME_S = 30
+# Two tracks without a registration to compare are one aircraft if they agree this well. Clocks
+# may differ by a few seconds: 3 s at 70 m/s is 210 m.
 TRACK_DISTANCE_M = 500
 TRACK_HEIGHT_M = 200
 # Two flights with the same registration are one aircraft only if their tracks agree this well.
 # Generous, as clocks may differ by a few seconds and radar positions are coarse.
 REGISTRATION_TRACK_M = 2000
-MAX_INTERPOLATE_S = 30  # A track is only interpolated between positions this close in time
+# Tracks are compared only at this many times or more: one or two positions say little. Three
+# radar positions are about 8 s together, as when OpenSky catches an aircraft just inside its box
+MIN_COMPARED = 3
 # The evidence for a registration link whose tracks couldn't be compared: they overlap in time
-# only within OVERLAP_SLACK_S, or have no positions at the same times
+# only within OVERLAP_SLACK_S, or have too few positions at the same times
 UNCHECKED = "registration, tracks not compared"
 
 # Which source's flight dates and names a pass. Sources not listed rank between these and WebTrak.
@@ -62,70 +67,74 @@ def ranked(sources):
     return sorted(sources, key=source_rank)
 
 
-def _overlap(a, b):
-    return parse_time(a["first_utc"]) - OVERLAP_SLACK_S <= parse_time(b["last_utc"]) and \
-        parse_time(b["first_utc"]) - OVERLAP_SLACK_S <= parse_time(a["last_utc"])
+def compare(ta, tb):
+    """[(ground_m, height_diff_m or None)] between two tracks, at the times both have positions.
+    Each position of the sparser track is compared with the other track interpolated at its time,
+    but never across a hole of more than MAX_INTERPOLATE_S: a line across the hole isn't where the
+    aircraft was."""
+    if len(ta) > len(tb):
+        ta, tb = tb, ta
+    times_b = [p[0] for p in tb]
+    out = []
+    for p in ta:
+        i = bisect.bisect_left(times_b, p[0])
+        if i < len(tb) and times_b[i] == p[0]:
+            q = tb[i][1:4]
+        elif 0 < i < len(tb) and times_b[i] - times_b[i - 1] <= MAX_INTERPOLATE_S:
+            q = position_at(tb, p[0], times_b)
+        else:
+            continue
+        dh = None if p[3] is None or q[2] is None else abs(p[3] - q[2])
+        out.append((apart_m(p[1:3], q), dh))
+    return out
 
 
 def separation_m(ta, tb):
-    """Median distance between two time-ordered tracks, at the times both have positions, or None
-    when there are no such times. Each position of the sparser track is compared with the other
-    track interpolated at its time, but never across a gap of more than MAX_INTERPOLATE_S: OpenSky's
-    tracks have holes where an aircraft left its box and came back, and a line across the hole
-    isn't where the aircraft was."""
-    if len(ta) > len(tb):
-        ta, tb = tb, ta
-    times_b = [p["t"] for p in tb]
-    apart = []
-    for p in ta:
-        i = bisect.bisect_left(times_b, p["t"])
-        if i < len(tb) and times_b[i] == p["t"]:
-            q = tb[i]
-            apart.append(apart_m((p["lat"], p["lon"]), (q["lat"], q["lon"])))
-        elif 0 < i < len(tb) and times_b[i] - times_b[i - 1] <= MAX_INTERPOLATE_S:
-            apart.append(apart_m((p["lat"], p["lon"]), position_at(tb, p["t"], times_b)))
-    return statistics.median(apart) if apart else None
+    """Median distance between two tracks at the times both have positions, or None when there are
+    fewer than MIN_COMPARED such times."""
+    got = compare(ta, tb)
+    return statistics.median(g for g, _ in got) if len(got) >= MIN_COMPARED else None
 
 
-def _evidence(a, b, tracks, approaches, receptor):
+def _evidence(a, b, tracks):
     """(strength, apart_m, kind) if flights a and b may be the same aircraft movement, else None.
     Lower strength is stronger evidence."""
-    ka, kb = (a["source"], a["source_id"]), (b["source"], b["source_id"])
+    ta, tb = tracks.get((a["source"], a["source_id"])), tracks.get((b["source"], b["source_id"]))
+    got = compare(ta, tb) if ta and tb else []
+    if len(got) < MIN_COMPARED:
+        got = None
     if a["registration"] and a["registration"] == b["registration"]:
-        apart = separation_m(tracks[ka], tracks[kb]) if ka in tracks and kb in tracks else None
-        if apart is None:
-            # No times at which both have positions, so the tracks couldn't be checked: weaker
-            # than a registration whose tracks agree, though still stronger than tracks alone
+        if got is None:
+            # Too few times at which both have positions, so the tracks couldn't be checked:
+            # weaker than a registration whose tracks agree, though still stronger than tracks alone
             return 1, 0.0, UNCHECKED
+        apart = statistics.median(g for g, _ in got)
         if apart > REGISTRATION_TRACK_M:
             return None  # The same registration on two different aircraft
         return 0, apart, "registration"
-    if a["registration"] and b["registration"]:
-        return None  # Different registrations: never the same aircraft
-    ca, cb = approaches.get((*ka, receptor)), approaches.get((*kb, receptor))
-    if not ca or not cb or abs(ca[0] - cb[0]) > TRACK_TIME_S:
-        return None
-    t = (ca[0] + cb[0]) / 2
-    pa, pb = position_at(tracks[ka], t), position_at(tracks[kb], t)
-    apart = apart_m(pa, pb)
-    if apart > TRACK_DISTANCE_M:
-        return None
-    if pa[2] is not None and pb[2] is not None and abs(pa[2] - pb[2]) > TRACK_HEIGHT_M:
+    if (a["registration"] and b["registration"]) or got is None:
+        return None  # Different registrations are never the same aircraft; nor tracks never compared
+    apart = statistics.median(g for g, _ in got)
+    heights = [dh for _, dh in got if dh is not None]
+    if apart > TRACK_DISTANCE_M or (heights and statistics.median(heights) > TRACK_HEIGHT_M):
         return None
     return 2, apart, "track"
 
 
-def candidates(flights, tracks, approaches, receptor):
+def candidates(flights, tracks):
     """Every pair of flights that could be linked, best first: [(strength, apart_m, key_a, key_b, kind)]."""
     found = []
-    ordered = sorted(flights, key=lambda f: f["first_utc"])
-    for i, a in enumerate(ordered):
-        for b in ordered[i + 1:]:
-            if b["first_utc"] > a["last_utc"] and parse_time(b["first_utc"]) - parse_time(a["last_utc"]) > OVERLAP_SLACK_S:
-                break
-            if a["source"] == b["source"] or not _overlap(a, b):
+    timed = sorted(((parse_time(f["first_utc"]), parse_time(f["last_utc"]), f) for f in flights),
+                   key=lambda x: x[0])
+    for i, (a0, a1, a) in enumerate(timed):
+        for b0, b1, b in timed[i + 1:]:
+            if b0 - a1 > OVERLAP_SLACK_S:
+                break  # Sorted by first time, so no later flight overlaps a either
+            if a["source"] == b["source"] or b1 < a0 - OVERLAP_SLACK_S:
                 continue
-            got = _evidence(a, b, tracks, approaches, receptor)
+            if a["registration"] and b["registration"] and a["registration"] != b["registration"]:
+                continue  # Never the same aircraft: don't compare their tracks
+            got = _evidence(a, b, tracks)
             if got:
                 found.append((got[0], got[1], (a["source"], a["source_id"]), (b["source"], b["source_id"]), got[2]))
     return sorted(found)
@@ -171,11 +180,11 @@ def _pass_name(group, flight, approaches, receptor):
 
 
 def link(flights, tracks, approaches, receptor):
-    """Rows for the passes table. tracks: {(source, source_id): [position dicts, time-ordered]};
+    """Rows for the passes table. tracks: {(source, source_id): track (geometry.py)};
     approaches: {(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end)};
-    receptor: the pass receptor (manifest.load's pass_receptor)."""
+    receptor: the pass receptor (manifest.load's pass_receptor), which dates and names passes."""
     groups = _Groups(flights)
-    for _, _, ka, kb, why in candidates(flights, tracks, approaches, receptor):
+    for _, _, ka, kb, why in candidates(flights, tracks):
         groups.join(ka, kb, why)
 
     rows, used = [], {}

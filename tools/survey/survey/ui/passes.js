@@ -1,12 +1,12 @@
 // The passes table, the selected pass's detail, and selecting a pass from any view.
 "use strict";
 
-// Each noise event at the receptor goes to at most one pass: of the passes whose closest approach
-// came from 5 s before its LAmax to 40 s before it (sound takes a few seconds to arrive, and the
-// clocks may differ a little), the one that came closest to the receptor. Each pass then shows the
-// loudest event it was given. It isn't a match (ARCHITECTURE.md, Match, is still to be built), but
-// two passes never both claim one event. Worked out over every pass of the day, whatever the
-// filters, so filtering never moves an event to another pass.
+// Each noise event at the receptor, from a source that's switched on, goes to at most one pass: of
+// the passes whose closest approach came from 40 s before its LAmax to 5 s after it (sound takes a
+// few seconds to arrive, and the clocks may differ a little), the one that came closest to the
+// receptor. Each pass then shows the loudest event it was given. It isn't a match (ARCHITECTURE.md,
+// Match, is still to be built), but two passes never both claim one event. Worked out over every
+// pass of the day, whatever the filters, so filtering never moves an event to another pass.
 const EVENT_BEFORE_S = 5, EVENT_AFTER_S = 40;
 function assignEvents(r) {
   const passes = new Map();
@@ -20,7 +20,7 @@ function assignEvents(r) {
   const list = [...passes.entries()].sort((a, b) => a[1].t - b[1].t);
   const owner = new Map();
   for (const e of state.data.events) {
-    if (e.receptor !== r) continue;
+    if (e.receptor !== r || !state.sources.has(e.source)) continue;
     const at = toT(e.lmax_utc);
     let best = null;
     for (const [id, p] of list) {
@@ -46,7 +46,7 @@ function drawTable(passes) {
     row1.push(h("th", { colspan: 2, class: "group" }, key(s, colourOf(s), isRadar(s)), " ", sourceName(s)));
     row2.push(h("th", { class: "num", text: "m away" }), h("th", { class: "num", text: "m up" }));
   }
-  if (pair) row1.push(h("th", { rowspan: 2, class: "num", title: "Height at closest approach, the first source's minus the second's. Left out where either is at its track's end." },
+  if (pair) row1.push(h("th", { rowspan: 2, class: "num", title: "Height at closest approach, the first source's minus the second's. Left out where either is at an edge of its source's data." },
     "Δ height (m)", h("div", { class: "sub-th", text: `${sourceName(pair[0])} − ${sourceName(pair[1])}` })));
   row1.push(h("th", { rowspan: 2, class: "num", title: `The loudest noise event at the receptor whose LAmax came ${EVENT_BEFORE_S} s before to ${EVENT_AFTER_S} s after this pass's closest approach, unless another pass in that time came closer to the receptor. A guide, not a match.` }, "LAmax (dB)"));
   const thead = $("table").querySelector("thead");
@@ -102,7 +102,7 @@ function drawDetail(passes) {
   const r = $("f-receptor").value;
   const parts = passes.some((p) => p.id === state.selected) ? [] : [h("p", { class: "hidden-note", text: "Not in the table or map now: the filters, sources or time window leave it out." })];
   parts.push(h("dl", {}, h("dt", { text: "Pass" }), h("dd", { text: state.selected }),
-    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? (fs.map((f) => f.evidence).find(Boolean) || "not recorded") : "only one source" })));
+    h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? ([...new Set(fs.map((f) => f.evidence).filter(Boolean))].join("; ") || "not recorded") : "only one source" })));
   for (const f of fs.sort((a, b) => bySource(a.source, b.source))) {
     const a = f.approaches[r] || {};
     parts.push(h("div", { class: "detail-source" }, key(f.source, colourOf(f.source), isRadar(f.source)), sourceName(f.source)));
@@ -110,7 +110,7 @@ function drawDetail(passes) {
       ["Direction", { A: "Arrival", D: "Departure", O: "Other" }[f.direction] || f.direction], ["From / to", [f.origin, f.destination].filter(Boolean).join(" → ")],
       ["Seen", `${hms(toT(f.first_utc))}–${hms(toT(f.last_utc))}`], ["Closest at", a.t ? hms(toT(a.t)) : ""],
       ["Ground distance (m)", fmt(a.ground_m, 0)], ["Height (m above sea level)", fmt(a.height_m, 0)], ["Slant (m)", fmt(a.slant_m, 0)],
-      ["Note", a.at_track_end ? "closest point is at the end of this source's track" : ""]];
+      ["Note", a.at_track_end ? "closest point is at an edge of this source's data (its track's end, or a gap in it), so it may have come closer" : ""]];
     parts.push(h("dl", {}, ...rows.filter(([, v]) => v && v !== "–").flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: String(v) })])));
   }
   for (const [s, why] of Object.entries(unseenOf(state.selected))) {

@@ -5,7 +5,9 @@ An adapter is a module with:
     PATHS                                   keys of its manifest entry that are paths; manifest.load
                                             makes them absolute, relative to the manifest
     read(name, spec, context, warnings)     -> {table: rows}, for any of schema.SOURCE_TABLES; a
-                                            table it doesn't fill can be left out
+                                            table it doesn't fill can be left out. Rows may be any
+                                            iterable: a generator for positions or levels keeps a
+                                            long deployment's rows from all being held at once
     limits(spec, context)                   -> what the source can see (explain.py's limits)
 
 name is the source's name in the manifest (what its rows' `source` column says), spec its manifest
