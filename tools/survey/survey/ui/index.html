@@ -60,6 +60,15 @@
       </section>
     </div>
 
+    <section class="panel" style="margin-bottom: 12px">
+      <div class="panel-head">
+        <h2>By aircraft type</h2>
+        <span class="tools"><span class="note" id="types-count"></span><label class="note">Measure <select id="f-measure"></select></label></span>
+      </div>
+      <svg id="types" viewBox="0 0 1200 120" role="img" aria-label="The chosen measure for each pass, by aircraft type, a lane per source"></svg>
+      <p class="note">A row per aircraft type, with a lane per source: a dot for each flight, coloured by its source, and a tick at the lane's median. A hollow dot is at an edge of its source's data, so it may be wrong, and is left out of the median. Path angle is fitted 3 km either side of the closest approach, as adsb analyse does, and is negative for a descent. LAmax is the loudest event given to the pass, one dot each. It follows the filters and the time window above. Each lane holds whatever its source saw, and the sources cover different hours, so to compare sources, tick <i>In several sources only</i>: every lane then holds the same passes. Click a dot to select its pass.</p>
+    </section>
+
     <div class="bottom">
       <section class="panel">
         <div class="panel-head"><h2>Passes</h2><span class="note" id="table-count"></span></div>
@@ -79,6 +88,7 @@
 <script src="map.js"></script>
 <script src="timeline.js"></script>
 <script src="passes.js"></script>
+<script src="types.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

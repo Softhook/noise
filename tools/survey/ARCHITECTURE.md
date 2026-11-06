@@ -127,7 +127,7 @@ Written to `data/<deployment>/` (git-ignored):
 
 | File | Contents |
 |---|---|
-| `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
+| `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
 | `build.json` | when it was built, the counts per source, and the warnings |
 | `event_matches.csv` | noise event → pass, per receptor, with geometry and predicted sound arrival |
 | `identity.csv` | resolved type and registration per pass, with their sources |

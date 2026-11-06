@@ -55,6 +55,8 @@ function fmt(v, digits) {
   if (v === null || v === undefined || v === "" || Number.isNaN(v)) return "–";
   return Number(v).toLocaleString("en-GB", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
+// A signed path angle (positive climbing), as the page puts it
+const pathAngle = (deg) => `${fmt(Math.abs(deg), 2)}° ${deg > 0.5 ? "climbing" : deg < -0.5 ? "descending" : "level"}`;
 const toT = (iso) => Date.parse(iso) / 1000;
 const hms = (t) => new Date(t * 1000).toISOString().slice(11, 19);
 const hm = (t) => new Date(t * 1000).toISOString().slice(11, 16);
@@ -86,6 +88,7 @@ function flightTip(f) {
     h("b", { text: f.registration || f.callsign || f.source_id }), ` · ${f.type || "unknown type"}`)];
   rows.push(h("div", { class: "row", text: `${sourceName(f.source)}${f.callsign ? " · " + f.callsign : ""}${f.direction ? " · " + ({ A: "arrival", D: "departure", O: "other" }[f.direction] || f.direction) : ""}` }));
   if (a) rows.push(h("div", { class: "row", text: `Closest ${hms(toT(a.t))} · ${fmt(a.ground_m, 0)} m away · ${fmt(a.height_m, 0)} m up${a.at_track_end ? " (edge of its data)" : ""}` }));
+  if (a && a.path_angle_deg !== null && a.path_angle_deg !== undefined) rows.push(h("div", { class: "row", text: `Path angle ${pathAngle(a.path_angle_deg)}` }));
   for (const [s, why] of Object.entries(unseenOf(f.pass_id))) {
     if (state.sources.has(s)) rows.push(h("div", { class: "row" + (why === "unexplained" ? " unexplained" : ""), text: `Not in ${sourceName(s)}: ${why === "unexplained" ? "should have seen it" : why}` }));
   }

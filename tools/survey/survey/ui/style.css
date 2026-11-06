@@ -110,6 +110,13 @@ svg .ink { fill: var(--text); }
 .tick { stroke: var(--c); stroke-width: 2; }
 .tick.selected { stroke-width: 4; }
 .tick-hit { stroke: transparent; stroke-width: 9; cursor: pointer; pointer-events: stroke; }
+.dot { stroke: var(--surface); stroke-width: 1.5; cursor: pointer; }
+/* A hollow dot's ring is its source's colour (--c); set here, since a class rule beats an SVG stroke attribute */
+.dot.edge { fill: var(--surface); stroke: var(--c); stroke-width: 1.5; }
+.dot.selected { stroke: var(--text); stroke-width: 2; }
+.dot.edge.selected { stroke: var(--c); stroke-width: 2.5; }
+.median { stroke: var(--text); stroke-width: 2; }
+.ref { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 4 3; }
 .brush { fill: var(--brush); stroke: var(--axis); stroke-width: 1; }
 .crosshair { stroke: var(--axis); stroke-width: 1; }
 svg.zoomable { cursor: grab; user-select: none; -webkit-user-select: none; }

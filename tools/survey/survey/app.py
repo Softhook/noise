@@ -112,7 +112,9 @@ def index(t):
     for a in t["approaches"]:
         approaches.setdefault((a["source"], a["source_id"]), {})[a["receptor"]] = {
             "t": a["t"], "ground_m": number(a["ground_m"]), "height_m": number(a["height_m"]),
-            "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1"}
+            "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1",
+            # Missing from a build made before the column was added, until it's rebuilt
+            "path_angle_deg": number(a.get("path_angle_deg"))}
     return {**t, "approach_index": approaches,
             "pass_index": {(p["source"], p["source_id"]): p for p in t["passes"]}}
 

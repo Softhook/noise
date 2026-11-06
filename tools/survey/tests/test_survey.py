@@ -22,7 +22,7 @@ from survey import adapters, build, explain, link, manifest, schema, server
 from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, registration
-from survey.geometry import Frame, closest_approach
+from survey.geometry import Frame, closest_approach, path_angle
 
 TOOLS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NMT6 = (51.50535, 0.11075)
@@ -139,6 +139,25 @@ class Geometry(unittest.TestCase):
         t, ground, _, _, edge = closest_approach([p for p in westbound(T0) if abs(p[0] - T0) > 10], frame)
         self.assertAlmostEqual(ground, 210, delta=2)
         self.assertFalse(edge)
+
+    def test_path_angle_is_fitted_near_the_closest_approach(self):
+        frame = Frame(*NMT6)
+        self.assertAlmostEqual(path_angle(westbound(T0), frame, T0), -5.5, delta=0.05)  # Descending
+        climbing = [(2 * T0 - t, lat, lon, h) for t, lat, lon, h in reversed(westbound(T0))]
+        self.assertAlmostEqual(path_angle(climbing, frame, T0), 5.5, delta=0.05)
+        # Only the 3 km either side counts: a steeper stretch further out doesn't change it
+        bent = [(t, lat, lon, h + (max(0, T0 - 50 - t) * 70 * 0.1)) for t, lat, lon, h in westbound(T0)]
+        self.assertAlmostEqual(path_angle(bent, frame, T0), -5.5, delta=0.05)
+
+    def test_path_angle_needs_enough_heights_and_no_hole(self):
+        frame = Frame(*NMT6)
+        self.assertIsNone(path_angle([(t, lat, lon, None) for t, lat, lon, _ in westbound(T0)], frame, T0))
+        self.assertIsNone(path_angle([p for p in westbound(T0) if abs(p[0] - T0) <= 5], frame, T0))  # Under 1 km
+        # Across a hole, only the side of it the closest approach is on is fitted, so a jump in
+        # height across the hole doesn't tilt the line
+        holed = [(t, lat, lon, h + (300 if t > T0 + 20 else 0)) for t, lat, lon, h in westbound(T0) if not T0 + 10 < t <= T0 + 50]
+        self.assertAlmostEqual(path_angle(holed, frame, T0), -5.5, delta=0.05)
+        self.assertIsNone(path_angle([], frame, T0))
 
 
 class Manifests(unittest.TestCase):
@@ -503,6 +522,7 @@ class BuildAndServe(unittest.TestCase):
         approaches = schema.read_table(common, "approaches")
         self.assertEqual(len(approaches), 3)
         self.assertTrue(all(abs(float(a["ground_m"]) - 210) < 5 for a in approaches))
+        self.assertTrue(all(abs(float(a["path_angle_deg"]) + 5.5) < 0.2 for a in approaches))
         self.assertEqual(len(schema.read_table(common, "levels")), 30)
         # WebTrak has no data when G-LCYO passed; OpenSky saw everything WebTrak did
         [unseen] = schema.read_table(common, "unseen")
@@ -714,10 +734,10 @@ class BuildAndServe(unittest.TestCase):
 class Page(unittest.TestCase):
     """The survey app's own scripts (survey/ui/), run by tests/ui_check.js without a browser."""
 
-    def run_page(self, data, receptor="nmt6", sources=()):
+    def run_page(self, data, receptor="nmt6", sources=(), measure=None):
         here = os.path.dirname(os.path.abspath(__file__))
         done = subprocess.run(["node", os.path.join(here, "ui_check.js"), os.path.join(server.UI_DIR, "index.html")],
-                              input=json.dumps({"data": data, "receptor": receptor, "sources": list(sources)}),
+                              input=json.dumps({"data": data, "receptor": receptor, "sources": list(sources), "measure": measure}),
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)
@@ -743,6 +763,27 @@ class Page(unittest.TestCase):
         data = {"flights": [], "events": [], "sources": link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"])}
         got = self.run_page(data, sources=["webtrak", "zzz", "fusion", "opensky", "adsb", "adsblol"])
         self.assertEqual(got["order"], ["adsb", "adsblol", "opensky", "fusion", "webtrak", "zzz"])
+
+    def test_by_aircraft_type_has_a_lane_per_source_and_a_row_per_pass_type(self):
+        def f(pass_id, source, kind, angle, edge=False, height=300):
+            return {"pass_id": pass_id, "source": source, "type": kind, "first_utc": iso(T0 - 60),
+                    "approaches": {"nmt6": {"t": iso(T0), "ground_m": 200, "height_m": height,
+                                            "path_angle_deg": angle, "at_track_end": edge}}}
+
+        data = {"sources": ["opensky", "webtrak"], "events": [], "flights": [
+            # WebTrak calls a's aircraft an E195, but it's in the E190 row, as OpenSky, ranked first, says
+            f("a", "opensky", "E190", -5.4), f("a", "webtrak", "E195", -5.6),
+            f("b", "opensky", "E190", -5.6), f("b", "webtrak", "", -5.2),
+            f("c", "webtrak", "", None), f("d", "webtrak", "", 3.0),
+            f("e", "opensky", "A320", -4.5, edge=True, height=900)]}
+        got = self.run_page(data, sources=["opensky", "webtrak"], measure="path_angle_deg")["types"]
+        self.assertEqual(got, [
+            ["A320", 1, [["opensky", [-4.5], -4.5]]],  # The path angle isn't doubtful at an edge, so it counts
+            ["E190", 2, [["opensky", [-5.4, -5.6], -5.5], ["webtrak", [-5.6, -5.2], -5.4]]],
+            ["unknown", 1, [["webtrak", [3.0], 3.0]]]])  # c has no path angle, so isn't shown
+        # A height at an edge of its source's data is shown, but left out of the median
+        got = self.run_page(data, sources=["opensky", "webtrak"], measure="height_m")["types"]
+        self.assertEqual(got[0], ["A320", 1, [["opensky", [900], None]]])
 
 
 if __name__ == "__main__":

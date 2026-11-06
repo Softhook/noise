@@ -36,8 +36,10 @@ TABLES = {
     "coverage": ["source", "start_utc", "end_utc", "note"],
     # Each flight's closest approach to each receptor (worked out by the core). at_track_end: the
     # closest point is the track's first or last position, so the aircraft may have come closer
-    # outside the source's data, and the approach isn't a true closest approach
-    "approaches": ["source", "source_id", "receptor", "t", "ground_m", "height_m", "slant_m", "at_track_end"],
+    # outside the source's data, and the approach isn't a true closest approach. path_angle_deg: the
+    # flight path's angle there (geometry.path_angle), positive climbing, empty without enough heights
+    "approaches": ["source", "source_id", "receptor", "t", "ground_m", "height_m", "slant_m", "at_track_end",
+                   "path_angle_deg"],
     # Flights from different sources that are the same aircraft movement
     "passes": ["pass_id", "source", "source_id", "evidence"],
     # Each pass, and each source with no flight in it, with why (explain.py): "no data" (no data

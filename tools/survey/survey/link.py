@@ -181,7 +181,7 @@ def _pass_name(group, flight, approaches, receptor):
 
 def link(flights, tracks, approaches, receptor):
     """Rows for the passes table. tracks: {(source, source_id): track (geometry.py)};
-    approaches: {(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end)};
+    approaches: {(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end, path_angle_deg)};
     receptor: the pass receptor (manifest.load's pass_receptor), which dates and names passes."""
     groups = _Groups(flights)
     for _, _, ka, kb, why in candidates(flights, tracks):

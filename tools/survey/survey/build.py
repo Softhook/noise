@@ -27,7 +27,7 @@ import sys
 
 from . import adapters, explain, link, manifest, schema
 from .common import day_of, iso, rounded
-from .geometry import Frame, closest_approach
+from .geometry import Frame, closest_approach, path_angle
 
 
 class Busy(Exception):
@@ -120,7 +120,7 @@ def level_parts(levels):
 
 
 def approaches(tracks, receptors):
-    """{(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end)}"""
+    """{(source, source_id, receptor): (t, ground_m, height_m, slant_m, at_track_end, path_angle_deg)}"""
     found = {}
     for r in receptors.values():
         frame = Frame(r["lat"], r["lon"])
@@ -130,14 +130,15 @@ def approaches(tracks, receptors):
         for key, points in tracks.items():
             got = closest_approach(points, frame, mic)
             if got:
-                found[(*key, r["id"])] = got
+                found[(*key, r["id"])] = (*got, path_angle(points, frame, got[0]))
     return found
 
 
 def approach_rows(found):
     return [{"source": s, "source_id": sid, "receptor": rid, "t": iso(t), "ground_m": rounded(g),
-             "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else ""}
-            for (s, sid, rid), (t, g, h, sl, end) in sorted(found.items())]
+             "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else "",
+             "path_angle_deg": None if angle is None else round(angle, 2)}
+            for (s, sid, rid), (t, g, h, sl, end, angle) in sorted(found.items())]
 
 
 def receptor_rows(receptors):

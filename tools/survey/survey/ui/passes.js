@@ -110,6 +110,7 @@ function drawDetail(passes) {
       ["Direction", { A: "Arrival", D: "Departure", O: "Other" }[f.direction] || f.direction], ["From / to", [f.origin, f.destination].filter(Boolean).join(" → ")],
       ["Seen", `${hms(toT(f.first_utc))}–${hms(toT(f.last_utc))}`], ["Closest at", a.t ? hms(toT(a.t)) : ""],
       ["Ground distance (m)", fmt(a.ground_m, 0)], ["Height (m above sea level)", fmt(a.height_m, 0)], ["Slant (m)", fmt(a.slant_m, 0)],
+      ["Path angle", a.path_angle_deg === null || a.path_angle_deg === undefined ? "" : pathAngle(a.path_angle_deg)],
       ["Note", a.at_track_end ? "closest point is at an edge of this source's data (its track's end, or a gap in it), so it may have come closer" : ""]];
     parts.push(h("dl", {}, ...rows.filter(([, v]) => v && v !== "–").flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: String(v) })])));
   }
@@ -159,7 +160,7 @@ function scrollableTable() {
     wrap.scrollLeft += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * wrap.clientWidth : e.deltaY;
   }, { passive: false });
 }
-// from: "map", "timeline" or "table". The selected pass is brought into view in the others.
+// from: "map", "timeline", "types" or "table". The selected pass is brought into view in the others.
 function select(id, from) {
   state.selected = state.selected === id ? null : id;
   render();

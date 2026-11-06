@@ -20,6 +20,7 @@ function render() {
   drawTimeline(shownFlights(null));
   drawPlan(flights);
   drawProfile(flights);
+  drawTypes(flights);
   drawTable(passes);
   drawDetail(passes);
   tiles(flights, passes);
@@ -121,6 +122,7 @@ async function start() {
   makeZoomable("plan");
   makeZoomable("profile");
   setupTimeline();
+  setupTypes();
   await loadDay();
 }
 start();

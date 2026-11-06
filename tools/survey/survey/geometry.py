@@ -1,4 +1,4 @@
-"""Local coordinates, distances, and positions along a track. The core's own, so tools/adsb can change freely.
+"""Local coordinates, distances, path angles, and positions along a track. The core's own, so tools/adsb can change freely.
 
 A track is a time-ordered list of tuples whose first four items are (t, lat, lon, height_m or
 None); anything after those is ignored here.
@@ -67,6 +67,58 @@ def closest_approach(points, frame, mic_amsl=None):
     t, d, h, at_edge = best
     slant = None if h is None or mic_amsl is None else math.hypot(d, h - mic_amsl)
     return t, d, h, slant, at_edge
+
+
+# Path angle: fitted over this far either side of the closest approach, along the track, and only
+# if the heights used span at least min_span_m of it (adsb analyse's slope_window_m and min_slope_span_m)
+PATH_WINDOW_M = 3000.0
+PATH_MIN_SPAN_M = 1000.0
+PATH_MIN_POINTS = 5
+
+
+def path_angle(points, frame, t):
+    """The flight path's angle near time t (its closest approach), in degrees: positive climbing,
+    negative descending. None without enough heights near t.
+
+    As adsb analyse does it: a straight line fitted to height against distance along the track,
+    within PATH_WINDOW_M either side of where the aircraft was at t. Distance is measured along the
+    straight line through the window, not by adding up the steps between positions, which position
+    noise makes look longer. Only the stretch of track around t without a hole of more than
+    MAX_INTERPOLATE_S is used, so the fit never spans a gap in the source's data.
+    """
+    if not points:
+        return None
+    pts = [(p[0], *frame.xy(p[1], p[2]), p[3]) for p in points]
+    # The run of positions with no hole, that t falls in or next to
+    i = min(range(len(pts)), key=lambda k: abs(pts[k][0] - t))
+    lo = hi = i
+    while lo > 0 and pts[lo][0] - pts[lo - 1][0] <= MAX_INTERPOLATE_S:
+        lo -= 1
+    while hi < len(pts) - 1 and pts[hi + 1][0] - pts[hi][0] <= MAX_INTERPOLATE_S:
+        hi += 1
+    run = pts[lo:hi + 1]
+    along = [0.0]
+    for a, b in zip(run, run[1:]):
+        along.append(along[-1] + math.hypot(b[1] - a[1], b[2] - a[2]))
+    centre = along[i - lo]
+    chosen = [p for p, d in zip(run, along) if abs(d - centre) <= PATH_WINDOW_M]
+    if len(chosen) < 2:
+        return None
+    east, north = chosen[-1][1] - chosen[0][1], chosen[-1][2] - chosen[0][2]
+    length = math.hypot(east, north)
+    if not length:
+        return None
+    ux, uy = east / length, north / length
+    fit = [((p[1] - chosen[0][1]) * ux + (p[2] - chosen[0][2]) * uy, p[3]) for p in chosen if p[3] is not None]
+    if len(fit) < PATH_MIN_POINTS or fit[-1][0] - fit[0][0] < PATH_MIN_SPAN_M:
+        return None
+    mean_d = sum(d for d, _ in fit) / len(fit)
+    mean_h = sum(h for _, h in fit) / len(fit)
+    spread = sum((d - mean_d) ** 2 for d, _ in fit)
+    if not spread:
+        return None
+    slope = sum((d - mean_d) * (h - mean_h) for d, h in fit) / spread
+    return math.degrees(math.atan(slope))
 
 
 def distance_m(frame, lat, lon):
