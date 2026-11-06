@@ -24,7 +24,7 @@ const unseenOf = (passId) => (state.data.unseen || {})[passId] || {};
 // {} for a build made before it existed
 const identityOf = (passId) => (state.data.identity || {})[passId] || {};
 // Where a resolved type came from, in words
-const REGISTER_NAMES = { uk: "the UK register", ch: "the Swiss register" };
+const REGISTER_NAMES = { uk: "the UK register", ch: "the Swiss register", ie: "the Irish register", lu: "the Luxembourg register" };
 const typeNote = (id) => {
   const s = id.type_source || "";
   if (!s) return "";

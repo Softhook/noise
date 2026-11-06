@@ -61,12 +61,18 @@ make build      # again, to use what it found
 
 `make fleet` (`python3 -m survey fleet`) checks the registrations of flights that came within 3 km of a receptor and below 3,000 ft (`--km`, `--ft`), as the passes table starts with. It asks only about those not already in the table, one request a second. `--dry-run` lists what it would ask, `--recheck` asks again, and `python3 -m survey fleet G-LCYN HB-AZH` checks just those.
 
-Registers it can ask online, in `survey/registers.py`:
+Registers it can ask, in `survey/registers.py`:
 
-| Mark | Register | Gives |
-|---|---|---|
-| G- | UK, the CAA's G-INFO | type, model, engines, MTOW, transponder address, noise certificate |
-| HB- | Switzerland, FOCA/BAZL | type, model and its marketing name, engines, MTOM, noise certificate |
+| Mark | Register | How | Gives |
+|---|---|---|---|
+| G- | UK, the CAA's G-INFO | searched, per aircraft | type, model, engines, MTOW, transponder address, noise certificate |
+| HB- | Switzerland, FOCA/BAZL | searched, per aircraft | type, model and its marketing name, engines, MTOM, noise certificate |
+| EI-, EJ- | Ireland, the IAA | its monthly "all registered aircraft" Excel file | model, engines, MTOW |
+| LX- | Luxembourg, the DAC | its relevé, a PDF on data.public.lu | model |
+
+A downloaded register's newest file is fetched once a run and read in memory; nothing of it is saved but the entries asked for, as the files also name owners. It gives the model but not the ICAO type designator, so `registers.MODEL_TYPES` maps the models that fly near the survey (BD-500-1A10 to BCS1, DHC-8-402 to DH8D, and so on). An entry whose model isn't there is kept with no type, says so in its `note`, and settles nothing until the model is added and the entry rechecked. The file can be months old: the IAA's newest in November 2026 was for the end of September 2025. An aircraft registered since then shows as `not found`, with the file's date in its note, so recheck it when a newer file comes out. Reading Luxembourg's PDF needs `pdftotext` (`brew install poppler`), the one thing here outside Python's standard library; without it, only Luxembourg's lookups fail.
+
+The Dutch, Italian and German registers publish no file to download: the Dutch open-data file was withdrawn in 2022, Italy's register is open only to those with a legitimate interest, and Germany's isn't public.
 
 It lists the registrations no register covers. Check those by hand and add a row with `register` set to `manual` and the source in `note`; the script never overwrites one. A registration its register doesn't have gets a `not found` row, so it isn't asked again, and settles no type. Only facts about the aircraft are kept, never its owner or operator.
 
@@ -90,7 +96,7 @@ To add a country, write a function in `survey/registers.py` that takes a registr
 | `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; ranks the sources |
 | `survey/resolve.py` | Each pass's registration and type: the fleet table's first, then the sources', with any disagreement |
 | `survey/fleet.py` | `python3 -m survey fleet`: the fleet table, and which registrations to look up |
-| `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's |
+| `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's searched, Ireland's and Luxembourg's downloaded |
 | `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, resolving types, the tables, as a list of steps |
 | `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's small tables, read once and kept until the next build, and its positions and levels read a day at a time |
 | `survey/server.py` | `python3 -m survey serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |

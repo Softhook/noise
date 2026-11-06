@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import gzip
+import html
 import http.client
 import http.server
 import io
@@ -16,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import zipfile
 from unittest import mock
 
 from survey import adapters, build, explain, fleet, link, manifest, registers, resolve, schema, server
@@ -833,6 +835,8 @@ class FakeRegister:
                 return answer
         raise AssertionError(f"unexpected request {url}")
 
+    text = bytes = lambda self, url: self.json(url)
+
 
 GINFO = {
     "search": [{"AircraftID": 64481, "Mark": "LCYN", "AircraftType": "ERJ 190-100 LR", "RegistrationStatus": "R"},
@@ -930,6 +934,117 @@ class Fleet(unittest.TestCase):
             self.assertEqual(got["icao_type"], "E190")
             self.assertEqual(got["approach_epndb"], "92.5")
             self.assertEqual(list(got), fleet.FIELDS)
+
+
+def xlsx(rows):
+    """A minimal Excel file: rows of text in the first sheet, through shared strings, with a
+    gap in the columns, as Excel leaves for an empty cell."""
+    strings, cells = [], []
+    for r, row in enumerate(rows, 1):
+        refs = []
+        for c, text in enumerate(row):
+            if text == "":
+                continue
+            strings.append(text)
+            refs.append(f'<c r="{chr(65 + c)}{r}" t="s"><v>{len(strings) - 1}</v></c>')
+        cells.append(f'<row r="{r}">{"".join(refs)}</row>')
+    ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("xl/sharedStrings.xml", f"<sst {ns}>" + "".join(f"<si><t>{html.escape(s)}</t></si>" for s in strings) + "</sst>")
+        z.writestr("xl/worksheets/sheet1.xml", f"<worksheet {ns}><sheetData>{''.join(cells)}</sheetData></worksheet>")
+    return out.getvalue()
+
+
+IAA_HEADER = ["Registration Mark", "Aircraft producer", "Aircraft Model", "Category", "Registration date", "MTOW (KGs)",
+              "Year of Manufacture", "Aircraft Serial Number", "Engine Manufacturer", "Engine Model", "No. of Engines",
+              "Registered Owner", "Address"]
+IAA_LISTING_PAGE = """<table><tr><td>31 August 2025</td><td>01/09/2025</td>
+<td><a href="https://www.iaa.ie/docs/aircraft-registration/all-registered-aircraft---august-2025.xlsx?v=1">Download</a></td></tr>
+<tr><td>30 September 2025</td><td>01/10/2025</td>
+<td><a href="https://www.iaa.ie/docs/aircraft-registration/all-registered---september---2025.xlsx?v=3">Download</a></td></tr>
+<tr><td>Changes in September 2025</td><td>02/10/2025</td>
+<td><a href="https://www.iaa.ie/docs/aircraft-registration-montly-changes/register-changes-september-2025.xlsx">Download</a></td></tr></table>"""
+# Two pages of the relevé, as pdftotext -layout lays them out, with the columns in other places
+LU_TEXT = (
+    "Relevé luxembourgeois des immatriculations\n"
+    "Immat        Constructeur                  Type d'aéronef       SN aéronef   Propriétaire                Exploitant\n"
+    "LX-ABC       BOMBARDIER INC.               BD-700-1A10 GLOBAL   9213         SOMEONE LTD.                SOMEONE ELSE S.A.\n"
+    "                                           EXPRESS XRS\n\n"
+    "\fImmat        Constructeur            Type d'aéronef   SN aéronef   Propriétaire               Exploitant\n"
+    "LX-LEC       EMBRAER S.A.            ERJ 190-400      19020218     LX-LEC S.A.                LUXAIR, SOCIÉTÉ LUXEMBOURGEOISE DE\n"
+    "                                                                                              NAVIGATION AÉRIENNE S.A.\n\n"
+    "LX-LQA       BOMBARDIER INC.         DHC-8-402        4468         ROI SOLEIL S.A.            LUXAIR\n")
+
+
+class DownloadedRegisters(unittest.TestCase):
+    def test_models_map_to_icao_types(self):
+        for model, code in [("BD-500-1A10", "BCS1"), ("BD-500-1A11", "BCS3"), ("ERJ 190-100 LR", "E190"),
+                            ("ERJ 190-300", "E290"), ("ERJ 190-400", "E295"), ("DHC-8-402", "DH8D"),
+                            ("ATR 72-212 A", "AT76"), ("A320-251N", "A20N"), ("A320-214", "A320"),
+                            ("A321-271NX", "A21N"), ("BD-700-1A10 GLOBAL EXPRESS XRS", "")]:
+            self.assertEqual(registers.icao_type(model), code, model)
+
+    def test_the_irish_file_is_read_without_owners(self):
+        rows = registers.xlsx_rows(xlsx([
+            ["All Registered Aircraft as at 30 September 2025 - Total 3"], IAA_HEADER,
+            ["EI-HLA", "AIRBUS CANADA LIMITED PARTNERSHIP", "BD-500-1A10", "LAND AEROPLANE", "31/10/2023", "54885",
+             "2023", "50068", "PRATT & WHITNEY", "PW1521G", "2", "A LESSOR LIMITED", "DUBLIN 2"],
+            ["EJ-ADMI", "GULFSTREAM", "GULFSTREAM GVI", "LAND AEROPLANE", "", "", "", "", "", "", "", "PRIVATE INDIVIDUAL", "CORK"],
+            ["EI-ABS", "BOEING", "B75N1", "", "", "1338", "", "75-2634", "", "", "1", "PRIVATE INDIVIDUAL", "DUBLIN"],
+            ["Total", "3"]]))
+        got = registers.iaa_entries(rows, "30 September 2025")
+        self.assertEqual(sorted(got), ["EIABS", "EIHLA", "EJADMI"])
+        e = got["EIHLA"]
+        self.assertEqual((e["mark"], e["icao_type"], e["model"], e["mtow_kg"], e["engines"], e["register"]),
+                         ("EI-HLA", "BCS1", "BD-500-1A10", 54885, "2 x PRATT & WHITNEY PW1521G", "ie"))
+        self.assertEqual(set(e), set(fleet.FIELDS))
+        self.assertNotIn("LESSOR", json.dumps(got))
+        self.assertNotIn("DUBLIN", json.dumps(got))
+        # A model MODEL_TYPES doesn't have keeps its model, with no type, so it settles nothing
+        self.assertEqual((got["EIABS"]["icao_type"], got["EIABS"]["model"]), ("", "B75N1"))
+        self.assertEqual(fleet.known_type(got["EIABS"]), "")
+        self.assertIn("MODEL_TYPES", got["EIABS"]["note"])
+
+    def test_the_newest_irish_register_file_is_used(self):
+        page = {registers.IAA_LISTING: IAA_LISTING_PAGE, registers.IAA_LISTING + "/1": IAA_LISTING_PAGE}
+        issued, title, url = registers.iaa_newest(FakeRegister(page))
+        self.assertEqual(issued, "2025-10-01")
+        self.assertTrue(url.endswith("all-registered---september---2025.xlsx?v=3"))  # Not the monthly changes
+
+    def test_the_luxembourg_releve_is_read_by_each_pages_columns(self):
+        got = registers.lu_entries(LU_TEXT, "2026-10-15")
+        self.assertEqual(sorted(got), ["LXABC", "LXLEC", "LXLQA"])
+        self.assertEqual((got["LXLEC"]["model"], got["LXLEC"]["icao_type"], got["LXLEC"]["serial_number"]),
+                         ("ERJ 190-400", "E295", "19020218"))
+        self.assertEqual(got["LXLQA"]["icao_type"], "DH8D")
+        self.assertEqual(got["LXABC"]["model"], "BD-700-1A10 GLOBAL EXPRESS XRS")  # Carried on below
+        self.assertNotIn("SOLEIL", json.dumps(got))
+        self.assertNotIn("LUXAIR", json.dumps(got))
+
+    def test_a_downloaded_register_is_read_once_a_run_even_when_it_fails(self):
+        http, calls = registers.Http(pause_s=0), []
+
+        def read(h):
+            calls.append(1)
+            return {"LXLEC": {"icao_type": "E295"}}
+
+        self.assertEqual(registers.downloaded("LXLEC", http, "lu", read), {"icao_type": "E295"})
+        self.assertIsNone(registers.downloaded("LXLQA", http, "lu", read))
+        self.assertEqual(len(calls), 1)
+
+        def fails(h):
+            calls.append(1)
+            raise registers.LookupFailed("cut short")
+
+        for reg in ("EIHLA", "EIHLB"):
+            with self.assertRaises(registers.LookupFailed):
+                registers.downloaded(reg, http, "ie", fails)
+        self.assertEqual(len(calls), 2)
+
+    def test_irish_and_luxembourg_marks_go_to_their_registers(self):
+        self.assertEqual([registers.REGISTERS[registers.nationality(r)][0] for r in ("EIHLA", "EJADMI", "LXLEC")],
+                         ["ie", "ie", "lu"])
 
 
 class Resolve(unittest.TestCase):
