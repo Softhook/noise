@@ -36,9 +36,19 @@ The app only listens on this computer, and only reads built deployments. **Rebui
 
 ## Matching noise events
 
-The build matches each noise event to the pass that made it (`survey/match.py`, with the rules in [ARCHITECTURE.md](ARCHITECTURE.md#match-noise-events-to-passes)). For each pass, it predicts when the sound from the closest point of its track reached the receptor. An event goes to the loudest predicted pass whose arrival is within 20 s of its LAmax, and each pass gets at most one event. The other passes that may have added to the level are listed. The results are in `common/event_matches.csv`. `build.json`'s `matches` counts them per receptor and noise source, with the median offset of LAmax from the predicted arrival: a steady value near zero says the clocks agree.
+The build matches each noise event to the pass that made it (`survey/match.py`, with the rules in [ARCHITECTURE.md](ARCHITECTURE.md#match-noise-events-to-passes)). For each pass, it predicts when the sound from the closest point of its track reached the receptor.
+- It first finds each day's clock offset between the noise meter and the tracks, so a clock a minute out still matches.
+- An event then goes to the loudest predicted pass within 3 km whose arrival is within 20 s of its LAmax, and each pass gets at most one event.
+- The other passes that may have added to the level are named.
 
-In the app, the passes table shows each pass's matched LAmax. The pass's detail gives the event, its offset and anything flagged. A noise event's tooltip on the timeline says which pass it went to, and clicking it selects that pass. The **Events not matched** tile counts the events with no pass.
+The results are in `common/event_matches.csv`, and every candidate pass, matched or not, is in `common/event_candidates.csv`. `build.json`'s `matches` gives, per receptor and noise source:
+- the counts;
+- each day's clock offset;
+- the median offset of LAmax from the predicted arrival, over the matches with nothing flagged, for arrivals and departures apart. A steady value near zero says the clocks agree.
+
+The build warns when a day's offset is over 5 s, or can't be found on a busy day.
+
+In the app, the passes table shows each pass's matched LAmax. The pass's detail gives the event, its offset and anything flagged. A noise event's tooltip on the timeline says which pass it went to, and clicking it selects that pass. The **Events not matched** tile counts the events with no pass, such as one whose only pass was over 3 km away.
 
 ## Where the data lives
 
@@ -83,7 +93,7 @@ The garden's location is private, so a manifest never holds it. Instead, the gar
 
 Pass ids are dated by the closest approach to one receptor: the manifest's `pass_receptor`, or else its first public receptor, so they come out the same on a computer without the garden's `site.json`.
 
-Built tables go in `data/derived/deployments/<deployment>/common/`: `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen`, `identity` and `event_matches`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+Built tables go in `data/derived/deployments/<deployment>/common/`: `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen`, `identity`, `event_matches` and `event_candidates`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
 
 ## Aircraft types
 
@@ -131,7 +141,7 @@ To add a country, write a function in `survey/registers.py` that takes a registr
 | `survey/explain.py` | Why a source has no flight in a pass: no data then, outside its area, above its ceiling, or unexplained |
 | `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; ranks the sources |
 | `survey/resolve.py` | Each pass's registration and type: the fleet table's first, then the sources', with any disagreement |
-| `survey/match.py` | Each noise event to the pass that made it: the predicted sound arrival from each pass's closest point, the loudest pass in the window, and any others that may have added to the level |
+| `survey/match.py` | Each noise event to the pass that made it: the predicted sound arrival from each pass's closest point, each day's clock offset, the loudest pass within 3 km in the window, any others that may have added to the level, and the clock check's medians |
 | `survey/fleet.py` | `noise fleet`: the fleet table, and which registrations to look up |
 | `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's searched, Ireland's and Luxembourg's downloaded |
 | `survey/build.py` | `noise build`: each source's prepare step and adapter, approaches, linking, resolving types, the tables, as a list of steps |

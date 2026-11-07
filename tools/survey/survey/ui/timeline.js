@@ -103,7 +103,7 @@ function drawTimeline(flights) {
     const dot = el("circle", { cx: x, cy: y, r: 4, class: "lmax" + (e.event_class === "aircraft" ? "" : " other") }, layer);
     dot.addEventListener("mousemove", (ev) => showTip(ev, [h("div", {}, h("b", { text: `${fmt(Number(e.lmax_db), 1)} dB LAmax` })),
       h("div", { class: "row", text: `${hms(toT(e.lmax_utc))} · SEL ${fmt(Number(e.sel_db), 1)} dB · ${e.event_class === "aircraft" ? "aircraft event" : e.event_class === "other" ? "not an aircraft, by the source" : "unclassed event"}` }),
-      h("div", { class: "row", text: e.pass_id ? `Matched to ${e.pass_id}, ${Number(e.offset_s) >= 0 ? "+" : ""}${fmt(Number(e.offset_s), 1)} s from its predicted arrival` : e.flags === "taken" ? "Not matched: the passes near it made other events" : "Not matched to a pass" })]));
+      h("div", { class: "row", text: e.pass_id ? `Matched to ${e.pass_id}, ${Number(e.offset_s) >= 0 ? "+" : ""}${fmt(Number(e.offset_s), 1)} s from its predicted arrival` : (e.flags || "").includes("taken") ? "Not matched: the passes near it made other events" : (e.flags || "").includes("distant") ? "Not matched: the only passes then were over 3 km away" : "Not matched to a pass" })]));
     dot.addEventListener("mouseleave", hideTip);
     if (e.pass_id) dot.addEventListener("click", () => select(e.pass_id, "timeline"));
   }

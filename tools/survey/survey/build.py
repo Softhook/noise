@@ -33,6 +33,12 @@ from .common import day_of, iso, rounded
 from .geometry import Frame, closest_approach, path_angle
 
 
+# A day's clock offset (match.py) worth a warning: this far out, or not established on a day with
+# this many events
+CLOCK_WARN_S = 5
+CLOCK_WARN_EVENTS = 10
+
+
 class Busy(Exception):
     """Another build of the same deployment is running."""
 
@@ -153,7 +159,7 @@ def receptor_rows(receptors):
             for r in receptors.values()]
 
 
-def summarise(m, tables, tracks, warnings):
+def summarise(m, tables, tracks, warnings, clocks=None):
     """build.json: when, what went in, and what came out."""
     linked = {}
     for row in tables["passes"]:
@@ -183,8 +189,9 @@ def summarise(m, tables, tracks, warnings):
             "unknown": sum(1 for i in tables["identity"] if not i["type"]),
             "sources disagree": sum(1 for i in tables["identity"] if i["disagree"]),
         },
-        # Per receptor and noise source: events matched to a pass, and LAmax's median offset from its arrival
-        "matches": match.summary(tables["event_matches"]),
+        # Per receptor and noise source: events matched to a pass, each day's clock offset, and LAmax's
+        # median offset from the arrival over the clean arrivals
+        "matches": match.summary(tables["event_matches"], clocks or {}),
         "warnings": warnings,
     }
 
@@ -214,12 +221,20 @@ def _build(m, log, fleet_path=None):
         "passes": passes,
         "unseen": explain.unseen_rows(passes, tracks, limits, tables["coverage"]),
         "identity": resolve.resolve(passes, tables["flights"], fleet.read(fleet_path)),
-        "event_matches": match.match(tables["noise_events"], passes, tables["flights"], tracks, m["receptors"]),
     })
+    tables["event_matches"], tables["event_candidates"], clocks = match.match(
+        tables["noise_events"], passes, tables["flights"], tracks, m["receptors"])
+    for group, days in clocks.items():
+        for day, clock in days.items():
+            if clock["offset_s"] is not None and abs(clock["offset_s"]) > CLOCK_WARN_S:
+                warnings.append(f"{group} on {day}: noise events are {clock['offset_s']:+.1f} s from their passes' "
+                                "predicted arrivals: a clock may be out")
+            elif clock["offset_s"] is None and clock["events"] >= CLOCK_WARN_EVENTS:
+                warnings.append(f"{group} on {day}: no clock offset stands out, so matching assumed the clocks agree")
 
     out = os.path.join(m["out_dir"], "common")
     schema.write_tables(out, {name: tables[name] for name in schema.TABLES})
-    summary = summarise(m, tables, tracks, warnings)
+    summary = summarise(m, tables, tracks, warnings, clocks)
     schema.write_json(os.path.join(m["out_dir"], "build.json"), summary)
     for w in warnings:
         print(f"WARNING: {w}", file=log)

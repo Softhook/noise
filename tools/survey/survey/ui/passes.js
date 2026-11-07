@@ -89,7 +89,7 @@ function eventRows(events) {
     h("dt", { text: `${sourceName(e.source)} event` }),
     h("dd", { text: `LAmax ${fmt(Number(e.lmax_db), 1)} dB at ${hms(toT(e.lmax_utc))}, ${Number(e.offset_s) >= 0 ? "+" : ""}${fmt(Number(e.offset_s), 1)} s from the sound's predicted arrival from ${fmt(Number(e.slant_m), 0)} m (${sourceName(e.track_source)}'s track)` }),
     ...matchNotes(e).map((note) => h("dd", { class: "disagree", text: note })),
-    ...(e.others ? [h("dt", { text: "May have added" }), h("dd", { text: e.others })] : [])]);
+    ...(e.others ? [h("dt", { text: "May have added" }), h("dd", { text: e.others.split(";").join(", ") })] : [])]);
 }
 function drawDetail(passes) {
   const box = $("detail");

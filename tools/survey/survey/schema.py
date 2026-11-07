@@ -53,11 +53,16 @@ TABLES = {
     # Each noise event, and the pass that made it (match.py), keyed on source, receptor and
     # lmax_utc. track_source, track_id: the flight whose track predicted the sound; emitted_utc and
     # arrival_utc: when the sound left its closest point and reached the receptor; offset_s: LAmax
-    # minus arrival; slant_m, ground_m, height_m: its closest point. others: other passes that may
-    # have added to the level. flags: match.FLAGS
+    # minus arrival, as measured; window_centre_s: the day's clock offset the window was centred
+    # on, empty if not established; slant_m, ground_m, height_m, path_angle_deg: its closest
+    # point. others: pass ids, ";"-joined, that may have added to the level. flags: match.FLAGS
     "event_matches": ["source", "receptor", "lmax_utc", "lmax_db", "event_class", "pass_id", "track_source",
-                      "track_id", "emitted_utc", "arrival_utc", "offset_s", "slant_m", "ground_m", "height_m",
-                      "others", "flags"],
+                      "track_id", "emitted_utc", "arrival_utc", "offset_s", "window_centre_s", "slant_m", "ground_m",
+                      "height_m", "path_angle_deg", "others", "flags"],
+    # Every pass whose predicted arrival fitted an event in time (match.py), matched or not.
+    # below_match_db: how much quieter than the matched pass it was predicted, empty if none was
+    "event_candidates": ["source", "receptor", "lmax_utc", "pass_id", "matched", "offset_s", "slant_m",
+                         "track_source", "below_match_db"],
 }
 # The tables an adapter may fill. The rest are worked out by the core (build.py).
 SOURCE_TABLES = ("flights", "positions", "noise_events", "levels", "coverage")

@@ -10,10 +10,15 @@ Where the survey's tools stand, what's waiting on a decision, and what's next. R
 
 ## Done: match (7 November 2026)
 
-- `survey/match.py` matches each noise event at a receptor to the pass that made it. The predicted sound arrival comes from each pass's 3-D closest point, using its highest-ranked track not at an edge of its data. An event goes to the loudest predicted pass within ±20 s of LAmax, and each pass gets at most one event. Other passes within 10 dB are listed. The rules are in [ARCHITECTURE.md](tools/survey/ARCHITECTURE.md#match-noise-events-to-passes).
-- The results go in a new table, `common/event_matches.csv`, and `build.json`'s `matches` gives the counts and the median offset of LAmax from the arrival, per receptor and noise source.
+- `survey/match.py` matches each noise event at a receptor to the pass that made it. The predicted sound arrival comes from each pass's 3-D closest point, using its highest-ranked track not at an edge of its data.
+- It first finds each day's clock offset from where LAmax-minus-arrival pairs pile up, and centres the window on it.
+- An event goes to the loudest predicted pass within 3 km and ±20 s, and each pass gets at most one event. Other passes within 10 dB are named.
+- The rules are in [ARCHITECTURE.md](tools/survey/ARCHITECTURE.md#match-noise-events-to-passes).
+- The results go in two new tables, `event_matches` and `event_candidates`. `build.json`'s `matches` gives the counts, each day's clock offset, and the median offset over clean arrivals and clean departures, kept apart.
 - The app's passes table, detail and timeline use the build's matches instead of the page's own guess.
-- On 5 November 2026, all 22 NMT6 aircraft events matched the right pass. The median offset was 0.3 s, and all were within ±2 s except one, at −7.8 s.
+- On 5 November 2026, each of the 22 NMT6 events WebTrak classed as aircraft went to the only pass within 1 km that fitted in time. All 22 were departures. The clock offset was 0.4 s, and the median offset over the departures 0.3 s.
+- A Global Express at −7.8 s is unexplained: it isn't the departure effect, since every pass that day was a departure.
+- A critical review the same day led to the 3 km limit, the clock offset, the separate medians and the candidates table. Not done: comparing the predicted level with the measured one, to catch an event that isn't the pass's even within 3 km. That needs the Fusion's levels.
 
 ## Done: the restructure (7 November 2026)
 
@@ -53,7 +58,7 @@ Why each choice was made: the critical review that led to it is summarised in th
 
 The survey README's [Status](tools/survey/README.md#status) says what's built. Still to do, from the architecture:
 
-1. **`checks`:** clock offsets (first, from `match`'s offsets, per day and source pair), coverage, heights, identity conflicts, unmatched flights and events.
+1. **`checks`:** clock offsets (`match` already finds each day's; `checks` reports them per day and source pair, and the jumps), coverage, heights, identity conflicts, unmatched flights and events.
 2. **The rest of `resolve`:** per-pass manual overrides, airport records, and lookups within a budget.
 3. **The garden's real data:** the Pi's logs once it's at the garden (`make pi-collect`). Until then, OpenSky stands in for it.
 4. **The Fusion adapter**, once its export format is decoded ([notes](Documents/Fusion_Data_Format_Reverse_Engineering.md)).

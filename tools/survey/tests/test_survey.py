@@ -572,6 +572,11 @@ class Linking(unittest.TestCase):
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0)])), 2)
 
 
+def flags(row):
+    """A match's flags, but no_clock: a test's few events never establish a clock offset."""
+    return ";".join(f for f in row["flags"].split(";") if f != "no_clock")
+
+
 class Matching(unittest.TestCase):
     RECEPTORS = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1], "ground_elevation_m": 3.0, "mic_height_m": 3.0}}
 
@@ -587,7 +592,7 @@ class Matching(unittest.TestCase):
                 tracks[(source, sid)] = pts
         noise = [{"source": "webtrak", "receptor": "nmt6", "lmax_utc": iso(t), "lmax_db": db, "event_class": kind}
                  for t, db, kind in events]
-        got = match.match(noise, rows, flights, tracks, self.RECEPTORS)
+        got, self.candidates, self.clocks = match.match(noise, rows, flights, tracks, self.RECEPTORS)
         return {round(parse_time(r["lmax_utc"]) - T0): r for r in got}
 
     def test_an_event_goes_to_the_pass_predicted_loudest_within_the_window(self):
@@ -595,7 +600,7 @@ class Matching(unittest.TestCase):
                           "later": {"opensky": westbound(T0 + 300)}},
                          [(T0 + 3, 75, "aircraft"), (T0 + 340, 70, "aircraft")])
         row = got[3]
-        self.assertEqual((row["pass_id"], row["track_source"], row["flags"]), ("near", "opensky", ""))
+        self.assertEqual((row["pass_id"], row["track_source"], flags(row)), ("near", "opensky", ""))
         # Heard from about 386 m, from about 31 m past abeam, since it's descending: so 0.44 s after
         # abeam, and the sound arrives about 1.1 s after that
         slant = float(row["slant_m"])
@@ -603,17 +608,19 @@ class Matching(unittest.TestCase):
         emitted = T0 + 324 * math.sin(math.radians(5.5)) / 70
         self.assertAlmostEqual(parse_time(row["emitted_utc"]), emitted, delta=0.05)
         self.assertAlmostEqual(row["offset_s"], T0 + 3 - (emitted + slant / match.SOUND_SPEED), delta=0.06)
-        # "far" is over 10 dB quieter, so it isn't listed as adding to the level
+        # "far" is over 10 dB quieter, so it isn't listed as adding to the level, but it's a candidate
         self.assertEqual(row["others"], "")
+        far = [c for c in self.candidates if c["pass_id"] == "far"]
+        self.assertEqual(len(far), 1)
+        self.assertGreater(far[0]["below_match_db"], 10)
         # 40 s after "later"'s arrival is outside the window
-        self.assertEqual((got[340]["pass_id"], got[340]["flags"]), ("", "unmatched"))
+        self.assertEqual((got[340]["pass_id"], flags(got[340])), ("", "unmatched"))
 
     def test_a_pass_close_enough_to_add_to_the_level_is_listed(self):
         got = self.match({"lcy": {"opensky": westbound(T0)}, "heli": {"opensky": westbound(T0 + 8, north_m=-900)}},
                          [(T0 + 2, 76, "aircraft")])
         self.assertEqual(got[2]["pass_id"], "lcy")
-        self.assertEqual(got[2]["flags"], "others")
-        self.assertRegex(got[2]["others"], r"^heli 9\d\d m -\d\.\d s$")
+        self.assertEqual((flags(got[2]), got[2]["others"]), ("others", "heli"))
 
     def test_a_pass_makes_one_event_and_the_closer_in_time_gets_it(self):
         # Both events fit "near" best, the second one better in time. The first goes to "other"
@@ -622,30 +629,65 @@ class Matching(unittest.TestCase):
         self.assertEqual((got[2]["pass_id"], got[-8]["pass_id"]), ("near", "other"))
         # With nothing else near, the event is left over, and says why
         got = self.match({"near": {"opensky": westbound(T0)}}, [(T0 - 8, 70, "aircraft"), (T0 + 2, 75, "aircraft")])
-        self.assertEqual((got[2]["pass_id"], got[-8]["pass_id"], got[-8]["flags"]), ("near", "", "taken"))
-        self.assertRegex(got[-8]["others"], r"^near ")
+        self.assertEqual((got[2]["pass_id"], got[-8]["pass_id"], flags(got[-8])), ("near", "", "taken"))
+        self.assertEqual([c["pass_id"] for c in self.candidates if c["lmax_utc"] == iso(T0 - 8)], ["near"])
 
     def test_the_ads_b_track_predicts_the_sound_unless_its_closest_point_is_at_an_edge(self):
         both = {"opensky": westbound(T0), "webtrak": westbound(T0 + 2)}
         self.assertEqual(self.match({"p": both}, [(T0 + 3, 75, "aircraft")])[3]["track_source"], "opensky")
         cut = {"opensky": [p for p in westbound(T0) if p[0] > T0 + 20], "webtrak": westbound(T0 + 2)}
         row = self.match({"p": cut}, [(T0 + 3, 75, "aircraft")])[3]
-        self.assertEqual((row["track_source"], row["flags"]), ("webtrak", ""))
+        self.assertEqual((row["track_source"], flags(row)), ("webtrak", ""))
         # Every track cut off: the best is used, and flagged
         row = self.match({"p": {"opensky": cut["opensky"]}}, [(T0 + 21, 75, "aircraft")])[21]
-        self.assertEqual((row["pass_id"], row["flags"]), ("p", "at_track_end"))
+        self.assertEqual((row["pass_id"], flags(row)), ("p", "at_track_end"))
 
     def test_odd_events_are_flagged(self):
         flat = [(t, lat, lon, None) for t, lat, lon, _ in westbound(T0)]
         got = self.match({"p": {"webtrak": flat}, "q": {"opensky": westbound(T0 + 600)}},
                          [(T0 + 1, 70, "aircraft"), (T0 + 602, 70, "other")])
-        self.assertEqual(got[1]["flags"], "no_height")
-        self.assertEqual(got[602]["flags"], "not_aircraft")
+        self.assertEqual(flags(got[1]), "no_height")
+        self.assertEqual(flags(got[602]), "not_aircraft")
         # An event at a receptor left out of the build is listed, unmatched
         event = {"source": "fusion", "receptor": "garden", "lmax_utc": iso(T0), "lmax_db": 70, "event_class": "aircraft"}
-        [row] = match.match([event], [], [], {}, self.RECEPTORS)
+        [row], _, clocks = match.match([event], [], [], {}, self.RECEPTORS)
         self.assertEqual((row["pass_id"], row["flags"]), ("", "unmatched"))
-        self.assertEqual(match.summary([row])["garden fusion"]["unmatched"], 1)
+        self.assertEqual(match.summary([row], clocks)["garden fusion"]["unmatched"], 1)
+
+    def test_a_pass_over_3_km_away_is_never_matched(self):
+        # A bus under a high pass: the pass fits in time, but is too far to be the sound
+        got = self.match({"high": {"opensky": westbound(T0, north_m=-3500)}}, [(T0 + 12, 70, "other")])
+        self.assertEqual((got[12]["pass_id"], flags(got[12])), ("", "unmatched;distant"))
+        self.assertEqual([c["pass_id"] for c in self.candidates], ["high"])
+
+    def test_a_clock_out_by_a_minute_is_found_and_the_window_follows_it(self):
+        # Eight passes 5 minutes apart, and the noise meter's clock 45 s fast: outside the 20 s
+        # window, but a clear offset, so they still match, and the offset says by how much
+        passes = {f"p{k}": {"opensky": westbound(T0 + 300 * k)} for k in range(8)}
+        events = [(T0 + 300 * k + 46, 75, "aircraft") for k in range(8)]
+        got = self.match(passes, events)
+        self.assertEqual([got[300 * k + 46]["pass_id"] for k in range(8)], [f"p{k}" for k in range(8)])
+        self.assertTrue(all(got[300 * k + 46]["flags"] == "" for k in range(8)))
+        self.assertAlmostEqual(self.clocks["nmt6 webtrak"]["2026-11-05"]["offset_s"], 44.6, delta=0.3)
+        summary = match.summary(list(got.values()), self.clocks)["nmt6 webtrak"]
+        self.assertEqual((summary["matched"], summary["clean arrivals"], summary["clean departures"]), (8, 8, 0))
+        self.assertAlmostEqual(summary["median offset s, clean arrivals"], 44.6, delta=0.3)
+        # Too few events to tell: the window stays on 0, and says so
+        got = self.match({"p": {"opensky": westbound(T0)}}, [(T0 + 46, 75, "aircraft")])
+        self.assertEqual((got[46]["pass_id"], got[46]["flags"]), ("", "unmatched;no_clock"))
+
+    def test_the_clock_check_keeps_arrivals_and_departures_apart_and_leaves_doubtful_ones_out(self):
+        climb = [(t, lat, lon, 660 - h) for t, lat, lon, h in westbound(T0 + 600)]  # A departure, climbing
+        got = self.match({"arr": {"opensky": westbound(T0)}, "dep": {"opensky": climb},
+                          "cut": {"opensky": [p for p in westbound(T0 + 1200) if p[0] > T0 + 1220]}},
+                         [(T0 + 2, 75, "aircraft"), (T0 + 600 + 9, 78, "aircraft"), (T0 + 1222, 74, "aircraft")])
+        self.assertLess(got[2]["path_angle_deg"], -5)
+        self.assertGreater(got[609]["path_angle_deg"], 5)
+        summary = match.summary(list(got.values()), self.clocks)["nmt6 webtrak"]
+        # The cut-off pass is left out; the arrival and the departure are kept apart
+        self.assertEqual((summary["matched"], summary["clean arrivals"], summary["clean departures"]), (3, 1, 1))
+        self.assertEqual(summary["median offset s, clean arrivals"], got[2]["offset_s"])
+        self.assertEqual(summary["median offset s, clean departures"], got[609]["offset_s"])
 
 
 class Explain(unittest.TestCase):
@@ -767,7 +809,7 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual((unseen["pass_id"], unseen["source"], unseen["reason"]), ("20261105T0910-GLCYO", "webtrak", explain.NO_DATA))
         self.assertEqual(summary["unseen"][explain.UNEXPLAINED], 0)
         [row] = schema.read_table(common, "event_matches")
-        self.assertEqual((row["pass_id"], row["flags"]), ("20261105T0900-GLCYN", ""))
+        self.assertEqual((row["pass_id"], flags(row)), ("20261105T0900-GLCYN", ""))
         self.assertEqual(summary["matches"]["nmt6 webtrak"]["matched"], 1)
 
     def test_a_build_replaces_the_tables_folder_whole(self):
