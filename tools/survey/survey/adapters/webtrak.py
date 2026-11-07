@@ -7,36 +7,24 @@ Only this module imports the webtrak package, as ARCHITECTURE.md requires of ada
 Manifest entry:
     "webtrak": {"adapter": "webtrak", "chunks": "raw/webtrak/lcy", "monitors": {"nmt6": "106"}}
 
-`chunks` is the site's raw chunk cache, relative to the data folder.
-
-`tool` (optional) is the webtrak tool's folder, tools/webtrak by default. `monitors` maps a receptor to its WebTrak monitor id. Heights are WebTrak's altitude above sea
-level, of kind `radar`, since we don't know how WebTrak derives them.
+`chunks` is the site's raw chunk cache, relative to the data folder. `monitors` maps a receptor
+to its WebTrak monitor id. Heights are WebTrak's altitude above sea level, of kind `radar`, since
+we don't know how WebTrak derives them.
 """
 
 from __future__ import annotations
 
 import gzip
 import os
-import sys
 
 from ..common import iso, registration, stamp
 from ..geometry import Frame, distance_m
 
 PATHS = ("chunks",)
-MANIFEST_PATHS = ("tool",)
-# tools/webtrak, beside tools/survey
-DEFAULT_TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "webtrak")
 TRACK_GAP_S = 600  # A track id seen again after this long is a new flight
 # WebTrak's event class, as the common noise_events table puts it. Class 1 looks like an
 # aircraft-correlated event and 5 a non-aircraft one (tools/webtrak/webtrak/parse.py: an inference).
 EVENT_CLASSES = {"1": "aircraft", "5": "other"}
-
-
-def _webtrak(tool):
-    if tool not in sys.path:
-        sys.path.insert(0, tool)
-    from webtrak import parse  # noqa: E402  (only here, so the core never loads it)
-    return parse
 
 
 def limits(spec, context):
@@ -48,8 +36,9 @@ def limits(spec, context):
 
 def read(name, spec, context, warnings):
     """Radar flights and positions near the receptors, and the monitors' events and levels, for the window."""
+    from webtrak import parse  # Only here, so the core never loads it
+
     start, end, receptors = context.start, context.end, context.receptors
-    parse = _webtrak(spec.get("tool") or DEFAULT_TOOL)
     raw_dir = spec["chunks"]
     monitors = {str(mid): rid for rid, mid in (spec.get("monitors") or {}).items() if rid in receptors}
     frames = [Frame(r["lat"], r["lon"]) for r in receptors.values()]

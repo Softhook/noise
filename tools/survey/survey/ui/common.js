@@ -19,12 +19,12 @@ function bySource(a, b) {
 const isRadar = (source) => !!(state.radar && state.radar.has(source));
 // Why a source has no flight in a pass (survey/explain.py), as the table puts it
 const WHY = { "no data": "no data then", "outside its area": "outside its area", "above its ceiling": "above its ceiling", "unexplained": "missed" };
-const unseenOf = (passId) => (state.data.unseen || {})[passId] || {};
-// A pass's resolved identity (resolve.py): {registration, type, model, type_source, disagree}, or
-// {} for a build made before it existed
-const identityOf = (passId) => (state.data.identity || {})[passId] || {};
+const unseenOf = (passId) => state.data.unseen[passId] || {};
+// A pass's resolved identity (resolve.py): {registration, type, model, type_source, fleet, disagree}.
+// Its type is the one the page shows everywhere: the register's, or else its highest-ranked source's.
+const identityOf = (passId) => state.data.identity[passId] || {};
 // Where a resolved type came from, in words. id.fleet (resolve.py) says why the fleet table didn't
-// settle it; a build made before it existed has none, so then the note doesn't say why
+// settle it
 const REGISTER_NAMES = { uk: "the UK register", ch: "the Swiss register", ie: "the Irish register", lu: "the Luxembourg register" };
 const FLEET_WHY = {
   "no registration": "no registration to look up",
@@ -63,9 +63,7 @@ const TYPE_NAMES = {
 const typeName = (code) => TYPE_NAMES[code] || "";
 // A type as text: "E290 (Embraer E190-E2)", or the designator alone if it has no name here
 const typeText = (code) => (code ? (typeName(code) ? `${code} (${typeName(code)})` : code) : "");
-// A pass's type: the resolved one, or else the first its flights give in source order
-const passType = (passId, flights) => identityOf(passId).type
-  || flights.slice().sort((a, b) => bySource(a.source, b.source)).map((f) => f.type).find(Boolean) || "";
+const passType = (passId) => identityOf(passId).type || "";
 const unexplained = (passId) => Object.entries(unseenOf(passId)).some(([s, why]) => why === "unexplained" && state.sources.has(s));
 
 const state = {

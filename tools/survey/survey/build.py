@@ -33,12 +33,6 @@ from .common import day_of, iso, rounded
 from .geometry import Frame, closest_approach, path_angle
 
 
-# A day's clock offset (match.py) worth a warning: this far out, or not established on a day with
-# this many events
-CLOCK_WARN_S = 5
-CLOCK_WARN_EVENTS = 10
-
-
 class Busy(Exception):
     """Another build of the same deployment is running."""
 
@@ -62,8 +56,9 @@ def build_lock(m, wait=True):
 
 def clear_leftovers(m):
     """Remove the staging and old tables folders a build that was killed part-way left behind."""
-    for path in glob.glob(os.path.join(m["out_dir"], ".common.*")) + glob.glob(os.path.join(m["out_dir"], "analysis", "*.tmp")) + glob.glob(os.path.join(m["out_dir"], "analysis", "*.logs")):
-        shutil.rmtree(path, ignore_errors=True)
+    for pattern in (".common.*", os.path.join("analysis", "*.tmp"), os.path.join("analysis", "*.logs")):
+        for path in glob.glob(os.path.join(m["out_dir"], pattern)):
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def read_sources(m, warnings, log):
@@ -137,11 +132,8 @@ def approaches(tracks, receptors):
     found = {}
     for r in receptors.values():
         frame = Frame(r["lat"], r["lon"])
-        mic = None
-        if r["ground_elevation_m"] is not None:
-            mic = float(r["ground_elevation_m"]) + float(r["mic_height_m"] or 0)
         for key, points in tracks.items():
-            got = closest_approach(points, frame, mic)
+            got = closest_approach(points, frame, r["mic_amsl_m"])
             if got:
                 found[(*key, r["id"])] = (*got, path_angle(points, frame, got[0]))
     return found
@@ -150,7 +142,7 @@ def approaches(tracks, receptors):
 def approach_rows(found):
     return [{"source": s, "source_id": sid, "receptor": rid, "t": iso(t), "ground_m": rounded(g),
              "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else "",
-             "path_angle_deg": None if angle is None else round(angle, 2)}
+             "path_angle_deg": rounded(angle, 2)}
             for (s, sid, rid), (t, g, h, sl, end, angle) in sorted(found.items())]
 
 
@@ -159,39 +151,27 @@ def receptor_rows(receptors):
             for r in receptors.values()]
 
 
-def summarise(m, tables, tracks, warnings, clocks=None):
-    """build.json: when, what went in, and what came out."""
-    linked = {}
-    for row in tables["passes"]:
-        linked.setdefault(row["pass_id"], set()).add(row["source"])
-
-    def count(table, source):
-        return sum(1 for row in tables[table] if row["source"] == source)
-
+def summarise(m, tables, tracks, members, clocks, warnings):
+    """build.json: when, what went in, and what came out. Each step summarises its own table."""
     return {
+        "format": schema.FORMAT,
         "deployment": m["deployment"],
         "description": m["description"],
         "manifest": m["path"],
         "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "window_utc": [iso(m["start"]), iso(m["end"])],
         "receptors": list(m["receptors"]),
-        "sources": {name: {"adapter": spec["adapter"], "flights": count("flights", name),
+        "sources": {name: {"adapter": spec["adapter"],
+                           "flights": sum(1 for f in tables["flights"] if f["source"] == name),
                            "positions": sum(len(pts) for (s, _), pts in tracks.items() if s == name)}
                     for name, spec in m["sources"].items()},
-        "passes": len(linked),
-        "passes_in_several_sources": sum(1 for s in linked.values() if len(s) > 1),
-        "unseen": {reason: sum(1 for u in tables["unseen"] if u["reason"] == reason) for reason in explain.REASONS},
-        "types": {
-            "from a register": sum(1 for i in tables["identity"] if i["type_source"].startswith("register:")),
-            "set by hand": sum(1 for i in tables["identity"] if i["type_source"] == fleet.MANUAL),
-            "from a source only": sum(1 for i in tables["identity"] if i["type_source"] and ":" not in i["type_source"]
-                                      and i["type_source"] != fleet.MANUAL),
-            "unknown": sum(1 for i in tables["identity"] if not i["type"]),
-            "sources disagree": sum(1 for i in tables["identity"] if i["disagree"]),
-        },
+        "passes": len(members),
+        "passes_in_several_sources": sum(1 for keys in members.values() if len(keys) > 1),
+        "unseen": explain.summary(tables["unseen"]),
+        "types": resolve.summary(tables["identity"]),
         # Per receptor and noise source: events matched to a pass, each day's clock offset, and LAmax's
-        # median offset from the arrival over the clean arrivals
-        "matches": match.summary(tables["event_matches"], clocks or {}),
+        # median offset from the arrival over the clean arrivals and departures
+        "matches": match.summary(tables["event_matches"], clocks),
         "warnings": warnings,
     }
 
@@ -199,7 +179,7 @@ def summarise(m, tables, tracks, warnings, clocks=None):
 def build(m, log=None, wait=True, fleet_path=None):
     """Build manifest m (from manifest.load). Returns the build summary. If another build of it is
     running, waits for it to finish, or with wait=False raises Busy. fleet_path: the fleet table
-    (fleet.FLEET_PATH if None)."""
+    (paths.FLEET_PATH if None)."""
     with build_lock(m, wait):
         clear_leftovers(m)
         return _build(m, log or sys.stderr, fleet_path)
@@ -212,6 +192,7 @@ def _build(m, log, fleet_path=None):
     tables["flights"] = [f for f in tables["flights"] if (f["source"], f["source_id"]) in tracks]
     found = approaches(tracks, m["receptors"])
     passes = link.link(tables["flights"], tracks, found, m["pass_receptor"])
+    members = link.members(passes)
     tables.update({
         "receptors": receptor_rows(m["receptors"]),
         # By day, and in track order within a day, so a reader can take each track's positions as they come
@@ -219,22 +200,16 @@ def _build(m, log, fleet_path=None):
         "levels": level_parts(levels),
         "approaches": approach_rows(found),
         "passes": passes,
-        "unseen": explain.unseen_rows(passes, tracks, limits, tables["coverage"]),
-        "identity": resolve.resolve(passes, tables["flights"], fleet.read(fleet_path)),
+        "unseen": explain.unseen_rows(members, tracks, limits, tables["coverage"]),
+        "identity": resolve.resolve(members, tables["flights"], fleet.read(fleet_path)),
     })
     tables["event_matches"], tables["event_candidates"], clocks = match.match(
-        tables["noise_events"], passes, tables["flights"], tracks, m["receptors"])
-    for group, days in clocks.items():
-        for day, clock in days.items():
-            if clock["offset_s"] is not None and abs(clock["offset_s"]) > CLOCK_WARN_S:
-                warnings.append(f"{group} on {day}: noise events are {clock['offset_s']:+.1f} s from their passes' "
-                                "predicted arrivals: a clock may be out")
-            elif clock["offset_s"] is None and clock["events"] >= CLOCK_WARN_EVENTS:
-                warnings.append(f"{group} on {day}: no clock offset stands out, so matching assumed the clocks agree")
+        tables["noise_events"], members, tables["flights"], tracks, m["receptors"])
+    warnings += match.clock_warnings(clocks)
 
     out = os.path.join(m["out_dir"], "common")
     schema.write_tables(out, {name: tables[name] for name in schema.TABLES})
-    summary = summarise(m, tables, tracks, warnings, clocks)
+    summary = summarise(m, tables, tracks, members, clocks, warnings)
     schema.write_json(os.path.join(m["out_dir"], "build.json"), summary)
     for w in warnings:
         print(f"WARNING: {w}", file=log)

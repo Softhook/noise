@@ -32,12 +32,11 @@ import shutil
 import subprocess
 import sys
 
+from .. import paths
 from ..common import iso, number, parse_time, registration, stamp
 
 PATHS = ("results", "logs", "weather")
 MANIFEST_PATHS = ("site",)
-# tools/adsb, beside tools/survey: run as `python -m adsb`, never imported
-ADSB_TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "adsb")
 INPUTS_FILE = ".inputs.sha256"  # In a results folder: the fingerprint of what it was analysed from
 
 KNOTS_TO_MS = 0.514444
@@ -132,7 +131,8 @@ def fingerprint(files, site, weather, window, hashes):
     """What an analysis depends on, by content, never by where it is: the window, the files it
     reads (by their path in the logs folder), the site config, the weather, the adsb code and the
     Python version. The same data copied to another folder or computer gives the same fingerprint."""
-    code = sorted(os.path.join(d, f) for d, _, names in os.walk(os.path.join(ADSB_TOOL, "adsb"))
+    tool = paths.ADSB_TOOL
+    code = sorted(os.path.join(d, f) for d, _, names in os.walk(os.path.join(tool, "adsb"))
                   for f in names if f.endswith((".py", ".html")))
     parts = {
         "window": window,
@@ -140,7 +140,7 @@ def fingerprint(files, site, weather, window, hashes):
         "logs": [[rel, hashes(path)] for rel, path in files.items()],
         "site": hashes(site),
         "weather": hashes(weather) if weather else None,
-        "code": [[os.path.relpath(path, ADSB_TOOL), hashes(path)] for path in code],
+        "code": [[os.path.relpath(path, tool), hashes(path)] for path in code],
     }
     return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
 
@@ -188,9 +188,8 @@ def prepare(name, spec, context, out_dir, log, warnings):
     os.makedirs(view, exist_ok=True)
     command = ["analyse", "--config", site, "--logs", view, "--out", temp, "--all-positions",
                "--from", window[0], "--to", window[1]] + (["--weather", weather] if weather else [])
-    env = dict(os.environ, PYTHONPATH=ADSB_TOOL + os.pathsep + os.environ.get("PYTHONPATH", ""))
-    try:
-        done = subprocess.run([sys.executable, "-m", "adsb", *command], env=env,
+    try:  # The editable install (make setup) puts tools/adsb's package on the path
+        done = subprocess.run([sys.executable, "-m", "adsb", *command],
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     finally:
         shutil.rmtree(view, ignore_errors=True)

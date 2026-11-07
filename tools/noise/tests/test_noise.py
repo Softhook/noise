@@ -20,7 +20,7 @@ from noise import cli  # noqa: E402
 
 # Each tool works out the data folder itself, so they stay independent; this is what they say
 WHERE = {
-    "survey": ("survey", "from survey import manifest; print(manifest.DATA_DIR)"),
+    "survey": ("survey", "from survey import paths; print(paths.DATA_DIR)"),
     "webtrak": ("webtrak", "from webtrak import __main__ as m; print(os.path.dirname(os.path.dirname(m.DEFAULT_RAW)))"),
     "opensky": ("opensky", "from opensky import common; print(common.DATA_DIR)"),
 }

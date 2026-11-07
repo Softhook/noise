@@ -150,7 +150,7 @@ Written to `data/derived/deployments/<deployment>/` (git-ignored), beside `analy
 | File | Contents |
 |---|---|
 | `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
-| `build.json` | when it was built, the counts per source, and the warnings |
+| `build.json` | the tables' format (`schema.FORMAT`; the app asks for a rebuild of any other), when it was built, the counts per source and per step, and the warnings |
 | `common/event_matches.csv` | each noise event, the pass it's matched to, the track that predicted its sound, the predicted arrival and the offset from LAmax, the day's clock offset, the closest point and path angle, other passes that may have added, and flags (built) |
 | `common/event_candidates.csv` | every pass that fitted an event in time, matched or not, with its offset, distance and how much quieter than the match it was predicted (built) |
 | `common/identity.csv` | resolved type and registration per pass, where the type came from, and any disagreement (built) |
@@ -236,8 +236,10 @@ tools/
     deployments/<name>.json           manifests; a source's paths are relative to data/
     survey/
       __main__.py                     build | serve | fleet (later: lookup | check)
+      paths.py                        where the deployments, fleet table, ADS-B tool and data folder are
       manifest.py                     reads a manifest, including private receptors
-      schema.py                       table definitions, reading, writing and validation
+      common.py                       times, numbers, registrations, and the order of sources
+      schema.py                       table definitions and their format version, reading and writing
       geometry.py                     local coordinates, closest approach to each receptor
       adapters/__init__.py            the adapter interface and registry (ADAPTERS)
       adapters/adsb.py                runs adsb analyse (--all-positions) on the raw logs when they change, and

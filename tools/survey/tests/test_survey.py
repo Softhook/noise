@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import gzip
+import hashlib
 import html
 import http.client
 import http.server
@@ -21,17 +22,17 @@ import unittest
 import zipfile
 from unittest import mock
 
-from survey import adapters, build, explain, fleet, link, manifest, match, registers, resolve, schema, server
+from survey import adapters, build, explain, fleet, link, manifest, match, paths, registers, resolve, schema, server
 from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
-from survey.common import iso, parse_time, registration
+from survey.common import iso, parse_time, ranked, registration
 from survey.geometry import Frame, closest_approach, closest_slant, path_angle
 
-TOOLS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NMT6 = (51.50535, 0.11075)
 T0 = parse_time("2026-11-05T09:00:00Z")  # GMT, so WebTrak's local times are UTC
 M_PER_DEG_LAT = 111250.0
 M_PER_DEG_LON = M_PER_DEG_LAT * math.cos(math.radians(NMT6[0]))
+DIGEST_FORMAT_1 = "5d748cf9d9a9"  # schema.TABLES's columns at FORMAT 1 (see test_changing_a_tables_columns...)
 
 
 def at(east_m, north_m):
@@ -197,7 +198,7 @@ class Manifests(unittest.TestCase):
 
     def test_a_deployment_is_found_by_name_or_path(self):
         path = self.write()
-        with mock.patch.object(manifest, "DEPLOYMENTS_DIR", self.dir):
+        with mock.patch.object(paths, "DEPLOYMENTS_DIR", self.dir):
             self.assertEqual(manifest.find("d1"), os.path.join(self.dir, "d1.json"))
             self.assertEqual(manifest.find(path), path)
             with self.assertRaises(manifest.ManifestError):
@@ -205,27 +206,35 @@ class Manifests(unittest.TestCase):
 
     def test_data_paths_are_relative_to_the_data_folder_and_null_sources_are_off(self):
         data = os.path.join(self.dir, "data")
-        with mock.patch.object(manifest, "DATA_DIR", data):
+        with mock.patch.object(paths, "DATA_DIR", data):
             m = manifest.load(self.write(sources={
-                "opensky": {"adapter": "adsb", "results": "results"}, "adsb": None,
-                "webtrak": {"adapter": "webtrak", "tool": "code/webtrak", "chunks": "raw/webtrak/lcy"}}))
+                "opensky": {"adapter": "adsb", "logs": "raw/opensky/2026-11-05", "site": "config/site.json"}, "adsb": None,
+                "webtrak": {"adapter": "webtrak", "chunks": "raw/webtrak/lcy"}}))
         self.assertEqual(list(m["sources"]), ["opensky", "webtrak"])
-        self.assertEqual(m["sources"]["opensky"]["results"], os.path.join(data, "results"))
+        self.assertEqual(m["sources"]["opensky"]["logs"], os.path.join(data, "raw", "opensky", "2026-11-05"))
         self.assertEqual(m["sources"]["webtrak"]["chunks"], os.path.join(data, "raw", "webtrak", "lcy"))
-        # Code, unlike data, is found from the manifest
-        self.assertEqual(m["sources"]["webtrak"]["tool"], os.path.join(self.dir, "code", "webtrak"))
+        # Config, unlike data, is found from the manifest
+        self.assertEqual(m["sources"]["opensky"]["site"], os.path.join(self.dir, "config", "site.json"))
         self.assertEqual(m["deployment"], "d1")
 
     def test_a_private_receptor_comes_from_its_config_or_is_left_out(self):
         m = manifest.load(self.write())
         self.assertEqual(list(m["receptors"]), ["nmt6"])
-        self.assertIn("garden", m["warnings"][0])
+        self.assertTrue(any("garden" in w and "left out" in w for w in m["warnings"]))
         os.makedirs(os.path.join(self.dir, "private"))
         with open(os.path.join(self.dir, "private", "site.json"), "w") as f:
             json.dump({"site": {"name": "Garden", "lat": 51.5, "lon": 0.1, "ground_elevation_m": 2, "mic_height_m": 3}}, f)
         m = manifest.load(self.write())
         self.assertEqual(m["receptors"]["garden"]["name"], "Garden")
         self.assertFalse(m["receptors"]["garden"]["public"])
+
+    def test_a_receptors_microphone_height_is_its_ground_plus_its_mic_and_without_a_ground_sea_level(self):
+        m = manifest.load(self.write(receptors={
+            "nmt6": {"lat": NMT6[0], "lon": NMT6[1], "public": True, "ground_elevation_m": 3, "mic_height_m": 4},
+            "other": {"lat": NMT6[0], "lon": NMT6[1], "mic_height_m": 4}}))
+        self.assertEqual((m["receptors"]["nmt6"]["mic_amsl_m"], m["receptors"]["other"]["mic_amsl_m"]), (7.0, 4.0))
+        self.assertEqual([w for w in m["warnings"] if "sea level" in w],
+                         ["receptor other: no ground_elevation_m, so its ground is taken as sea level"])
 
     def test_pass_ids_are_dated_by_a_public_receptor_unless_the_manifest_names_one(self):
         os.makedirs(os.path.join(self.dir, "private"))
@@ -246,6 +255,8 @@ class Manifests(unittest.TestCase):
             manifest.load(self.write(window_utc=["2026-11-05T00:00:00", "2026-11-06T00:00:00Z"]))
         with self.assertRaises(manifest.ManifestError):
             manifest.load(self.write(sources={"x": {"adapter": "fax"}}))
+        with self.assertRaises(manifest.ManifestError):
+            manifest.load(self.write(receptors={"nmt6": {"lat": NMT6[0], "lon": NMT6[1], "ground_elevation_m": "3 m"}}))
 
 
 class Adapters(unittest.TestCase):
@@ -333,7 +344,7 @@ class Adapters(unittest.TestCase):
         webtrak_chunks(site, [("101", "GLCYN", "E190", westbound(T0)), ("102", "GFAR", "C172", westbound(T0, north_m=40000))],
                        levels=[(T0 + s, 60 + s / 10) for s in range(0, 30)], events=[(T0 + 3, 72.5)])
         receptors = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1]}}
-        spec = {"tool": os.path.join(TOOLS, "webtrak"), "chunks": site, "monitors": {"nmt6": "106"}}
+        spec = {"chunks": site, "monitors": {"nmt6": "106"}}
         got = webtrak.read("webtrak", spec, window(T0 - 600, T0 + 600, receptors), [])
         flights, positions, noise, levels, coverage = (got[t] for t in schema.SOURCE_TABLES)
         self.assertEqual([f["registration"] for f in flights], ["GLCYN"])  # The one 40 km away is left out
@@ -565,7 +576,7 @@ class Linking(unittest.TestCase):
         self.assertEqual(list(unnamed), ["20261105T0900-a"])
 
     def test_sources_are_ranked_ads_b_first_and_webtrak_last(self):
-        self.assertEqual(link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"]), ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
+        self.assertEqual(ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"]), ["adsb", "adsblol", "opensky", "fusion", "webtrak"])
 
     def test_two_flights_from_one_source_are_never_one_pass(self):
         fs = [flight("opensky", "a", "GLCYN", T0 - 60, T0 + 60), flight("opensky", "b", "GLCYN", T0 - 60, T0 + 60)]
@@ -578,7 +589,7 @@ def flags(row):
 
 
 class Matching(unittest.TestCase):
-    RECEPTORS = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1], "ground_elevation_m": 3.0, "mic_height_m": 3.0}}
+    RECEPTORS = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1], "mic_amsl_m": 6.0}}
 
     def match(self, passes, events):
         """passes: {pass_id: {source: track}}; events: [(lmax_t, db, class)] at NMT6 from WebTrak.
@@ -592,7 +603,7 @@ class Matching(unittest.TestCase):
                 tracks[(source, sid)] = pts
         noise = [{"source": "webtrak", "receptor": "nmt6", "lmax_utc": iso(t), "lmax_db": db, "event_class": kind}
                  for t, db, kind in events]
-        got, self.candidates, self.clocks = match.match(noise, rows, flights, tracks, self.RECEPTORS)
+        got, self.candidates, self.clocks = match.match(noise, link.members(rows), flights, tracks, self.RECEPTORS)
         return {round(parse_time(r["lmax_utc"]) - T0): r for r in got}
 
     def test_an_event_goes_to_the_pass_predicted_loudest_within_the_window(self):
@@ -650,7 +661,7 @@ class Matching(unittest.TestCase):
         self.assertEqual(flags(got[602]), "not_aircraft")
         # An event at a receptor left out of the build is listed, unmatched
         event = {"source": "fusion", "receptor": "garden", "lmax_utc": iso(T0), "lmax_db": 70, "event_class": "aircraft"}
-        [row], _, clocks = match.match([event], [], [], {}, self.RECEPTORS)
+        [row], _, clocks = match.match([event], {}, [], {}, self.RECEPTORS)
         self.assertEqual((row["pass_id"], row["flags"]), ("", "unmatched"))
         self.assertEqual(match.summary([row], clocks)["garden fusion"]["unmatched"], 1)
 
@@ -765,19 +776,16 @@ class BuildAndServe(unittest.TestCase):
                 "receptors": {"nmt6": {"lat": NMT6[0], "lon": NMT6[1], "label": "NMT6", "public": True,
                                        "ground_elevation_m": 3, "mic_height_m": 3}},
                 "sources": {"opensky": {"adapter": "adsb", "results": "results"},
-                            "webtrak": {"adapter": "webtrak", "tool": os.path.join(TOOLS, "webtrak"),
-                                        "chunks": "lcy", "monitors": {"nmt6": "106"}}}}, f)
-        for name, value in (("OUT_DIR", os.path.join(self.dir, "out")), ("DATA_DIR", self.dir)):
-            patcher = mock.patch.object(manifest, name, value)
+                            "webtrak": {"adapter": "webtrak", "chunks": "lcy", "monitors": {"nmt6": "106"}}}}, f)
+        for name, value in (("OUT_DIR", os.path.join(self.dir, "out")), ("DATA_DIR", self.dir),
+                            ("FLEET_PATH", os.path.join(self.dir, "fleet.csv"))):
+            patcher = mock.patch.object(paths, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
         # A fleet table of the test's own, never the real one in registry/
-        self.fleet_path = os.path.join(self.dir, "fleet.csv")
+        # Its own path, not left to the patch above: a mistake there must never overwrite registry/fleet.csv
         fleet.write({"GLCYN": {"registration": "GLCYN", "mark": "G-LCYN", "status": "registered", "icao_type": "E190",
-                               "model": "ERJ 190-100 LR", "icao24": "4006A1", "register": "uk"}}, self.fleet_path)
-        patcher = mock.patch.object(fleet, "FLEET_PATH", self.fleet_path)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+                               "model": "ERJ 190-100 LR", "icao24": "4006A1", "register": "uk"}}, paths.FLEET_PATH)
 
     def test_build_resolves_types_from_the_fleet_table(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
@@ -812,6 +820,12 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual((row["pass_id"], flags(row)), ("20261105T0900-GLCYN", ""))
         self.assertEqual(summary["matches"]["nmt6 webtrak"]["matched"], 1)
 
+    def test_changing_a_tables_columns_means_raising_its_format(self):
+        # If this fails, a table's columns changed: raise schema.FORMAT, so the app asks for a
+        # rebuild rather than reading older builds, and then put the new FORMAT and digest here
+        digest = hashlib.sha256(json.dumps(schema.TABLES, sort_keys=True).encode()).hexdigest()[:12]
+        self.assertEqual((schema.FORMAT, digest), (1, DIGEST_FORMAT_1))
+
     def test_a_build_replaces_the_tables_folder_whole(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
         build.build(m, log=io.StringIO())
@@ -844,12 +858,28 @@ class BuildAndServe(unittest.TestCase):
     def test_a_rebuild_is_refused_even_after_the_manifest_is_read_again(self):
         app = App(self.deployments)
         d = app.deployment("2026-11-05")
+        first = d.m
         path = os.path.join(self.deployments, "2026-11-05.json")
         with d.building:  # As if a rebuild were running
             os.utime(path, (os.path.getmtime(path) + 5,) * 2)
-            self.assertIsNot(app.deployment("2026-11-05"), d)
+            self.assertIs(app.deployment("2026-11-05"), d)
+            self.assertIsNot(d.m, first)  # Read again
             with self.assertRaises(BadRequest):
                 app.rebuild({"deployment": "2026-11-05"})
+
+    def test_a_build_in_an_older_format_needs_a_rebuild(self):
+        app = App(self.deployments)
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
+        build_json = os.path.join(self.dir, "out", "2026-11-05", "build.json")
+        info = schema.read_json(build_json)
+        schema.write_json(build_json, {**info, "format": schema.FORMAT - 1})
+        [listed] = app.deployments()
+        self.assertEqual((listed["built"], listed["outdated"], listed["days"]), (False, True, []))
+        with self.assertRaises(BadRequest) as got:
+            app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
+        self.assertIn("older version", str(got.exception))
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
+        self.assertEqual(len(app.day({"deployment": "2026-11-05", "day": "2026-11-05"})["flights"]), 3)
 
     def test_the_day_says_which_tracks_are_radar_and_classes_events(self):
         app = App(self.deployments)
@@ -1076,7 +1106,7 @@ class Page(unittest.TestCase):
         self.assertEqual(got, {"a": "80", "b": "68"})
 
     def test_sources_are_listed_in_the_servers_order(self):
-        data = {"flights": [], "events": [], "sources": link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"])}
+        data = {"flights": [], "events": [], "sources": ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"])}
         got = self.run_page(data, sources=["webtrak", "zzz", "fusion", "opensky", "adsb", "adsblol"])
         self.assertEqual(got["order"], ["adsb", "adsblol", "opensky", "fusion", "webtrak", "zzz"])
 
@@ -1086,8 +1116,10 @@ class Page(unittest.TestCase):
                     "approaches": {"nmt6": {"t": iso(T0), "ground_m": 200, "height_m": height,
                                             "path_angle_deg": angle, "at_track_end": edge}}}
 
-        data = {"sources": ["opensky", "webtrak"], "events": [], "flights": [
-            # WebTrak calls a's aircraft an E195, but it's in the E190 row, as OpenSky, ranked first, says
+        # Each pass's row is its resolved type (resolve.py), whatever its flights say: WebTrak calls
+        # a's aircraft an E195, but it's in the E190 row, as resolve took OpenSky's, ranked first
+        identity = {"a": {"type": "E190"}, "b": {"type": "E190"}, "c": {"type": ""}, "d": {"type": ""}, "e": {"type": "A320"}}
+        data = {"sources": ["opensky", "webtrak"], "events": [], "identity": identity, "unseen": {}, "flights": [
             f("a", "opensky", "E190", -5.4), f("a", "webtrak", "E195", -5.6),
             f("b", "opensky", "E190", -5.6), f("b", "webtrak", "", -5.2),
             f("c", "webtrak", "", None), f("d", "webtrak", "", 3.0),
@@ -1107,8 +1139,9 @@ class Page(unittest.TestCase):
                     "approaches": {"nmt6": {"t": iso(T0), "ground_m": 200, "height_m": 300, "path_angle_deg": -4.5}}}
 
         # The register says a is an E290, whatever OpenSky says; b isn't in the fleet table
-        data = {"sources": ["opensky"], "events": [], "flights": [f("a", "E190"), f("b", "E190")],
-                "identity": {"a": {"type": "E290", "type_source": "register:ch", "disagree": "opensky E190"}}}
+        data = {"sources": ["opensky"], "events": [], "flights": [f("a", "E190"), f("b", "E190")], "unseen": {},
+                "identity": {"a": {"type": "E290", "type_source": "register:ch", "disagree": "opensky E190"},
+                             "b": {"type": "E190", "type_source": "opensky"}}}
         got = self.run_page(data, sources=["opensky"], measure="path_angle_deg")["types"]
         self.assertEqual([row[:2] for row in got], [["E190", 1], ["E290", 1]])
 
@@ -1445,14 +1478,14 @@ class Resolve(unittest.TestCase):
             ("p1", "webtrak", "HBAZH", "E295", ""), ("p1", "opensky", "HBAZH", "E290", "4b4a01"))
         entries = {"HBAZH": {"registration": "HBAZH", "icao_type": "E290", "model": "ERJ 190-300", "register": "ch",
                              "status": "registered", "icao24": ""}}
-        [got] = resolve.resolve(passes, flights, entries)
+        [got] = resolve.resolve(link.members(passes), flights, entries)
         self.assertEqual((got["registration"], got["type"], got["model"], got["type_source"], got["disagree"]),
                          ("HBAZH", "E290", "ERJ 190-300", "register:ch", "webtrak E295"))
 
     def test_a_transponder_address_other_than_the_registers_is_flagged(self):
         passes, flights = self.flights_and_passes(("p1", "opensky", "GLCYN", "E190", "4063C4"))
         entries = {"GLCYN": {"icao_type": "E190", "register": "uk", "status": "registered", "icao24": "4063C3"}}
-        [got] = resolve.resolve(passes, flights, entries)
+        [got] = resolve.resolve(link.members(passes), flights, entries)
         self.assertEqual(got["disagree"], "opensky hex 4063C4, register 4063C3")
 
     def test_without_an_entry_the_highest_ranked_source_decides(self):
@@ -1462,7 +1495,7 @@ class Resolve(unittest.TestCase):
             ("p3", "opensky", "GLCYQ", "E190", ""))
         entries = {"GLCYQ": {"status": fleet.NOT_FOUND, "register": "uk"},
                    "PHEZE": {"status": "", "icao_type": "", "register": fleet.MANUAL}}
-        got = {r["pass_id"]: r for r in resolve.resolve(passes, flights, entries)}
+        got = {r["pass_id"]: r for r in resolve.resolve(link.members(passes), flights, entries)}
         self.assertEqual((got["p1"]["type"], got["p1"]["type_source"], got["p1"]["disagree"]), ("E190", "opensky", "webtrak E195"))
         self.assertEqual((got["p2"]["type"], got["p2"]["type_source"]), ("", ""))
         self.assertEqual(got["p3"]["type_source"], "opensky")  # A "not found" entry settles nothing
@@ -1476,14 +1509,14 @@ class Resolve(unittest.TestCase):
                    "GLCYQ": {"status": fleet.NOT_FOUND, "register": "uk"},
                    "EIFAV": {"icao_type": "", "register": "ie", "status": "registered"},
                    "GLCYT": {"icao_type": "E190", "register": "uk", "status": fleet.LEFT}}
-        got = {r["pass_id"]: r["fleet"] for r in resolve.resolve(passes, flights, entries)}
+        got = {r["pass_id"]: r["fleet"] for r in resolve.resolve(link.members(passes), flights, entries)}
         self.assertEqual(got, {"p1": "", "p2": "no registration", "p3": "not in the table", "p4": "not found",
                                "p5": "no type", "p6": ""})
 
     def test_a_manual_entry_says_so(self):
         passes, flights = self.flights_and_passes(("p1", "opensky", "PHEZE", "E190", ""))
         entries = {"PHEZE": {"icao_type": "E190", "register": fleet.MANUAL, "status": "registered"}}
-        [got] = resolve.resolve(passes, flights, entries)
+        [got] = resolve.resolve(link.members(passes), flights, entries)
         self.assertEqual(got["type_source"], fleet.MANUAL)
 
 

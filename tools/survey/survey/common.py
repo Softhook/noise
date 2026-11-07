@@ -1,4 +1,4 @@
-"""Times, numbers and normalisation shared by the adapters and the core."""
+"""Times, numbers, normalisation and the order of sources, shared by the adapters and the core."""
 
 from __future__ import annotations
 
@@ -52,3 +52,25 @@ def registration(text):
 
 def rounded(value, places=1):
     return None if value is None else round(value, places)
+
+
+# The order of sources, everywhere: which source's flight dates and names a pass (link.py), whose
+# track predicts its sound (match.py), whose type is taken without a register's (resolve.py), and
+# the order the survey app lists them in. The ADS-B sources first, WebTrak last, since WebTrak must
+# be removable (ARCHITECTURE.md). Sources not listed rank between the two.
+FIRST_SOURCES = ("adsb", "adsblol", "opensky")
+LAST_SOURCES = ("webtrak",)
+
+
+def source_rank(source):
+    """A sort key: lower is a higher-ranked source."""
+    if source in FIRST_SOURCES:
+        return (0, FIRST_SOURCES.index(source), source)
+    if source in LAST_SOURCES:
+        return (2, LAST_SOURCES.index(source), source)
+    return (1, 0, source)
+
+
+def ranked(sources):
+    """Sources in rank order."""
+    return sorted(sources, key=source_rank)

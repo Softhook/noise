@@ -94,13 +94,10 @@ def why_unseen(points, limits, coverage):
     return UNEXPLAINED
 
 
-def unseen_rows(passes, tracks, limits, coverage):
+def unseen_rows(members, tracks, limits, coverage):
     """Rows for the unseen table: each pass, and each source that has no flight in it, with why.
-    passes: the passes table's rows; tracks: {(source, source_id): track (geometry.py)};
-    limits: {source: limits}; coverage: the coverage table's rows."""
-    members = {}
-    for row in passes:
-        members.setdefault(row["pass_id"], []).append((row["source"], row["source_id"]))
+    members: link.members(); tracks: {(source, source_id): track (geometry.py)}; limits: {source:
+    limits}; coverage: the coverage table's rows."""
     when = {}
     for c in coverage:
         when.setdefault(c["source"], []).append((parse_time(c["start_utc"]), parse_time(c["end_utc"])))
@@ -116,3 +113,8 @@ def unseen_rows(passes, tracks, limits, coverage):
                 rows.append({"pass_id": pass_id, "source": source,
                              "reason": why_unseen(points, lim, when.get(source, empty))})
     return rows
+
+
+def summary(rows):
+    """build.json's unseen: how many (pass, source) pairs there are for each reason."""
+    return {reason: sum(1 for u in rows if u["reason"] == reason) for reason in REASONS}

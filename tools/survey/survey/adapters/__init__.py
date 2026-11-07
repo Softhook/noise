@@ -3,9 +3,9 @@
 An adapter is a module with:
 
     PATHS                                   keys of its manifest entry that are data paths; manifest.load
-                                            makes them absolute, relative to the data folder (tools/data
-                                            or NOISE_DATA)
-    MANIFEST_PATHS (optional)               keys that are paths to code or config, relative to the manifest
+                                            makes them absolute, relative to the data folder (data/ or
+                                            NOISE_DATA)
+    MANIFEST_PATHS (optional)               keys that are paths to config, relative to the manifest
     prepare(name, spec, context, out_dir, log, warnings) (optional)
                                             -> the spec to read with, or None to leave the source out.
                                             Run before read, to work out derived files from raw

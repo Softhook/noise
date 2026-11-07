@@ -64,6 +64,10 @@ TABLES = {
     "event_candidates": ["source", "receptor", "lmax_utc", "pass_id", "matched", "offset_s", "slant_m",
                          "track_source", "below_match_db"],
 }
+# The tables' format, kept in build.json. Raise it whenever a table's columns, or what they mean,
+# change: the survey app then asks for a rebuild instead of reading a build made before, so neither
+# it nor the page needs to cope with older tables. Builds are derived, so a rebuild loses nothing.
+FORMAT = 1
 # The tables an adapter may fill. The rest are worked out by the core (build.py).
 SOURCE_TABLES = ("flights", "positions", "noise_events", "levels", "coverage")
 # The tables kept as a file per UTC day

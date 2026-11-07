@@ -37,7 +37,7 @@ function fillDays() {
   }));
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
   $("subtitle").textContent = !d ? "No deployments." : d.error ? `Can't read ${d.deployment}'s manifest: ${d.error}` : (d.description || d.deployment);
-  $("built").textContent = d && d.built ? `Built ${d.built_utc.replace("T", " ").slice(0, 16)} UTC` : d && d.error ? "" : "Not built yet";
+  $("built").textContent = d && d.built ? `Built ${d.built_utc.replace("T", " ").slice(0, 16)} UTC` : d && d.error ? "" : d && d.outdated ? "Needs a rebuild" : "Not built yet";
   $("rebuild").disabled = !!(d && d.error);
   $("warnings").replaceChildren(...(d && d.warnings || []).map((w) => h("li", {}, h("span", { class: "icon", "aria-hidden": "true", text: "!" }), h("span", { text: w }))));
 }
@@ -46,7 +46,7 @@ async function loadDay() {
   if (!d || !d.built || !$("f-day").value) {
     state.data = null;
     $("content").hidden = true;
-    if (d && !d.built && !d.error) $("subtitle").textContent = `${d.deployment} isn't built yet. Press Rebuild, or run: make build DEPLOYMENT=${d.deployment}`;
+    if (d && !d.built && !d.error) $("subtitle").textContent = `${d.deployment} ${d.outdated ? "was built by an older version of the survey" : "isn't built yet"}. Press Rebuild, or run: make build DEPLOYMENT=${d.deployment}`;
     return;
   }
   $("content").hidden = false;
@@ -85,7 +85,7 @@ async function loadDay() {
 async function loadDeployments(keep) {
   state.deployments = await api("/api/deployments");
   const sel = $("f-deployment"), prev = keep || sel.value;
-  sel.replaceChildren(...state.deployments.map((d) => h("option", { value: d.deployment, text: d.deployment + (d.error ? " (can't read)" : d.built ? "" : " (not built)") })));
+  sel.replaceChildren(...state.deployments.map((d) => h("option", { value: d.deployment, text: d.deployment + (d.error ? " (can't read)" : d.built ? "" : d.outdated ? " (needs a rebuild)" : " (not built)") })));
   // The newest deployment first, unless one was already chosen
   if (prev && state.deployments.some((d) => d.deployment === prev)) sel.value = prev;
   else if (state.deployments.length) sel.value = state.deployments[state.deployments.length - 1].deployment;

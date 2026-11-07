@@ -6,6 +6,8 @@ a method on App and a route in server.py.
 A build (build.py) replaces a deployment's tables folder whole, and then build.json. A Deployment
 reads the tables again only when that has happened, and never while it's happening. It keeps the
 small tables in memory, and reads positions and levels a day at a time, as the page asks for them.
+A build of another format than schema.FORMAT (made by an older version) counts as not built: the
+page asks for a rebuild rather than reading it.
 """
 
 from __future__ import annotations
@@ -15,8 +17,8 @@ import os
 import threading
 import time
 
-from . import build, link, manifest, schema
-from .common import number, parse_time
+from . import build, manifest, paths, schema
+from .common import number, parse_time, ranked
 
 TRACK_SPACING_S = 2.0  # Positions closer together than this are thinned for drawing
 DAY_S = 86400
@@ -68,11 +70,12 @@ class BuildJob:
 
 
 class Deployment:
-    """One deployment: its manifest, and its built tables, kept until a build changes them."""
+    """One deployment: its manifest, read again whenever the file changes, and its built tables,
+    kept until a build changes them. The App keeps one per deployment for as long as it runs."""
 
-    def __init__(self, path, locks=None):
+    def __init__(self, path):
         self.manifest_path = path
-        self.m = manifest.load(path)
+        self._manifest = (None, None)  # (the file's modification time, manifest.load's)
         self.stamp = None
         self.tables = None
         self.days = {}  # Day -> read_day(), for the last few days asked for
@@ -80,8 +83,15 @@ class Deployment:
         # building: held while the page's Rebuild runs, so a second press is refused. The two are
         # separate, so a day being read never makes a Rebuild look like it's already running, and
         # a request during a rebuild gets the old tables (a build swaps the new ones in whole).
-        # The App keeps one pair per deployment name, so they outlive a re-read of the manifest.
-        self.lock, self.building = locks or (threading.Lock(), threading.Lock())
+        self.lock, self.building = threading.Lock(), threading.Lock()
+
+    @property
+    def m(self):
+        """The manifest (manifest.load's), read again if its file has changed. ManifestError if it's bad."""
+        stamp = os.path.getmtime(self.manifest_path)
+        if self._manifest[0] != stamp:
+            self._manifest = (stamp, manifest.load(self.manifest_path))
+        return self._manifest[1]
 
     @property
     def folder(self):
@@ -92,7 +102,13 @@ class Deployment:
         return os.path.join(self.m["out_dir"], "build.json")
 
     def build_info(self):
-        return schema.read_json(self.build_json)
+        """build.json, or None if it isn't built or was built in another format (schema.FORMAT)."""
+        info = schema.read_json(self.build_json)
+        return info if info and info.get("format") == schema.FORMAT else None
+
+    def outdated(self):
+        """Whether it was built, but in another format, by an older version: it needs a rebuild."""
+        return self.build_info() is None and os.path.exists(self.build_json)
 
     def _identity(self):
         """What changes when a build finishes: build.json's time, and the tables' folder, which a
@@ -115,6 +131,8 @@ class Deployment:
                     time.sleep(0.1)  # A build outside the app is putting its tables in place
                     continue
                 fresh = before != self.stamp
+                if fresh and self.build_info() is None:
+                    raise BadRequest(f"{self.m['deployment']} was built by an older version of the survey; rebuild it")
                 tables = index({name: schema.read_table(self.folder, name) for name in SMALL_TABLES}) if fresh else self.tables
                 kept = {} if fresh else self.days
                 got = None
@@ -143,9 +161,8 @@ def index(t):
     matches = {(m["source"], m["receptor"], m["lmax_utc"]): m for m in t["event_matches"]}
     for e in t["noise_events"]:
         e["_lmax"] = parse_time(e["lmax_utc"])
-        # Its match (match.py); none in a build made before matching was added, until it's rebuilt
-        got = matches.get((e["source"], e["receptor"], e["lmax_utc"]), {})
-        e.update({key: got.get(key, "") for key in MATCH_FIELDS})
+        got = matches[(e["source"], e["receptor"], e["lmax_utc"])]  # match.py gives every event a row
+        e.update({key: got[key] for key in MATCH_FIELDS})
     for c in t["coverage"]:
         c["_start"], c["_end"] = parse_time(c["start_utc"]), parse_time(c["end_utc"])
     approaches = {}
@@ -153,8 +170,7 @@ def index(t):
         approaches.setdefault((a["source"], a["source_id"]), {})[a["receptor"]] = {
             "t": a["t"], "ground_m": number(a["ground_m"]), "height_m": number(a["height_m"]),
             "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1",
-            # Missing from a build made before the column was added, until it's rebuilt
-            "path_angle_deg": number(a.get("path_angle_deg"))}
+            "path_angle_deg": number(a["path_angle_deg"])}
     return {**t, "approach_index": approaches,
             "pass_index": {(p["source"], p["source_id"]): p for p in t["passes"]}}
 
@@ -230,28 +246,24 @@ def thinned(points):
 def receptor_view(r):
     """A receptors table row, as the page uses it."""
     return {"id": r["id"], "name": r["name"], "label": r["label"], "lat": float(r["lat"]),
-            "lon": float(r["lon"]), "public": r["public"] in ("1", "True")}  # "True" from builds before 2026-11-06
+            "lon": float(r["lon"]), "public": r["public"] == "1"}
 
 
 class App:
     def __init__(self, deployments_dir=None):
-        self.dir = deployments_dir or manifest.DEPLOYMENTS_DIR
-        self.cache = {}
-        self.locks = {}  # Deployment name -> its lock, kept when its manifest is read again
+        self.dir = deployments_dir or paths.DEPLOYMENTS_DIR
+        self.known = {}  # Deployment name -> its Deployment
         self.jobs = {}  # Deployment name -> its latest BuildJob, started from the page
         self.lock = threading.Lock()
 
     def deployment(self, name):
-        """A deployment, read again whenever its manifest file changes."""
+        """The deployment whose manifest is deployments_dir/<name>.json, or BadRequest."""
         for path in manifest.all_manifests(self.dir):
-            if os.path.splitext(os.path.basename(path))[0] == name:
-                stamp = os.path.getmtime(path)
+            if manifest.name_of(path) == name:
                 with self.lock:
-                    cached = self.cache.get(name)
-                    if not cached or cached[0] != (path, stamp):
-                        locks = self.locks.setdefault(name, (threading.Lock(), threading.Lock()))
-                        self.cache[name] = ((path, stamp), Deployment(path, locks))
-                    return self.cache[name][1]
+                    if name not in self.known:
+                        self.known[name] = Deployment(path)
+                    return self.known[name]
         raise BadRequest(f"no deployment {name!r}")
 
     def _listing(self, name, path):
@@ -261,10 +273,11 @@ class App:
         return {
             "deployment": name,
             "description": d.m["description"],
-            "manifest": os.path.relpath(path, manifest.TOOLS_DIR),
+            "manifest": os.path.relpath(path, paths.TOOLS_DIR),
             "built": info is not None,
+            "outdated": d.outdated(),
             "built_utc": info and info["built_utc"],
-            "sources": link.ranked(d.m["sources"]),
+            "sources": ranked(d.m["sources"]),
             "receptors": [{"id": r["id"], "name": r["name"], "label": r["label"]} for r in d.m["receptors"].values()],
             "days": [{"day": day, "minutes": minutes_covered(coverage, *day_bounds(day))}
                      for day in days(d.m["start"], d.m["end"])] if info else [],
@@ -275,7 +288,7 @@ class App:
         """Every deployment, with its days and how much data each source has on each."""
         found = []
         for path in manifest.all_manifests(self.dir):
-            name = os.path.splitext(os.path.basename(path))[0]
+            name = manifest.name_of(path)
             try:
                 found.append(self._listing(name, path))
             except (manifest.ManifestError, ValueError, OSError) as error:
@@ -298,7 +311,6 @@ class App:
 
         def run():
             try:
-                d.m = manifest.load(d.manifest_path)
                 job.summary = build.build(d.m, log=job, wait=False)
             except build.Busy as error:
                 job.error = str(error)
@@ -355,7 +367,7 @@ class App:
             "deployment": d.m["deployment"],
             "day": day,
             "start": lo,
-            "sources": link.ranked(d.m["sources"]),  # The order the page lists them in
+            "sources": ranked(d.m["sources"]),  # The order the page lists them in
             "receptors": [receptor_view(r) for r in t["receptors"]],
             "coverage": [{k: v for k, v in c.items() if not k.startswith("_")}
                          for c in t["coverage"] if c["_end"] > lo and c["_start"] < hi],

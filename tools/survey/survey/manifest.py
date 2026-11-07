@@ -1,11 +1,15 @@
 """Read a deployment's manifest: its period, receptors and sources. See ARCHITECTURE.md, Manifest.
 
-A source's data paths (its adapter's PATHS) are relative to the data folder, DATA_DIR, so a
-manifest still works when the data is moved with NOISE_DATA. Other paths (a receptor's config, an
-adapter's MANIFEST_PATHS, such as webtrak's tool or an ADS-B source's site) are relative to the manifest file. A receptor whose location is private (the
-garden) gives `"config"`: the path to a git-ignored site.json (tools/adsb's format). If that file
-isn't there, the receptor is left out and a warning given, so a manifest in git never needs the
-garden's location in it.
+A source's data paths (its adapter's PATHS) are relative to the data folder (paths.DATA_DIR), so
+a manifest still works when the data is moved with NOISE_DATA. Other paths (a receptor's config, an
+adapter's MANIFEST_PATHS, such as an ADS-B source's site) are relative to the manifest file. A
+receptor whose location is private (the garden) gives `"config"`: the path to a git-ignored
+site.json (tools/adsb's format). If that file isn't there, the receptor is left out and a warning
+given, so a manifest in git never needs the garden's location in it.
+
+A receptor's microphone height above sea level, `mic_amsl_m`, is its ground elevation plus its
+mic height, worked out here once for every step that needs it. Without a ground elevation, the
+ground is taken as sea level (Thamesmead is about 3 m up), with a warning.
 """
 
 from __future__ import annotations
@@ -14,18 +18,9 @@ import glob
 import json
 import os
 
+from . import paths
 from .adapters import ADAPTERS
 from .common import parse_time
-
-SURVEY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TOOLS_DIR = os.path.dirname(SURVEY_DIR)
-DEPLOYMENTS_DIR = os.path.join(SURVEY_DIR, "deployments")
-# Every tool's data lives in one local folder outside the tools: the repository's data/
-# (git-ignored), or wherever NOISE_DATA says. raw/ holds what was collected or downloaded, written
-# once; derived/ what is worked out from it, which can be deleted and rebuilt. A deployment's build
-# goes in derived/deployments/<name>/. A manifest's data paths are relative to DATA_DIR.
-DATA_DIR = os.path.abspath(os.environ.get("NOISE_DATA") or os.path.join(os.path.dirname(TOOLS_DIR), "data"))
-OUT_DIR = os.path.join(DATA_DIR, "derived", "deployments")
 
 
 class ManifestError(ValueError):
@@ -42,29 +37,34 @@ def _receptor(rid, spec, base, warnings):
         with open(path) as f:
             site = json.load(f)["site"]
         spec = {**site, **spec}
-    for key in ("lat", "lon"):
-        if not isinstance(spec.get(key), (int, float)):
+    for key in ("lat", "lon", "ground_elevation_m", "mic_height_m"):
+        value = spec.get(key)
+        if (key in ("lat", "lon") or value is not None) and (not isinstance(value, (int, float)) or isinstance(value, bool)):
             raise ManifestError(f"receptor {rid}: {key} must be a number")
+    ground, mic = spec.get("ground_elevation_m"), spec.get("mic_height_m")
+    if ground is None:
+        warnings.append(f"receptor {rid}: no ground_elevation_m, so its ground is taken as sea level")
     return {
         "id": rid,
         "name": str(spec.get("name") or rid),
         "label": str(spec.get("label") or spec.get("name") or rid),
         "lat": float(spec["lat"]),
         "lon": float(spec["lon"]),
-        "ground_elevation_m": spec.get("ground_elevation_m"),
-        "mic_height_m": spec.get("mic_height_m"),
+        "ground_elevation_m": ground,
+        "mic_height_m": mic,
+        "mic_amsl_m": float(ground or 0) + float(mic or 0),
         "public": spec.get("public") is True,
     }
 
 
 def _source(name, spec, base):
-    """A source's entry, with its paths made absolute: data paths from DATA_DIR, code paths from
-    the manifest's folder."""
+    """A source's entry, with its paths made absolute: data paths from the data folder, config
+    paths from the manifest's folder."""
     spec = dict(spec)
     adapter = ADAPTERS.get(str(spec.get("adapter")))
     if adapter is None:
         raise ManifestError(f"source {name}: adapter must be one of {', '.join(ADAPTERS)}")
-    for keys, root in ((adapter.PATHS, DATA_DIR), (getattr(adapter, "MANIFEST_PATHS", ()), base)):
+    for keys, root in ((adapter.PATHS, paths.DATA_DIR), (getattr(adapter, "MANIFEST_PATHS", ()), base)):
         for key in keys:
             if key in spec:
                 spec[key] = os.path.normpath(os.path.join(root, spec[key]))
@@ -106,7 +106,7 @@ def load(path):
     pass_receptor = _pass_receptor(raw.get("pass_receptor"), receptors, warnings)
     sources = {name: _source(name, spec, base) for name, spec in (raw.get("sources") or {}).items()
                if spec is not None}  # A source set to null is turned off
-    name = raw.get("deployment") or os.path.splitext(os.path.basename(path))[0]
+    name = raw.get("deployment") or name_of(path)
     return {
         "deployment": name,
         "description": raw.get("description", ""),
@@ -117,21 +117,27 @@ def load(path):
         "receptors": receptors,
         "pass_receptor": pass_receptor,
         "sources": sources,
-        "out_dir": os.path.join(OUT_DIR, name),
+        "out_dir": os.path.join(paths.OUT_DIR, name),
         "warnings": warnings,
     }
 
 
 def find(name):
-    """A deployment's manifest: a path to one, or the name of one in DEPLOYMENTS_DIR."""
+    """A deployment's manifest: a path to one, or the name of one in paths.DEPLOYMENTS_DIR."""
     if os.path.exists(name):
         return name
-    path = os.path.join(DEPLOYMENTS_DIR, f"{name}.json")
+    path = os.path.join(paths.DEPLOYMENTS_DIR, f"{name}.json")
     if not os.path.exists(path):
-        known = ", ".join(os.path.splitext(os.path.basename(p))[0] for p in all_manifests())
+        known = ", ".join(name_of(p) for p in all_manifests())
         raise ManifestError(f"no deployment {name!r} (there are: {known or 'none'})")
     return path
 
 
 def all_manifests(folder=None):
-    return sorted(glob.glob(os.path.join(folder or DEPLOYMENTS_DIR, "*.json")))
+    """Every manifest in folder (paths.DEPLOYMENTS_DIR if None), by name."""
+    return sorted(glob.glob(os.path.join(folder or paths.DEPLOYMENTS_DIR, "*.json")))
+
+
+def name_of(path):
+    """A deployment's name, as its manifest's file name gives it (2026-11-05.json -> 2026-11-05)."""
+    return os.path.splitext(os.path.basename(path))[0]

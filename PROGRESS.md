@@ -2,11 +2,29 @@
 
 Where the survey's tools stand, what's waiting on a decision, and what's next. Read this first when picking the work up again. The design is in [tools/survey/ARCHITECTURE.md](tools/survey/ARCHITECTURE.md), and how to use everything is in [README.md](README.md).
 
-*Last updated: 7 November 2026, after `match`.*
+*Last updated: 7 November 2026, after the core refactor.*
 
 ## Waiting on a decision
 
-Nothing. The restructure and `match` were merged into `main` and pushed on 7 November 2026.
+Nothing. The restructure, `match` and the core refactor were merged into `main` and pushed on 7 November 2026.
+
+## Done: the core refactor (7 November 2026)
+
+The same results, with simpler code: a rebuild of both deployments gave byte-identical tables, and `build.json` differs only in its time and its new `format`.
+
+- `survey/paths.py` is the one place that says where things are. The WebTrak adapter's `tool` option and `sys.path` hack, and the ADS-B adapter's `PYTHONPATH`, are gone: the editable install finds both packages.
+- The order of sources moved from `link.py` to `common.py`, since `match`, `resolve`, the app and the page all use it.
+- `link.members()` groups each pass's flights once, and `explain`, `resolve` and `match` take that, instead of each regrouping the passes rows.
+- Each step summarises its own table (`explain.summary`, `resolve.summary`, `match.summary`, `match.clock_warnings`), and `build.summarise` only assembles them.
+- The manifest works out each receptor's `mic_amsl_m` once. Before, the approaches gave no slant without a ground elevation, while `match` silently took the ground as sea level. Now both take it as sea level, and the build warns. Both real receptors have an elevation, so nothing changed for them.
+- `match._match_group` is split into its steps: `_sounds`, `_near`, `_clocks`, `_assign`.
+- `build.json` records `schema.FORMAT`. The app treats a build of another format as needing a rebuild, so the shims for older builds came out of the app and the page. That includes the page's copy of `resolve`'s type rule.
+- The app keeps one `Deployment` per name, which re-reads its own manifest when the file changes, instead of a cache keyed on the file's time and a separate table of locks.
+- A critical review the same day found three problems, all fixed:
+  - A build test's fleet table was kept off `registry/fleet.csv` only by a patch, so it now names its own path again.
+  - Nothing made anyone raise `FORMAT` when a table changed. A test now pins it to a digest of the tables' columns.
+  - A non-numeric ground elevation or mic height crashed the build, rather than being refused as a bad manifest.
+- Still open, and older than the refactor: `event_matches` joins `noise_events` on source, receptor and LAmax time. That's unique in today's data, but nothing guarantees it. Give events an id of their own when the Fusion adapter is written.
 
 ## Done: match (7 November 2026)
 

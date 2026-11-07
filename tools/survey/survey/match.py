@@ -3,7 +3,7 @@
 For each pass near an event in time, the sound's predicted arrival at the receptor: where its track
 came closest to the microphone in three dimensions (geometry.closest_slant), plus the time sound
 takes to cover that distance. The track is the pass's flight in the highest-ranked source
-(link.source_rank) whose closest point isn't at an edge of its data, so the ADS-B sources' before
+(common.source_rank) whose closest point isn't at an edge of its data, so the ADS-B sources' before
 WebTrak's, and a match never depends on WebTrak's radar when an ADS-B track is there.
 
 The steps, for each noise source's events at a receptor:
@@ -51,7 +51,6 @@ import bisect
 import math
 import statistics
 
-from . import link
 from .common import day_of, iso, parse_time, rounded
 from .geometry import Frame, closest_approach, closest_slant, path_angle
 
@@ -77,23 +76,26 @@ CLOCK_MIN_SHARE = 0.3
 # A track this steep or more at its closest point is an arrival (descending) or a departure
 # (climbing), for the clock check
 LEVEL_ANGLE_DEG = 1.0
+# A day's clock offset worth a warning in the build: this far out, or not established on a day
+# with this many events
+CLOCK_WARN_S = 5
+CLOCK_WARN_EVENTS = 10
 
 FLAGS = ("unmatched", "distant", "taken", "others", "at_track_end", "no_height", "not_aircraft", "no_clock")
 
 
-def predicted(members, tracks, frame, mic_amsl):
-    """A pass's predicted sound at a receptor, from its flights [(source, source_id)]: {arrival,
-    slant, ground, height, emitted, key, angle, flags}, or None without a track. From the
-    highest-ranked flight whose closest point isn't at an edge of its data; else the highest-ranked
-    one; else, with no heights at all, from the ground distance."""
-    ranked = sorted(members, key=lambda k: (link.source_rank(k[0]), k[1]))
-    found = [(k, got) for k in ranked if (got := closest_slant(tracks.get(k) or [], frame, mic_amsl))]
+def predicted(keys, tracks, frame, mic_amsl):
+    """A pass's predicted sound at a receptor, from its flights [(source, source_id)] in source
+    order (link.members()): {arrival, slant, ground, height, emitted, key, angle, flags}, or None
+    without a track. From the highest-ranked flight whose closest point isn't at an edge of its
+    data; else the highest-ranked one; else, with no heights at all, from the ground distance."""
+    found = [(k, got) for k in keys if (got := closest_slant(tracks.get(k) or [], frame, mic_amsl))]
     if found:
         key, (t, slant, ground, height, edge) = next(((k, g) for k, g in found if not g[4]), found[0])
         return {"arrival": t + slant / SOUND_SPEED, "slant": slant, "ground": ground, "height": height,
                 "emitted": t, "key": key, "angle": path_angle(tracks[key], frame, t),
                 "flags": ["at_track_end"] if edge else []}
-    for key in ranked:
+    for key in keys:
         got = closest_approach(tracks.get(key) or [], frame)
         if got:
             t, ground, _, _, edge = got
@@ -120,123 +122,140 @@ def clock_offset(dts):
     return (statistics.median(chosen) if chosen else None), len(chosen)
 
 
-def match(events, passes, flights, tracks, receptors):
+def match(events, members, flights, tracks, receptors):
     """(event_matches rows, event_candidates rows, clocks), the rows in time order.
 
-    events: the noise_events table; passes, flights: those tables; tracks: {(source, source_id):
-    track (geometry.py)}; receptors: manifest.load's receptors. clocks: {"<receptor> <source>":
-    {day: {"offset_s", "pairs", "events"}}}: the offset, None where it wasn't established, the pairs
-    in its bin, and the day's events. An event at a
-    receptor that isn't there (a private one left out) is listed unmatched."""
-    members, span = {}, {}
+    events: the noise_events table; members: link.members(); flights: the flights table; tracks:
+    {(source, source_id): track (geometry.py)}; receptors: manifest.load's receptors. clocks:
+    {"<receptor> <source>": {day: {"offset_s", "pairs", "events"}}}: the offset, None where it
+    wasn't established, the pairs in its bin, and the day's events. An event at a receptor that
+    isn't there (a private one left out) is listed unmatched."""
     times = {(f["source"], f["source_id"]): (parse_time(f["first_utc"]), parse_time(f["last_utc"])) for f in flights}
-    for p in passes:
-        key = (p["source"], p["source_id"])
-        members.setdefault(p["pass_id"], []).append(key)
-        if key in times:
-            lo, hi = span.get(p["pass_id"], times[key])
-            span[p["pass_id"]] = (min(lo, times[key][0]), max(hi, times[key][1]))
+    spans = {}  # Each pass's first and last time, over its flights
+    for pass_id, keys in members.items():
+        got = [times[k] for k in keys if k in times]
+        if got:
+            spans[pass_id] = (min(a for a, _ in got), max(b for _, b in got))
 
-    rows, candidates, clocks = [], [], {}
     by_group = {}
     for e in events:
         by_group.setdefault((e["receptor"], e["source"]), []).append(e)
+    rows, candidates, clocks = [], [], {}
     for (rid, source), group in sorted(by_group.items()):
         group.sort(key=lambda e: parse_time(e["lmax_utc"]))
         r = receptors.get(rid)
         if r is None:
-            rows += [_row(e, None, None, ["unmatched"], [], None) for e in group]
+            rows += [_row(e, ["unmatched"]) for e in group]
             continue
-        got_rows, got_candidates, clocks[f"{rid} {source}"] = _match_group(group, members, span, tracks, r)
+        got_rows, got_candidates, clocks[f"{rid} {source}"] = _match_group(group, members, spans, tracks, r)
         rows += got_rows
         candidates += got_candidates
     order = lambda row: (row["lmax_utc"], row["receptor"], row["source"])  # noqa: E731
     return sorted(rows, key=order), sorted(candidates, key=lambda c: (*order(c), c["slant_m"] or 0)), clocks
 
 
-def _match_group(group, members, span, tracks, r):
-    """The matches, candidates and clock offsets for one noise source's events at one receptor."""
+def _match_group(group, members, spans, tracks, r):
+    """The matches, candidates and clock offsets for one noise source's events at one receptor,
+    group in LAmax order: the steps in the module's docstring, in turn."""
     frame = Frame(r["lat"], r["lon"])
-    mic = float(r["ground_elevation_m"] or 0) + float(r["mic_height_m"] or 0)
     lmax = [parse_time(e["lmax_utc"]) for e in group]
+    sound = _sounds(lmax, members, spans, tracks, frame, r["mic_amsl_m"])
+    near = _near(lmax, sound)
+    clocks = _clocks(lmax, near, sound)
+    centre = [clocks[day_of(t)]["offset_s"] for t in lmax]
+    # Each event's candidates, with how far each is from the window's centre
+    cands = [[(p, abs(dt - (c or 0))) for p, dt in found if abs(dt - (c or 0)) <= WINDOW_S]
+             for found, c in zip(near, centre)]
+    chosen = _assign(cands, sound)
 
-    # Each pass that could be heard within SEARCH_S of an event's LAmax, and its predicted sound
+    rows, candidate_rows = [], []
+    for i, e in enumerate(group):
+        pass_id = chosen.get(i)
+        ids = [p for p, _ in cands[i]]
+        near_enough = [p for p in ids if sound[p]["slant"] <= MAX_SLANT_M]
+        clock = [] if centre[i] is not None else ["no_clock"]
+        if pass_id is None:
+            flags = ["taken"] if near_enough else ["unmatched"] + (["distant"] if ids else [])
+            rows.append(_row(e, flags + clock, centre[i]))
+            matched_db = None
+        else:
+            got = sound[pass_id]
+            matched_db = level_db(got["slant"])
+            others = sorted((p for p in near_enough if p != pass_id
+                             and matched_db - level_db(sound[p]["slant"]) < CONTRIBUTE_DB), key=lambda p: sound[p]["slant"])
+            flags = (["others"] if others else []) + got["flags"] + (["not_aircraft"] if e["event_class"] == "other" else [])
+            rows.append(_row(e, flags + clock, centre[i], pass_id, got, others, lmax[i]))
+        for p in ids:
+            candidate_rows.append({
+                "source": e["source"], "receptor": e["receptor"], "lmax_utc": e["lmax_utc"], "pass_id": p,
+                "matched": "1" if p == pass_id else "", "offset_s": round(lmax[i] - sound[p]["arrival"], 1),
+                "slant_m": rounded(sound[p]["slant"]), "track_source": sound[p]["key"][0],
+                "below_match_db": None if matched_db is None else round(matched_db - level_db(sound[p]["slant"]), 1)})
+    return rows, candidate_rows, clocks
+
+
+def _sounds(lmax, members, spans, tracks, frame, mic_amsl):
+    """{pass_id: predicted()} for each pass that could be heard within SEARCH_S of an LAmax."""
     sound = {}
-    for pass_id, (lo, hi) in span.items():
+    for pass_id, (lo, hi) in spans.items():
         i = bisect.bisect_left(lmax, lo - SEARCH_S)
         if i < len(lmax) and lmax[i] <= hi + MAX_DELAY_S + SEARCH_S:
-            got = predicted(members[pass_id], tracks, frame, mic)
+            got = predicted(members[pass_id], tracks, frame, mic_amsl)
             if got:
                 sound[pass_id] = got
+    return sound
 
-    # Every (event, pass) pair within SEARCH_S, and each day's clock offset from the clean ones
-    near = [[] for _ in group]
+
+def _near(lmax, sound):
+    """For each event, [(pass_id, LAmax minus its predicted arrival)] for the passes within SEARCH_S."""
+    near = [[] for _ in lmax]
     for pass_id, got in sound.items():
         for i in range(bisect.bisect_left(lmax, got["arrival"] - SEARCH_S),
                        bisect.bisect_right(lmax, got["arrival"] + SEARCH_S)):
             near[i].append((pass_id, lmax[i] - got["arrival"]))
+    return near
+
+
+def _clocks(lmax, near, sound):
+    """{day: {"offset_s", "pairs", "events"}}: each day's clock offset, from its events' pairs
+    with clean passes (nothing flagged, within MAX_SLANT_M), or None if none stands out."""
     by_day = {}
-    for i, t in enumerate(lmax):
+    for t, found in zip(lmax, near):
         day = by_day.setdefault(day_of(t), {"events": 0, "dts": []})
         day["events"] += 1
-        day["dts"] += [dt for p, dt in near[i] if not sound[p]["flags"] and sound[p]["slant"] <= MAX_SLANT_M]
+        day["dts"] += [dt for p, dt in found if not sound[p]["flags"] and sound[p]["slant"] <= MAX_SLANT_M]
     clocks = {}
     for day, d in sorted(by_day.items()):
         offset, n = clock_offset(d["dts"])
         established = offset is not None and n >= max(CLOCK_MIN_PAIRS, CLOCK_MIN_SHARE * d["events"])
         clocks[day] = {"offset_s": round(offset, 1) if established else None, "pairs": n, "events": d["events"]}
-    centre = [clocks[day_of(t)]["offset_s"] for t in lmax]
+    return clocks
 
-    # The candidates, and every pair close enough to match, loudest first, then closest in time
-    pairs, cands = [], [[] for _ in group]
-    for i, found in enumerate(near):
-        for pass_id, dt in found:
-            if abs(dt - (centre[i] or 0)) <= WINDOW_S:
-                cands[i].append(pass_id)
-                if sound[pass_id]["slant"] <= MAX_SLANT_M:
-                    pairs.append((-level_db(sound[pass_id]["slant"]), abs(dt - (centre[i] or 0)), i, pass_id))
+
+def _assign(cands, sound):
+    """{event index: pass_id}. Every (event, candidate within MAX_SLANT_M) pair, loudest first,
+    then closest in time, taken best first: each event gets one pass and each pass one event."""
+    pairs = sorted((-level_db(sound[p]["slant"]), miss, i, p)
+                   for i, found in enumerate(cands) for p, miss in found if sound[p]["slant"] <= MAX_SLANT_M)
     chosen, used = {}, set()
-    for _, _, i, pass_id in sorted(pairs):
-        if i not in chosen and pass_id not in used:
-            chosen[i] = pass_id
-            used.add(pass_id)
-
-    rows, candidate_rows = [], []
-    for i, e in enumerate(group):
-        pass_id = chosen.get(i)
-        clock = [] if centre[i] is not None else ["no_clock"]
-        near_enough = [c for c in cands[i] if sound[c]["slant"] <= MAX_SLANT_M]
-        if pass_id is None:
-            flags = ["taken"] if near_enough else ["unmatched"] + (["distant"] if cands[i] else [])
-            rows.append(_row(e, None, None, flags + clock, [], centre[i]))
-            matched_db = None
-        else:
-            got = sound[pass_id]
-            matched_db = level_db(got["slant"])
-            others = [c for c in near_enough if c != pass_id and matched_db - level_db(sound[c]["slant"]) < CONTRIBUTE_DB]
-            others.sort(key=lambda c: sound[c]["slant"])
-            flags = (["others"] if others else []) + got["flags"] + (["not_aircraft"] if e["event_class"] == "other" else [])
-            rows.append(_row(e, pass_id, got, flags + clock, others, centre[i], lmax[i]))
-        for c in cands[i]:
-            candidate_rows.append({
-                "source": e["source"], "receptor": e["receptor"], "lmax_utc": e["lmax_utc"], "pass_id": c,
-                "matched": "1" if c == pass_id else "", "offset_s": round(lmax[i] - sound[c]["arrival"], 1),
-                "slant_m": rounded(sound[c]["slant"]), "track_source": sound[c]["key"][0],
-                "below_match_db": None if matched_db is None else round(matched_db - level_db(sound[c]["slant"]), 1)})
-    return rows, candidate_rows, clocks
+    for _, _, i, p in pairs:
+        if i not in chosen and p not in used:
+            chosen[i] = p
+            used.add(p)
+    return chosen
 
 
-def _row(e, pass_id, got, flags, others, centre, at=None):
+def _row(e, flags, centre=None, pass_id="", got=None, others=(), lmax=None):
+    """An event_matches row: the event, and its match if pass_id (got: its predicted(), lmax: its time)."""
     row = {key: e[key] for key in ("source", "receptor", "lmax_utc", "lmax_db", "event_class")}
-    row.update({"pass_id": pass_id or "", "track_source": "", "track_id": "", "emitted_utc": "", "arrival_utc": "",
+    row.update({"pass_id": pass_id, "track_source": "", "track_id": "", "emitted_utc": "", "arrival_utc": "",
                 "offset_s": None, "window_centre_s": centre, "slant_m": None, "ground_m": None, "height_m": None,
                 "path_angle_deg": None, "others": ";".join(others), "flags": ";".join(flags)})
     if pass_id:
         row.update({"track_source": got["key"][0], "track_id": got["key"][1], "emitted_utc": iso(got["emitted"]),
-                    "arrival_utc": iso(got["arrival"]), "offset_s": round(at - got["arrival"], 1),
+                    "arrival_utc": iso(got["arrival"]), "offset_s": round(lmax - got["arrival"], 1),
                     "slant_m": rounded(got["slant"]), "ground_m": rounded(got["ground"]),
-                    "height_m": rounded(got["height"]),
-                    "path_angle_deg": None if got["angle"] is None else round(got["angle"], 2)})
+                    "height_m": rounded(got["height"]), "path_angle_deg": rounded(got["angle"], 2)})
     return row
 
 
@@ -272,4 +291,18 @@ def summary(rows, clocks):
             s[f"clean {kind}s"] = len(offsets)
             s[f"median offset s, clean {kind}s"] = round(statistics.median(offsets), 1) if offsets else None
         s["clock by day"] = clocks.get(group, {})
+    return out
+
+
+def clock_warnings(clocks):
+    """The build's warnings about clocks (match()'s clocks): a day whose offset is over
+    CLOCK_WARN_S, or not established on a day of CLOCK_WARN_EVENTS events or more."""
+    out = []
+    for group, days in clocks.items():
+        for day, clock in days.items():
+            if clock["offset_s"] is not None and abs(clock["offset_s"]) > CLOCK_WARN_S:
+                out.append(f"{group} on {day}: noise events are {clock['offset_s']:+.1f} s from their passes' "
+                           "predicted arrivals: a clock may be out")
+            elif clock["offset_s"] is None and clock["events"] >= CLOCK_WARN_EVENTS:
+                out.append(f"{group} on {day}: no clock offset stands out, so matching assumed the clocks agree")
     return out

@@ -22,29 +22,15 @@ const median = (values) => {
   const v = values.slice().sort((a, b) => a - b), n = v.length;
   return !n ? null : n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2;
 };
-// A pass's type: the resolved one (from the fleet table's register entry first), or else the
-// first one given, in source order, by any of its flights that day, whatever is shown. So a pass
-// sits in the same row whichever sources are switched on.
-function passTypes() {
-  const flightsOf = new Map();
-  for (const f of state.data.flights) {
-    if (!flightsOf.has(f.pass_id)) flightsOf.set(f.pass_id, []);
-    flightsOf.get(f.pass_id).push(f);
-  }
-  const by = new Map();
-  for (const [passId, fs] of flightsOf) {
-    const type = passType(passId, fs);
-    if (type) by.set(passId, type);
-  }
-  return by;
-}
 // The panel's rows: [{type, passes, lanes: [{source, dots: [{f, pass, v, edge}], median}]}], types
-// in name order, "unknown" last; lanes in source order. A dot whose value is at an edge of its
-// source's data is kept, but left out of the median. For a "pass" measure, the one lane's source is null.
+// in name order, "unknown" last; lanes in source order. A pass's row is its resolved type
+// (passType), so it sits in the same row whichever sources are switched on. A dot whose value is at
+// an edge of its source's data is kept, but left out of the median. For a "pass" measure, the one
+// lane's source is null.
 function typeRows(flights, measureKey, r) {
-  const m = MEASURES[measureKey], types = passTypes(), rows = new Map();
+  const m = MEASURES[measureKey], rows = new Map();
   const row = (passId) => {
-    const type = types.get(passId) || "unknown";
+    const type = passType(passId) || "unknown";
     if (!rows.has(type)) rows.set(type, { type, passIds: new Set(), lanes: new Map() });
     return rows.get(type);
   };
@@ -152,7 +138,7 @@ function drawTypes(flights) {
     const line = h("div", { class: "row" }, h("b", { text: `${fmt(d.v, m.digits)}` }), ` · ${m.label}${d.edge ? " (at an edge of its data)" : ""}`);
     if (d.f) return [...flightTip(d.f), line];
     const reg = d.p.flights.map((f) => f.registration || f.callsign).find(Boolean) || d.pass;
-    return [h("div", {}, h("b", { text: reg }), ` · ${typeText(passType(d.pass, d.p.flights)) || "unknown type"}`),
+    return [h("div", {}, h("b", { text: reg }), ` · ${typeText(passType(d.pass)) || "unknown type"}`),
       h("div", { class: "row", text: `Pass ${d.pass} · closest ${hms(d.p.t)}` }), line];
   }
 }

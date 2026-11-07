@@ -28,16 +28,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import os
 import sys
 import tempfile
 
-from . import manifest, registers, schema
+from . import manifest, paths, registers, schema
 from .common import number, registration
-
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FLEET_PATH = os.path.join(HERE, "registry", "fleet.csv")
 
 FIELDS = ["registration", "mark", "status", "icao_type", "model", "marketing_name", "manufacturer",
           "serial_number", "year_built", "icao24", "engines", "mtow_kg", "noise_standard",
@@ -53,8 +49,8 @@ FT_M = 0.3048
 
 
 def read(path=None):
-    """{registration: row}, or {} if there's no table yet. path: FLEET_PATH if None."""
-    path = path or FLEET_PATH
+    """{registration: row}, or {} if there's no table yet. path: paths.FLEET_PATH if None."""
+    path = path or paths.FLEET_PATH
     if not os.path.exists(path):
         return {}
     with open(path, newline="") as f:
@@ -63,7 +59,7 @@ def read(path=None):
 
 def write(entries, path=None):
     """Write the table, by registration, in one step so a reader never sees half of it."""
-    path = path or FLEET_PATH
+    path = path or paths.FLEET_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=".fleet.", suffix=".tmp", dir=os.path.dirname(path))
     try:
@@ -183,13 +179,13 @@ def untyped(entries):
 
 
 def main(args):
-    args.fleet = args.fleet or FLEET_PATH
+    args.fleet = args.fleet or paths.FLEET_PATH
     entries = read(args.fleet)
     notes = []
     if args.registrations:
         regs = {registration(r): 1 for r in args.registrations}
     else:
-        regs, notes = seen(args.manifest or sorted(glob.glob(os.path.join(manifest.DEPLOYMENTS_DIR, "*.json"))), args.km, args.ft)
+        regs, notes = seen(args.manifest or manifest.all_manifests(), args.km, args.ft)
     for note in notes:
         print(note, file=sys.stderr)
     ask, no_register = to_check(regs, entries, args.recheck)

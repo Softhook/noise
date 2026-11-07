@@ -20,9 +20,11 @@ same source are never in one pass.
 
 A pass id is stable across rebuilds: the time of its closest approach to the pass receptor, to the
 minute, and its registration, or a source id when there's none. Both come from the pass's flight
-in the highest-ranked source (SOURCE_RANK): ADS-B sources first, WebTrak last, since WebTrak must be
-removable (ARCHITECTURE.md). Adding or removing WebTrak, or any source ranked below the ones a pass
-already has, leaves its id unchanged.
+in the highest-ranked source (common.source_rank): ADS-B sources first, WebTrak last, since WebTrak
+must be removable (ARCHITECTURE.md). Adding or removing WebTrak, or any source ranked below the
+ones a pass already has, leaves its id unchanged.
+
+The steps after this one take a pass's flights from members(), not the passes rows.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ import bisect
 import datetime as dt
 import statistics
 
-from .common import parse_time
+from .common import parse_time, source_rank
 from .geometry import MAX_INTERPOLATE_S, apart_m, position_at
 
 OVERLAP_SLACK_S = 120
@@ -48,23 +50,6 @@ MIN_COMPARED = 3
 # The evidence for a registration link whose tracks couldn't be compared: they overlap in time
 # only within OVERLAP_SLACK_S, or have too few positions at the same times
 UNCHECKED = "registration, tracks not compared"
-
-# Which source's flight dates and names a pass. Sources not listed rank between these and WebTrak.
-SOURCE_RANK = ("adsb", "adsblol", "opensky")
-LAST_SOURCES = ("webtrak",)
-
-
-def source_rank(source):
-    if source in SOURCE_RANK:
-        return (0, SOURCE_RANK.index(source), source)
-    if source in LAST_SOURCES:
-        return (2, LAST_SOURCES.index(source), source)
-    return (1, 0, source)
-
-
-def ranked(sources):
-    """Sources in rank order: the order the survey app lists them in, everywhere."""
-    return sorted(sources, key=source_rank)
 
 
 def compare(ta, tb):
@@ -198,3 +183,11 @@ def link(flights, tracks, approaches, receptor):
             rows.append({"pass_id": pass_id, "source": k[0], "source_id": k[1],
                          "evidence": groups.evidence.get(k, "") if len(group) > 1 else ""})
     return sorted(rows, key=lambda r: (r["pass_id"], r["source"]))
+
+
+def members(passes):
+    """{pass_id: [(source, source_id)]}, each pass's flights in source order, from the passes table."""
+    found = {}
+    for row in passes:
+        found.setdefault(row["pass_id"], []).append((row["source"], row["source_id"]))
+    return {pass_id: sorted(keys, key=lambda k: (source_rank(k[0]), k[1])) for pass_id, keys in found.items()}

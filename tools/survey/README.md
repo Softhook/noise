@@ -132,27 +132,30 @@ To add a country, write a function in `survey/registers.py` that takes a registr
 
 | Module | Does |
 |---|---|
-| `survey/manifest.py` | Finds and reads a manifest: window, receptors (including private ones), sources; where the data folder is |
+| `survey/paths.py` | Where everything is: the deployments, the fleet table, the ADS-B tool, and the data folder (`data/` or `NOISE_DATA`) |
+| `survey/manifest.py` | Finds and reads a manifest: window, receptors (including private ones, and each microphone's height above sea level), sources |
+| `survey/common.py` | Times, numbers, registrations, and the order of sources (ADS-B first, WebTrak last) that every step and the page use |
 | `survey/adapters/__init__.py` | The adapter interface, and the registry of adapters by name |
 | `survey/adapters/adsb.py` | Runs `adsb analyse` on an ADS-B source's raw logs when they've changed, and reads its results: our logger, adsb.lol and OpenSky |
 | `survey/adapters/webtrak.py` | Reads WebTrak's raw chunk cache through `tools/webtrak`'s parser: radar, events, 1 s levels |
-| `survey/schema.py` | The common tables' columns, the daily files for positions and levels, and reading and writing them so a reader never sees half a build |
+| `survey/schema.py` | The common tables' columns and their `FORMAT`, the daily files for positions and levels, and reading and writing them so a reader never sees half a build |
 | `survey/geometry.py` | Local coordinates, closest approach with `at_track_end` (at an edge of the data), the path angle there, and positions along a track |
 | `survey/explain.py` | Why a source has no flight in a pass: no data then, outside its area, above its ceiling, or unexplained |
-| `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; ranks the sources |
+| `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; `members()` gives the later steps each pass's flights |
 | `survey/resolve.py` | Each pass's registration and type: the fleet table's first, then the sources', with any disagreement |
 | `survey/match.py` | Each noise event to the pass that made it: the predicted sound arrival from each pass's closest point, each day's clock offset, the loudest pass within 3 km in the window, any others that may have added to the level, and the clock check's medians |
 | `survey/fleet.py` | `noise fleet`: the fleet table, and which registrations to look up |
 | `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's searched, Ireland's and Luxembourg's downloaded |
-| `survey/build.py` | `noise build`: each source's prepare step and adapter, approaches, linking, resolving types, the tables, as a list of steps |
-| `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's small tables, read once and kept until the next build, and its positions and levels read a day at a time |
+| `survey/build.py` | `noise build`: each source's prepare step and adapter, approaches, then each step in turn; build.json from each step's own `summary()` |
+| `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's small tables, read once and kept until the next build, and its positions and levels read a day at a time. A build of an older `FORMAT` counts as not built, and the page asks for a rebuild |
 | `survey/server.py` | `noise serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |
 | `survey/ui/` | The page: `index.html` and `style.css`, `common.js` (state and helpers), `map.js` (plan and profile), `timeline.js`, `passes.js` (table and detail), `types.js` (by aircraft type), `main.js` (loading and start-up) |
 
 ### Extending it
 
-- **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS` (its data paths), optionally `MANIFEST_PATHS` and `prepare(name, spec, context, out_dir, log, warnings)`, a step that works out derived files from raw ones for the window (as the ADS-B adapter runs `adsb analyse`), `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Positions and levels can be generators, so a long deployment's rows are read as the build takes them rather than all at once. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `link.SOURCE_RANK` if it should date passes ahead of others, and a colour and name in `ui/common.js`.
-- **A new core step** (`checks`): a module of its own, called from `build.build()` between the existing steps, with its table added to `schema.TABLES`.
+- **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS` (its data paths), optionally `MANIFEST_PATHS` and `prepare(name, spec, context, out_dir, log, warnings)`, a step that works out derived files from raw ones for the window (as the ADS-B adapter runs `adsb analyse`), `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Positions and levels can be generators, so a long deployment's rows are read as the build takes them rather than all at once. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `common.FIRST_SOURCES` if it should rank ahead of others, and a colour and name in `ui/common.js`.
+- **A new core step** (`checks`): a module of its own, called from `build._build()` after the existing steps, taking each pass's flights from `link.members()`, with its table added to `schema.TABLES` and its counts from a `summary()` of its own in `build.summarise()`.
+- **A change to a table's columns, or what they mean:** raise `schema.FORMAT`, so the app asks for a rebuild instead of reading older builds. Nothing needs to read an older format.
 - **A new request for the page:** a method on `app.App`, and a line in `server.py`'s `GET_ROUTES` or `POST_ROUTES`.
 - **A new panel on the page:** a script in `ui/`, loaded in `index.html` before `main.js`, and a call from `render()` in `main.js`.
 

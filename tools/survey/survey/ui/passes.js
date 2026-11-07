@@ -42,7 +42,7 @@ function drawTable(passes) {
     const by = Object.fromEntries(p.flights.map((f) => [f.source, f]));
     const reg = p.flights.map((f) => f.registration).find(Boolean) || "";
     const call = p.flights.map((f) => f.callsign).find(Boolean) || "";
-    const type = passType(p.id, p.flights), id = identityOf(p.id);
+    const type = passType(p.id), id = identityOf(p.id);
     const typeCell = h("td", { text: type || "–", title: [typeName(type), typeNote(id)].filter(Boolean).join(", ") });
     if (id.disagree) typeCell.classList.add("disagree");
     const cells = [h("td", { class: "pin", text: hms(p.t) }), h("td", { class: "pin pin2", text: reg || "–" }), h("td", { text: call || "–" }), typeCell];
