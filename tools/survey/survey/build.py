@@ -29,7 +29,7 @@ import shutil
 import sys
 
 from . import adapters, explain, fleet, link, manifest, match, resolve, schema
-from .common import day_of, iso, rounded
+from .common import day_of, iso, parse_time, rounded
 from .geometry import Frame, closest_approach, path_angle
 
 
@@ -104,7 +104,7 @@ def read_sources(m, warnings, log):
 def position_parts(tracks, flights):
     """The positions table, as {day: rows}: each track whole, in the file for the day of its
     flight's first_utc (schema.PARTITIONED), tracks in key order."""
-    first = {(f["source"], f["source_id"]): f["first_utc"][:10] for f in flights}
+    first = {(f["source"], f["source_id"]): day_of(parse_time(f["first_utc"])) for f in flights}
     by_day = {}
     for key in sorted(tracks):
         by_day.setdefault(first.get(key) or day_of(tracks[key][0][0]), []).append(key)

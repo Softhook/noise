@@ -5,14 +5,15 @@
     noise sql 2026-11-05 --csv "SELECT * FROM event_matches" > matches.csv
 
 Every common table is a view over the build's Parquet files (schema.connect), in a database held in
-memory, so nothing done here changes the build; only `noise build` writes the tables. Times are UTC. At the prompt, .tables lists the tables and their columns, and .quit (or Ctrl-D) leaves.
+memory: a table made here goes when it ends, and the build's files are only read, unless a
+statement writes files itself (COPY ... TO). Times are UTC. At the prompt, .tables lists the tables
+and their columns, and .quit (or Ctrl-D) leaves.
 """
 
 from __future__ import annotations
 
 import contextlib
 import csv
-import os
 import sys
 
 import duckdb
@@ -39,8 +40,6 @@ def show(db, statement, as_csv=False, out=None):
     """Run one statement, and print its result: a table, or with as_csv every row as CSV."""
     out = out or sys.stdout
     cursor = db.execute(statement)  # Run once; the rows are then fetched from it
-    if cursor.description is None:  # A statement with no result, such as SET
-        return
     columns = [d[0] for d in cursor.description]
     if columns == ["Success"]:  # DuckDB's answer to a statement that returns nothing, such as SET
         return
@@ -108,14 +107,10 @@ def prompt(db, name):
 
 def main(args):
     m = manifest.load(manifest.find(args.deployment))
-    folder = os.path.join(m["out_dir"], "common")
-    info = schema.read_json(os.path.join(m["out_dir"], "build.json"))
-    if info is None or not os.path.isdir(folder):
-        print(f"noise sql: {m['deployment']} isn't built yet (make build DEPLOYMENT={m['deployment']})", file=sys.stderr)
-        return 2
-    if info.get("format") != schema.FORMAT:
-        print(f"noise sql: {m['deployment']} was built by an older version of the survey; rebuild it "
-              f"(make build DEPLOYMENT={m['deployment']})", file=sys.stderr)
+    try:
+        folder = schema.built_tables(m)
+    except schema.NotBuilt as error:
+        print(f"noise sql: {error}", file=sys.stderr)
         return 2
     with contextlib.closing(schema.connect(folder)) as db:
         if args.query:

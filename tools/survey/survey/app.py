@@ -103,9 +103,8 @@ class Deployment:
         return os.path.join(self.m["out_dir"], "build.json")
 
     def build_info(self):
-        """build.json, or None if it isn't built or was built in another format (schema.FORMAT)."""
-        info = schema.read_json(self.build_json)
-        return info if info and info.get("format") == schema.FORMAT else None
+        """build.json, or None if it isn't built or was built in another format (schema.build_info)."""
+        return schema.build_info(self.m["out_dir"])
 
     def outdated(self):
         """Whether it was built, but in another format, by an older version: it needs a rebuild."""
@@ -136,7 +135,7 @@ class Deployment:
                     raise BadRequest(f"{self.m['deployment']} was built by an older version of the survey; rebuild it")
                 kept = {} if fresh else self.days
                 try:
-                    tables = index({name: schema.read_table(self.folder, name) for name in SMALL_TABLES}) if fresh else self.tables
+                    tables = index(schema.read_tables(self.folder, SMALL_TABLES)) if fresh else self.tables
                     got = None
                     if day is not None:
                         got = kept.get(day) or read_day(self.folder, day)
@@ -185,19 +184,24 @@ def index(t):
 def read_day(folder, day):
     """One day's tracks and levels, from the daily files (schema.PARTITIONED): {"tracks": {(source,
     source_id): [(t, lat, lon, height)]}, "height_kinds": {(source, source_id): kind}, "levels":
-    [(t, receptor, dB)]}. Tracks come from the day before too: a flight's positions are filed by
-    the day it started, so one that crossed midnight is in the earlier day's file."""
+    [(t, receptor, dB)]}. The tracks are those of the flights in the air that day, as App.day lists
+    them. They come from the day before's file too: a flight's positions are filed by the day it
+    started, so one that crossed midnight is in the earlier day's file. Only those flights are read
+    from it, not the whole of the day before."""
     before = (dt.date.fromisoformat(day) - dt.timedelta(days=1)).isoformat()
+    lo, hi = day_bounds(day)
     tracks, kinds = {}, {}
     with contextlib.closing(schema.connect(folder, days=[before, day])) as db:
         for source, source_id, t, lat, lon, height, kind in db.execute(
-                "SELECT source, source_id, t, lat, lon, height_m, coalesce(height_kind, '') FROM positions "
-                "ORDER BY source, source_id, t").fetchall():
+                "SELECT p.source, p.source_id, t, lat, lon, height_m, coalesce(height_kind, '') FROM positions p "
+                "SEMI JOIN flights f ON f.source = p.source AND f.source_id = p.source_id "
+                " AND f.last_utc >= to_timestamp(?) AND f.first_utc < to_timestamp(?) "
+                "ORDER BY p.source, p.source_id, t", [lo, hi]).fetchall():
             key = (source, source_id)
             tracks.setdefault(key, []).append((t, lat, lon, height))
             kinds.setdefault(key, kind)
-    with contextlib.closing(schema.connect(folder, days=[day])) as db:
-        levels = db.execute("SELECT t, receptor, level_db FROM levels ORDER BY t, receptor, level_db").fetchall()
+        levels = db.execute("SELECT t, receptor, level_db FROM levels WHERE t >= ? AND t < ? "
+                            "ORDER BY t, receptor, level_db", [lo, hi]).fetchall()
     return {"tracks": tracks, "height_kinds": kinds, "levels": levels}
 
 
@@ -370,7 +374,6 @@ class App:
                 unseen.setdefault(u["pass_id"], {})[u["source"]] = u["reason"]
         identity = {i["pass_id"]: {k: v for k, v in i.items() if k != "pass_id"}
                     for i in t["identity"] if i["pass_id"] in day_passes}
-        levels = [lv for lv in today["levels"] if lo <= lv[0] < hi]
         return {
             "deployment": d.m["deployment"],
             "day": day,
@@ -386,5 +389,5 @@ class App:
                        for f in flights},
             "events": [{k: v for k, v in e.items() if not k.startswith("_")}
                        for e in t["noise_events"] if lo <= e["_lmax"] < hi],
-            "levels": [[round(lt - lo, 1), receptor, db] for lt, receptor, db in levels],
+            "levels": [[round(lt - lo, 1), receptor, db] for lt, receptor, db in today["levels"]],
         }

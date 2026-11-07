@@ -85,13 +85,14 @@ def known_type(entry):
 
 def seen(manifests, km=DEFAULT_KM, ft=DEFAULT_FT):
     """{registration: number of flights} for flights in the built deployments that came within km
-    of a receptor and below ft. A deployment that isn't built is skipped, with a note."""
+    of a receptor and below ft. A deployment that isn't built (schema.built_tables) is skipped, with a note."""
     counts, notes = {}, []
     for path in manifests:
         m = manifest.load(path)
-        folder = os.path.join(m["out_dir"], "common")
-        if not os.path.exists(schema.table_path(folder, "flights")):
-            notes.append(f"{m['deployment']} isn't built, so it's left out (make build)")
+        try:
+            folder = schema.built_tables(m)
+        except schema.NotBuilt as error:
+            notes.append(f"left out: {error}")
             continue
         with contextlib.closing(schema.connect(folder)) as db:
             for reg, n in db.execute(

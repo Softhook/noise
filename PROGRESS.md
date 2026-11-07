@@ -23,6 +23,14 @@ Nothing. The restructure, `match`, the core refactor and the move to Parquet and
 - A critical review the same day found that a read broken off by a build's swap failed instead of being tried again. That race predated the change, and it's fixed.
 - New dependencies: `duckdb` and `pyarrow`. The Pi's logger still needs only the standard library.
 - Still CSV, on purpose: `registry/fleet.csv`, which is kept in git and edited by hand, and `adsb analyse`'s output, which the Pi's standard-library code writes.
+- A second critical review the same day fixed:
+  - A row missing a column was written with that column empty, and a missing flag as false, with no error. Now every row must have every column, as the Fusion adapter's will.
+  - `noise fleet` didn't check a build's format, so it would read a build of an older format. `schema.built_tables` is now the one check, used by the app, `noise sql` and `noise fleet`.
+  - The app read the whole of the day before's positions to find the few flights that crossed midnight. It now reads only the flights in the air that day, in one query.
+  - The app opened a DuckDB connection per table. It now opens one for the small tables, and one for a day.
+  - A flight's positions were filed by the first 10 characters of its `first_utc`, which is the wrong day for a time with a zone other than UTC. Every adapter gives UTC today, so nothing changed.
+- Checked: every table and everything the app serves, for both deployments, are the same as before.
+- Not changed, on purpose: the core still holds times as ISO strings and parses them again where it needs numbers. That's from the CSV days. Changing it would touch every step, and it's cheap at this size. Writes aren't fsynced, since a build can always be run again.
 
 ## Done: the core refactor (7 November 2026)
 

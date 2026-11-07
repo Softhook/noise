@@ -120,8 +120,6 @@ def _real(value):
 
 
 def _flag(value):
-    if value is None:
-        return False
     if not isinstance(value, bool):
         raise TypeError(f"a flag must be True or False, not {value!r}")
     return value
@@ -154,7 +152,8 @@ def table_path(folder, name, day=None):
 
 def write_table(folder, name, rows, filename=None):
     """Write one table's rows (dicts, any iterable) as folder/<filename or name>.parquet, converting
-    each column to its type (a key that isn't a column raises, as a value of the wrong kind does)."""
+    each column to its type. Every row has every column, and only those: a missing or extra key
+    raises, as a value of the wrong kind does, since either is a mistake in the code that made it."""
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"{filename or name}{EXTENSION}")
     columns, schema = TABLES[name], arrow_schema(name)
@@ -165,9 +164,11 @@ def write_table(folder, name, rows, filename=None):
         with pq.ParquetWriter(temp, schema, compression="zstd") as writer:
             batch = []
             for row in rows:
-                extra = row.keys() - columns.keys()
-                if extra:
-                    raise ValueError(f"{name}: not a column: {', '.join(sorted(extra))}")
+                if row.keys() != columns.keys():
+                    missing, extra = columns.keys() - row.keys(), row.keys() - columns.keys()
+                    raise ValueError(f"{name}: " + "; ".join(
+                        f"{what}: {', '.join(sorted(keys))}"
+                        for what, keys in (("missing", missing), ("not a column", extra)) if keys))
                 batch.append(row)
                 if len(batch) == BATCH_ROWS:
                     writer.write_table(_arrow(name, batch, schema))
@@ -187,7 +188,7 @@ def _arrow(name, rows, schema):
     for column, kind in TABLES[name].items():
         convert = TO_STORE[kind]
         try:
-            values = [convert(row.get(column)) for row in rows]
+            values = [convert(row[column]) for row in rows]
         except (TypeError, ValueError) as error:
             raise ValueError(f"{name}.{column}: {error}") from None
         arrays.append(pa.array(values, ARROW_TYPES[kind]))
@@ -243,25 +244,32 @@ _FROM_STORE = {TEXT: "coalesce({0}, '')", REAL: "{0}", FLAG: "coalesce({0}, fals
                TIME: "coalesce(strftime({0}, '%Y-%m-%dT%H:%M:%S.%gZ'), '')"}
 
 
+def _rows(db, name):
+    columns = TABLES[name]
+    select = ", ".join(_FROM_STORE[kind].format(column) for column, kind in columns.items())
+    cursor = db.execute(f"SELECT {select} FROM {name}")
+    while batch := cursor.fetchmany(10_000):
+        for values in batch:
+            yield dict(zip(columns, values))
+
+
 def read_rows(folder, name, days=None):
     """A table's rows, one dict at a time, as the core holds them (see the top of this module). For
     a partitioned table, only the files for days (all of them if None), in day order, and in the
     order each file was written."""
-    columns = TABLES[name]
-    select = ", ".join(_FROM_STORE[kind].format(column) for column, kind in columns.items())
     with contextlib.closing(connect(folder, days)) as db:
-        cursor = db.execute(f"SELECT {select} FROM {name}")
-        while True:
-            batch = cursor.fetchmany(10_000)
-            if not batch:
-                break
-            for values in batch:
-                yield dict(zip(columns, values))
+        yield from _rows(db, name)
 
 
 def read_table(folder, name, days=None):
     """A table's rows, as a list of dicts (see read_rows)."""
     return list(read_rows(folder, name, days))
+
+
+def read_tables(folder, names, days=None):
+    """{name: read_table's rows} for several tables, through one connection."""
+    with contextlib.closing(connect(folder, days)) as db:
+        return {name: list(_rows(db, name)) for name in names}
 
 
 def write_tables(folder, tables):
@@ -290,6 +298,28 @@ def write_tables(folder, tables):
     os.rename(staging, folder)
     if old:
         shutil.rmtree(old, ignore_errors=True)
+
+
+class NotBuilt(Exception):
+    """A deployment with no tables to read: never built, or built in another FORMAT, by an older
+    version, so it needs a rebuild."""
+
+
+def build_info(out_dir):
+    """A deployment's build.json, from out_dir (a manifest's out_dir), or None if it isn't built or
+    was built in another FORMAT. Everything that reads a build's tables checks this first."""
+    info = read_json(os.path.join(out_dir, "build.json"))
+    return info if info and info.get("format") == FORMAT else None
+
+
+def built_tables(m):
+    """The tables folder of manifest m's build (manifest.load's), or NotBuilt saying why there's none."""
+    if build_info(m["out_dir"]) is None:
+        if os.path.exists(os.path.join(m["out_dir"], "build.json")):
+            raise NotBuilt(f"{m['deployment']} was built by an older version of the survey; rebuild it "
+                           f"(make build DEPLOYMENT={m['deployment']})")
+        raise NotBuilt(f"{m['deployment']} isn't built yet (make build DEPLOYMENT={m['deployment']})")
+    return os.path.join(m["out_dir"], "common")
 
 
 def write_json(path, data):

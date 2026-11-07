@@ -131,7 +131,8 @@ class Storage(unittest.TestCase):
         rows = [{"source": "webtrak", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53.669Z", "pass_id": "p1",
                  "matched": True, "offset_s": 1.9, "slant_m": "709.9", "track_source": "", "below_match_db": None},
                 {"source": "webtrak", "receptor": "nmt6", "lmax_utc": "2026-11-05T09:02:53+01:00", "pass_id": "",
-                 "matched": False, "offset_s": float("nan")}]  # Missing columns are empty
+                 "matched": False, "offset_s": float("nan"), "slant_m": "", "track_source": None,
+                 "below_match_db": None}]  # NaN, "" and None are all missing
         schema.write_table(self.dir, "event_candidates", rows)
         got = schema.read_table(self.dir, "event_candidates")
         self.assertEqual(got[0], {**rows[0], "slant_m": 709.9})
@@ -146,11 +147,18 @@ class Storage(unittest.TestCase):
                 [("TIMESTAMP WITH TIME ZONE", "BOOLEAN", "DOUBLE", 1793865773669, False),
                  ("TIMESTAMP WITH TIME ZONE", "BOOLEAN", "DOUBLE", 1793865773000, True)])
 
-    def test_a_value_of_the_wrong_kind_is_refused(self):
-        base = {"source": "w", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53Z"}
-        for bad in ({"matched": "1"}, {"offset_s": "soon"}, {"lmax_utc": "2026-11-05T08:02:53"}, {"colour": "red"}):
+    def test_a_value_of_the_wrong_kind_or_a_missing_or_extra_column_is_refused(self):
+        base = {"source": "w", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53Z", "pass_id": "p1",
+                "matched": False, "offset_s": 1.0, "slant_m": 700.0, "track_source": "adsb", "below_match_db": None}
+        schema.write_table(self.dir, "event_candidates", [base])  # As a check that base itself is good
+        os.remove(schema.table_path(self.dir, "event_candidates"))
+        missing = {k: v for k, v in base.items() if k != "track_source"}
+        for bad in ({"matched": "1"}, {"matched": None}, {"offset_s": "soon"}, {"lmax_utc": "2026-11-05T08:02:53"},
+                    {"colour": "red"}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 schema.write_table(self.dir, "event_candidates", [{**base, **bad}])
+        with self.assertRaisesRegex(ValueError, "missing: track_source"):
+            schema.write_table(self.dir, "event_candidates", [base, missing])
         self.assertEqual(os.listdir(self.dir), [])  # Nothing half-written is left
 
     def test_a_table_with_no_rows_or_no_file_still_has_its_columns(self):
@@ -891,6 +899,11 @@ class BuildAndServe(unittest.TestCase):
         # G-LCYN in both sources, G-LCYO in OpenSky only; WebTrak's flights have their registrations too
         self.assertEqual(fleet.seen([path]), ({"GLCYN": 2, "GLCYO": 1}, []))
         self.assertEqual(fleet.seen([path], km=0.1), ({}, []))  # They passed about 210 m away
+        build_json = os.path.join(self.dir, "out", "2026-11-05", "build.json")
+        schema.write_json(build_json, {**schema.read_json(build_json), "format": schema.FORMAT - 1})
+        counts, [note] = fleet.seen([path])  # A build in an older format is left out, not read
+        self.assertEqual(counts, {})
+        self.assertIn("older version", note)
 
     def test_sql_queries_a_build(self):
         path = os.path.join(self.deployments, "2026-11-05.json")
@@ -1123,6 +1136,8 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(len(track), 61)  # Every 2 s, from 23:59:30 to 00:01:30
         self.assertLess(track[0][0], midnight)
         self.assertEqual(day["flights"][0]["height_kind"], "geometric")
+        # Of the day before's file, only that flight's positions are read
+        self.assertEqual(list(app_module.read_day(common, "2026-11-06")["tracks"]), [tuple(next(iter(day["tracks"])).split("|"))])
 
     def test_the_app_reads_a_changed_manifest_again(self):
         app = App(self.deployments)
