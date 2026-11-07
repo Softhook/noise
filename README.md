@@ -40,4 +40,6 @@ Each tool is its own package, and all but `fusion` have a README. The Pi gets on
 
 Every tool writes into `data/` (or `NOISE_DATA`), never into its own folder: `raw/` for what's fetched (`make pi-collect`, `make opensky`, `make webtrak`), `derived/` for what `make build` works out from it. A period is a deployment, a manifest in [`tools/survey/deployments/`](tools/survey/deployments). The layout and the rules are in [tools/survey/README.md](tools/survey/README.md#where-the-data-lives), and the design in [tools/survey/ARCHITECTURE.md](tools/survey/ARCHITECTURE.md).
 
+Where the work stands, what's waiting on a decision and what's next are in [PROGRESS.md](PROGRESS.md).
+
 The data stays private: the garden's location (`tools/adsb/site.json`, git-ignored) and OpenSky's data under its research terms. Publish only summaries.
