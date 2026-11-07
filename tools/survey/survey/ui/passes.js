@@ -83,10 +83,13 @@ function drawTable(passes) {
   $("table").style.setProperty("--head1", thead.rows[0].cells[4] ? thead.rows[0].cells[4].offsetHeight + "px" : "29px");
   $("table-count").textContent = `${passes.length} passes`;
 }
-// The detail's lines for the pass's matched noise events at the receptor
+// The detail's lines for the pass's matched noise events at the receptor.
+// Named for what measured the sound, not the source's tracks: WebTrak's events are its noise
+// monitors', not its radar's
+const NOISE_SOURCE_NAMES = { webtrak: "WebTrak", fusion: "Fusion", airport: "airport" };
 function eventRows(events) {
   return events.flatMap((e) => [
-    h("dt", { text: `${sourceName(e.source)} event` }),
+    h("dt", { text: `Noise event (${NOISE_SOURCE_NAMES[e.source] || e.source})` }),
     h("dd", { text: `LAmax ${fmt(Number(e.lmax_db), 1)} dB at ${hms(toT(e.lmax_utc))}, ${Number(e.offset_s) >= 0 ? "+" : ""}${fmt(Number(e.offset_s), 1)} s from the sound's predicted arrival from ${fmt(Number(e.slant_m), 0)} m (${sourceName(e.track_source)}'s track)` }),
     ...matchNotes(e).map((note) => h("dd", { class: "disagree", text: note })),
     ...(e.others ? [h("dt", { text: "May have added" }), h("dd", { text: e.others.split(";").join(", ") })] : [])]);

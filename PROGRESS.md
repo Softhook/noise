@@ -6,7 +6,7 @@ Where the survey's tools stand, what's waiting on a decision, and what's next. R
 
 ## Waiting on a decision
 
-- **Push `main`.** The restructure was merged into the local `main` (a fast-forward) on 7 November 2026, and `match` is on the branch `survey-match`. Neither is pushed. Merge `survey-match` too, then push, or open PRs.
+Nothing. The restructure and `match` were merged into `main` and pushed on 7 November 2026.
 
 ## Done: match (7 November 2026)
 
