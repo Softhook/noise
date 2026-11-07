@@ -50,6 +50,14 @@ TABLES = {
     # or a transponder address other than the register's. fleet: why the fleet table didn't settle
     # the type (no registration, not in the table, not found, no type), or empty if it did
     "identity": ["pass_id", "registration", "type", "model", "type_source", "fleet", "disagree"],
+    # Each noise event, and the pass that made it (match.py), keyed on source, receptor and
+    # lmax_utc. track_source, track_id: the flight whose track predicted the sound; emitted_utc and
+    # arrival_utc: when the sound left its closest point and reached the receptor; offset_s: LAmax
+    # minus arrival; slant_m, ground_m, height_m: its closest point. others: other passes that may
+    # have added to the level. flags: match.FLAGS
+    "event_matches": ["source", "receptor", "lmax_utc", "lmax_db", "event_class", "pass_id", "track_source",
+                      "track_id", "emitted_utc", "arrival_utc", "offset_s", "slant_m", "ground_m", "height_m",
+                      "others", "flags"],
 }
 # The tables an adapter may fill. The rest are worked out by the core (build.py).
 SOURCE_TABLES = ("flights", "positions", "noise_events", "levels", "coverage")

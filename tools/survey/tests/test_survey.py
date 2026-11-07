@@ -21,11 +21,11 @@ import unittest
 import zipfile
 from unittest import mock
 
-from survey import adapters, build, explain, fleet, link, manifest, registers, resolve, schema, server
+from survey import adapters, build, explain, fleet, link, manifest, match, registers, resolve, schema, server
 from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, registration
-from survey.geometry import Frame, closest_approach, path_angle
+from survey.geometry import Frame, closest_approach, closest_slant, path_angle
 
 TOOLS = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NMT6 = (51.50535, 0.11075)
@@ -124,6 +124,21 @@ class Geometry(unittest.TestCase):
         self.assertAlmostEqual(height, 330, delta=2)
         self.assertAlmostEqual(slant, math.hypot(ground, height - 6), delta=0.1)
         self.assertFalse(end)
+
+    def test_closest_slant_is_the_closest_point_in_three_dimensions(self):
+        # Overhead at 300 m while descending at 5.5°: the closest point in three dimensions is
+        # beyond the overhead point, where the aircraft is lower, and nearer than 300 m
+        frame = Frame(*NMT6)
+        pts = westbound(T0, north_m=0.0, height_at_abeam=306.0)[::5]
+        t, slant, ground, height, end = closest_slant(pts, frame, 6.0)
+        self.assertAlmostEqual(slant, 300 * math.cos(math.radians(5.5)), delta=1)
+        self.assertAlmostEqual(t, T0 + 300 * math.sin(math.radians(5.5)) / 70, delta=0.1)
+        self.assertAlmostEqual(ground, 300 * math.sin(math.radians(5.5)), delta=1)
+        self.assertAlmostEqual(height - 6, math.sqrt(slant ** 2 - ground ** 2), delta=1)
+        self.assertFalse(end)
+        # Without heights there's no slant; at the start of a track, it's at an edge
+        self.assertIsNone(closest_slant([(p[0], p[1], p[2], None) for p in pts], frame, 6.0))
+        self.assertTrue(closest_slant([p for p in pts if p[0] > T0 + 20], frame, 6.0)[4])
 
     def test_closest_point_at_the_end_of_a_track_is_flagged(self):
         frame = Frame(*NMT6)
@@ -557,6 +572,82 @@ class Linking(unittest.TestCase):
         self.assertEqual(len(self.passes(fs, [westbound(T0), westbound(T0)])), 2)
 
 
+class Matching(unittest.TestCase):
+    RECEPTORS = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1], "ground_elevation_m": 3.0, "mic_height_m": 3.0}}
+
+    def match(self, passes, events):
+        """passes: {pass_id: {source: track}}; events: [(lmax_t, db, class)] at NMT6 from WebTrak.
+        Returns {lmax offset from T0: row}."""
+        flights, rows, tracks = [], [], {}
+        for pass_id, by_source in passes.items():
+            for source, pts in by_source.items():
+                sid = f"{pass_id}-{source}"
+                flights.append(flight(source, sid, "", pts[0][0], pts[-1][0]))
+                rows.append({"pass_id": pass_id, "source": source, "source_id": sid, "evidence": ""})
+                tracks[(source, sid)] = pts
+        noise = [{"source": "webtrak", "receptor": "nmt6", "lmax_utc": iso(t), "lmax_db": db, "event_class": kind}
+                 for t, db, kind in events]
+        got = match.match(noise, rows, flights, tracks, self.RECEPTORS)
+        return {round(parse_time(r["lmax_utc"]) - T0): r for r in got}
+
+    def test_an_event_goes_to_the_pass_predicted_loudest_within_the_window(self):
+        got = self.match({"near": {"opensky": westbound(T0)}, "far": {"opensky": westbound(T0 + 5, north_m=-3000)},
+                          "later": {"opensky": westbound(T0 + 300)}},
+                         [(T0 + 3, 75, "aircraft"), (T0 + 340, 70, "aircraft")])
+        row = got[3]
+        self.assertEqual((row["pass_id"], row["track_source"], row["flags"]), ("near", "opensky", ""))
+        # Heard from about 386 m, from about 31 m past abeam, since it's descending: so 0.44 s after
+        # abeam, and the sound arrives about 1.1 s after that
+        slant = float(row["slant_m"])
+        self.assertAlmostEqual(slant, math.hypot(210, 324), delta=3)
+        emitted = T0 + 324 * math.sin(math.radians(5.5)) / 70
+        self.assertAlmostEqual(parse_time(row["emitted_utc"]), emitted, delta=0.05)
+        self.assertAlmostEqual(row["offset_s"], T0 + 3 - (emitted + slant / match.SOUND_SPEED), delta=0.06)
+        # "far" is over 10 dB quieter, so it isn't listed as adding to the level
+        self.assertEqual(row["others"], "")
+        # 40 s after "later"'s arrival is outside the window
+        self.assertEqual((got[340]["pass_id"], got[340]["flags"]), ("", "unmatched"))
+
+    def test_a_pass_close_enough_to_add_to_the_level_is_listed(self):
+        got = self.match({"lcy": {"opensky": westbound(T0)}, "heli": {"opensky": westbound(T0 + 8, north_m=-900)}},
+                         [(T0 + 2, 76, "aircraft")])
+        self.assertEqual(got[2]["pass_id"], "lcy")
+        self.assertEqual(got[2]["flags"], "others")
+        self.assertRegex(got[2]["others"], r"^heli 9\d\d m -\d\.\d s$")
+
+    def test_a_pass_makes_one_event_and_the_closer_in_time_gets_it(self):
+        # Both events fit "near" best, the second one better in time. The first goes to "other"
+        got = self.match({"near": {"opensky": westbound(T0)}, "other": {"opensky": westbound(T0 - 10, north_m=-1500)}},
+                         [(T0 - 8, 70, "aircraft"), (T0 + 2, 75, "aircraft")])
+        self.assertEqual((got[2]["pass_id"], got[-8]["pass_id"]), ("near", "other"))
+        # With nothing else near, the event is left over, and says why
+        got = self.match({"near": {"opensky": westbound(T0)}}, [(T0 - 8, 70, "aircraft"), (T0 + 2, 75, "aircraft")])
+        self.assertEqual((got[2]["pass_id"], got[-8]["pass_id"], got[-8]["flags"]), ("near", "", "taken"))
+        self.assertRegex(got[-8]["others"], r"^near ")
+
+    def test_the_ads_b_track_predicts_the_sound_unless_its_closest_point_is_at_an_edge(self):
+        both = {"opensky": westbound(T0), "webtrak": westbound(T0 + 2)}
+        self.assertEqual(self.match({"p": both}, [(T0 + 3, 75, "aircraft")])[3]["track_source"], "opensky")
+        cut = {"opensky": [p for p in westbound(T0) if p[0] > T0 + 20], "webtrak": westbound(T0 + 2)}
+        row = self.match({"p": cut}, [(T0 + 3, 75, "aircraft")])[3]
+        self.assertEqual((row["track_source"], row["flags"]), ("webtrak", ""))
+        # Every track cut off: the best is used, and flagged
+        row = self.match({"p": {"opensky": cut["opensky"]}}, [(T0 + 21, 75, "aircraft")])[21]
+        self.assertEqual((row["pass_id"], row["flags"]), ("p", "at_track_end"))
+
+    def test_odd_events_are_flagged(self):
+        flat = [(t, lat, lon, None) for t, lat, lon, _ in westbound(T0)]
+        got = self.match({"p": {"webtrak": flat}, "q": {"opensky": westbound(T0 + 600)}},
+                         [(T0 + 1, 70, "aircraft"), (T0 + 602, 70, "other")])
+        self.assertEqual(got[1]["flags"], "no_height")
+        self.assertEqual(got[602]["flags"], "not_aircraft")
+        # An event at a receptor left out of the build is listed, unmatched
+        event = {"source": "fusion", "receptor": "garden", "lmax_utc": iso(T0), "lmax_db": 70, "event_class": "aircraft"}
+        [row] = match.match([event], [], [], {}, self.RECEPTORS)
+        self.assertEqual((row["pass_id"], row["flags"]), ("", "unmatched"))
+        self.assertEqual(match.summary([row])["garden fusion"]["unmatched"], 1)
+
+
 class Explain(unittest.TestCase):
     """Why a source has no flight in a pass."""
 
@@ -675,6 +766,9 @@ class BuildAndServe(unittest.TestCase):
         [unseen] = schema.read_table(common, "unseen")
         self.assertEqual((unseen["pass_id"], unseen["source"], unseen["reason"]), ("20261105T0910-GLCYO", "webtrak", explain.NO_DATA))
         self.assertEqual(summary["unseen"][explain.UNEXPLAINED], 0)
+        [row] = schema.read_table(common, "event_matches")
+        self.assertEqual((row["pass_id"], row["flags"]), ("20261105T0900-GLCYN", ""))
+        self.assertEqual(summary["matches"]["nmt6 webtrak"]["matched"], 1)
 
     def test_a_build_replaces_the_tables_folder_whole(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
@@ -721,6 +815,8 @@ class BuildAndServe(unittest.TestCase):
         day = app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
         self.assertEqual({(f["source"], f["height_kind"]) for f in day["flights"]}, {("opensky", "geometric"), ("webtrak", "radar")})
         self.assertEqual([e["event_class"] for e in day["events"]], ["aircraft"])
+        # Matched to G-LCYN, by OpenSky's track rather than WebTrak's
+        self.assertEqual((day["events"][0]["pass_id"], day["events"][0]["track_source"]), ("20261105T0900-GLCYN", "opensky"))
         self.assertFalse(any(k.startswith("_") for f in day["flights"] for k in f))
         self.assertEqual(day["sources"], ["opensky", "webtrak"])
 
@@ -926,22 +1022,16 @@ class Page(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)
 
-    def test_each_noise_event_goes_to_one_pass_the_closest(self):
-        def f(pass_id, t, ground):
-            return {"pass_id": pass_id, "source": "opensky", "first_utc": iso(t - 60),
-                    "approaches": {"nmt6": {"t": iso(t), "ground_m": ground, "height_m": 300}}}
+    def test_each_pass_shows_its_matched_event_from_a_source_thats_on(self):
+        def e(pass_id, db, receptor="nmt6", source="webtrak"):
+            return {"source": source, "receptor": receptor, "lmax_utc": iso(T0), "lmax_db": str(db), "pass_id": pass_id}
 
-        def e(t, db, receptor="nmt6", source="webtrak"):
-            return {"source": source, "receptor": receptor, "lmax_utc": iso(t), "lmax_db": str(db)}
-
-        data = {"flights": [f("far", T0, 2000), f("near", T0 + 10, 150), f("alone", T0 + 600, 900), f("quiet", T0 + 1200, 500)],
-                "events": [e(T0 + 15, 75), e(T0 + 30, 70), e(T0 + 610, 68), e(T0 + 650, 80), e(T0 + 1200, 90, "garden"),
-                           e(T0 + 1201, 85, source="fusion")]}
-        got = self.run_page(data, sources=["webtrak", "opensky"])["events"]
-        # Both events near T0 go to "near", which came 150 m from NMT6, not to "far" as well; "alone"
-        # gets the one 10 s after it but not the one 50 s after; nothing at another receptor counts,
-        # nor an event from a source that's switched off
-        self.assertEqual(got, {"near": "75", "alone": "68"})
+        data = {"flights": [], "events": [e("a", 75), e("a", 80, source="airport"), e("b", 68), e("", 90),
+                                          e("c", 90, "garden"), e("d", 85, source="fusion")]}
+        got = self.run_page(data, sources=["webtrak", "airport"])["events"]
+        # a's louder event of the two sources; nothing unmatched, at another receptor, or from a
+        # source that's switched off
+        self.assertEqual(got, {"a": "80", "b": "68"})
 
     def test_sources_are_listed_in_the_servers_order(self):
         data = {"flights": [], "events": [], "sources": link.ranked(["webtrak", "fusion", "opensky", "adsb", "adsblol"])}

@@ -35,13 +35,13 @@ const context = {
   fetch: () => Promise.reject(new Error("no server")), requestAnimationFrame: () => 0, console,
 };
 vm.createContext(context);
-vm.runInContext(`${script}\n;globalThis.__ui = { state, assignEvents, bySource, typeRows };`, context);
+vm.runInContext(`${script}\n;globalThis.__ui = { state, matchedEvents, bySource, typeRows };`, context);
 const ui = context.__ui;
 
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 ui.state.data = input.data;
 ui.state.sources = new Set(input.sources);  // The sources switched on
-const owner = ui.assignEvents(input.receptor);
+const owner = ui.matchedEvents(input.receptor);
 ui.state.eventOf = owner;
 process.stdout.write(JSON.stringify({
   events: Object.fromEntries([...owner].map(([pass, e]) => [pass, e.lmax_db])),

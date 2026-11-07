@@ -45,9 +45,7 @@ def closest_approach(points, frame, mic_amsl=None):
         return None
     pts = [(p[0], *frame.xy(p[1], p[2]), p[3]) for p in points]
     n = len(pts)
-    # Positions at an edge of the data: the ends, and either side of a hole
-    edge = [i == 0 or i == n - 1 or pts[i][0] - pts[i - 1][0] > MAX_INTERPOLATE_S
-            or pts[i + 1][0] - pts[i][0] > MAX_INTERPOLATE_S for i in range(n)]
+    edge = _edges(pts)
     best = None
     for i in range(n):
         a = pts[i]
@@ -67,6 +65,43 @@ def closest_approach(points, frame, mic_amsl=None):
     t, d, h, at_edge = best
     slant = None if h is None or mic_amsl is None else math.hypot(d, h - mic_amsl)
     return t, d, h, slant, at_edge
+
+
+def _edges(pts):
+    """For each position of a track, whether it's at an edge of the source's data: the track's
+    first or last position, or either side of a hole of more than MAX_INTERPOLATE_S."""
+    n = len(pts)
+    return [i == 0 or i == n - 1 or pts[i][0] - pts[i - 1][0] > MAX_INTERPOLATE_S
+            or pts[i + 1][0] - pts[i][0] > MAX_INTERPOLATE_S for i in range(n)]
+
+
+def closest_slant(points, frame, mic_amsl):
+    """Where a track came closest to a microphone mic_amsl metres above sea level at the frame's
+    origin, in three dimensions: the point the loudest sound is heard from, if the aircraft were
+    equally loud in every direction. Looked for along each segment between neighbouring positions,
+    never across a hole of more than MAX_INTERPOLATE_S, and only where both ends have a height.
+
+    Returns (t, slant_m, ground_m, height_m, at_track_end), with at_track_end as closest_approach
+    gives it, or None when no position has a height."""
+    pts = [(p[0], *frame.xy(p[1], p[2]), p[3] - mic_amsl) for p in points if p[3] is not None]
+    if not pts:
+        return None
+    n = len(pts)
+    edge = _edges(pts)
+    best = None
+    for i in range(n):
+        a = pts[i]
+        j = i + 1 if i + 1 < n and pts[i + 1][0] - a[0] <= MAX_INTERPOLATE_S else i
+        b = pts[j]
+        d = (b[1] - a[1], b[2] - a[2], b[3] - a[3])
+        length = d[0] ** 2 + d[1] ** 2 + d[2] ** 2
+        f = 0.0 if length == 0 else min(1.0, max(0.0, -(a[1] * d[0] + a[2] * d[1] + a[3] * d[2]) / length))
+        x, y, z = a[1] + f * d[0], a[2] + f * d[1], a[3] + f * d[2]
+        slant = math.sqrt(x * x + y * y + z * z)
+        if best is None or slant < best[1]:
+            at_edge = (f == 0.0 and edge[i]) or (f == 1.0 and edge[j])
+            best = (a[0] + f * (b[0] - a[0]), slant, math.hypot(x, y), z + mic_amsl, at_edge)
+    return best
 
 
 # Path angle: fitted over this far either side of the closest approach, along the track, and only

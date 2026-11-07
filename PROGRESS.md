@@ -2,11 +2,18 @@
 
 Where the survey's tools stand, what's waiting on a decision, and what's next. Read this first when picking the work up again. The design is in [tools/survey/ARCHITECTURE.md](tools/survey/ARCHITECTURE.md), and how to use everything is in [README.md](README.md).
 
-*Last updated: 7 November 2026.*
+*Last updated: 7 November 2026, after `match`.*
 
 ## Waiting on a decision
 
-- **Merge the restructure.** The branch `restructure-data-and-project` has three commits on top of `main`, and isn't merged or pushed. Each commit passes its tests, and the last passes all 343 (`make test`). Rebuilding both deployments gives the same results as before. Merge it into `main`, or push it and open a PR.
+- **Push `main`.** The restructure was merged into the local `main` (a fast-forward) on 7 November 2026, and `match` is on the branch `survey-match`. Neither is pushed. Merge `survey-match` too, then push, or open PRs.
+
+## Done: match (7 November 2026)
+
+- `survey/match.py` matches each noise event at a receptor to the pass that made it. The predicted sound arrival comes from each pass's 3-D closest point, using its highest-ranked track not at an edge of its data. An event goes to the loudest predicted pass within ±20 s of LAmax, and each pass gets at most one event. Other passes within 10 dB are listed. The rules are in [ARCHITECTURE.md](tools/survey/ARCHITECTURE.md#match-noise-events-to-passes).
+- The results go in a new table, `common/event_matches.csv`, and `build.json`'s `matches` gives the counts and the median offset of LAmax from the arrival, per receptor and noise source.
+- The app's passes table, detail and timeline use the build's matches instead of the page's own guess.
+- On 5 November 2026, all 22 NMT6 aircraft events matched the right pass. The median offset was 0.3 s, and all were within ±2 s except one, at −7.8 s.
 
 ## Done: the restructure (7 November 2026)
 
@@ -46,8 +53,8 @@ Why each choice was made: the critical review that led to it is summarised in th
 
 The survey README's [Status](tools/survey/README.md#status) says what's built. Still to do, from the architecture:
 
-1. **`match`:** noise events to passes, for the garden and NMT6, and the match check page.
-2. **`checks`:** clock offsets, coverage, heights, identity conflicts, unmatched flights and events.
-3. **The rest of `resolve`:** per-pass manual overrides, airport records, and lookups within a budget.
-4. **The garden's real data:** the Pi's logs once it's at the garden (`make pi-collect`). Until then, OpenSky stands in for it.
-5. **The Fusion adapter**, once its export format is decoded ([notes](Documents/Fusion_Data_Format_Reverse_Engineering.md)).
+1. **`checks`:** clock offsets (first, from `match`'s offsets, per day and source pair), coverage, heights, identity conflicts, unmatched flights and events.
+2. **The rest of `resolve`:** per-pass manual overrides, airport records, and lookups within a budget.
+3. **The garden's real data:** the Pi's logs once it's at the garden (`make pi-collect`). Until then, OpenSky stands in for it.
+4. **The Fusion adapter**, once its export format is decoded ([notes](Documents/Fusion_Data_Format_Reverse_Engineering.md)).
+5. **The match check page** (Phase 1, with the Fusion): a page per matched event, for checking matches by eye.

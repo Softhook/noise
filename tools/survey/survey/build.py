@@ -14,7 +14,8 @@ The steps, each a function here, in order:
     link           flights -> passes (link.py)
     unseen         why a source has no flight in a pass (explain.py)
     resolve        each pass's registration and type, from the fleet table first (resolve.py)
-A step still to be built (match, checks) goes in build() between these.
+    match          each noise event to the pass that made it (match.py)
+A step still to be built (checks) goes in build() after these.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import os
 import shutil
 import sys
 
-from . import adapters, explain, fleet, link, manifest, resolve, schema
+from . import adapters, explain, fleet, link, manifest, match, resolve, schema
 from .common import day_of, iso, rounded
 from .geometry import Frame, closest_approach, path_angle
 
@@ -182,6 +183,8 @@ def summarise(m, tables, tracks, warnings):
             "unknown": sum(1 for i in tables["identity"] if not i["type"]),
             "sources disagree": sum(1 for i in tables["identity"] if i["disagree"]),
         },
+        # Per receptor and noise source: events matched to a pass, and LAmax's median offset from its arrival
+        "matches": match.summary(tables["event_matches"]),
         "warnings": warnings,
     }
 
@@ -211,6 +214,7 @@ def _build(m, log, fleet_path=None):
         "passes": passes,
         "unseen": explain.unseen_rows(passes, tracks, limits, tables["coverage"]),
         "identity": resolve.resolve(passes, tables["flights"], fleet.read(fleet_path)),
+        "event_matches": match.match(tables["noise_events"], passes, tables["flights"], tracks, m["receptors"]),
     })
 
     out = os.path.join(m["out_dir"], "common")

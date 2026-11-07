@@ -5,18 +5,18 @@ function tiles(flights, passes) {
   const d = state.data, r = $("f-receptor").value;
   const several = passes.filter((p) => new Set(p.flights.map((f) => f.source)).size > 1).length;
   const missed = passes.filter((p) => unexplained(p.id)).length;
-  // Events follow the receptor, the time window and the source switches. Not the search or the
-  // pass filters: an event isn't tied to an aircraft until `match` is built.
+  // Events follow the receptor, the time window and the source switches, but not the search or the
+  // pass filters, so the count includes events matched to no pass
   const events = d.events.filter((e) => e.receptor === r && state.sources.has(e.source) &&
     (!state.window || (toT(e.lmax_utc) >= state.window[0] && toT(e.lmax_utc) <= state.window[1])));
   const items = [["Passes", passes.length], ["In several sources", several], ["Missed, unexplained", missed],
-    ["Noise events", events.length]];
+    ["Noise events", events.length], ["Events not matched", events.filter((e) => !e.pass_id).length]];
   $("tiles").replaceChildren(...items.map(([l, v]) => h("div", { class: "tile" }, h("div", { class: "label", text: l }), h("div", { class: "value", text: v.toLocaleString("en-GB") }))));
 }
 function render() {
   if (!state.data) return;
   const flights = shownFlights(), passes = passesOf(flights);
-  state.eventOf = assignEvents($("f-receptor").value);
+  state.eventOf = matchedEvents($("f-receptor").value);
   drawTimeline(shownFlights(null));
   drawPlan(flights);
   drawProfile(flights);

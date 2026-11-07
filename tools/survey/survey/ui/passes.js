@@ -1,39 +1,26 @@
 // The passes table, the selected pass's detail, and selecting a pass from any view.
 "use strict";
 
-// Each noise event at the receptor, from a source that's switched on, goes to at most one pass: of
-// the passes whose closest approach came from 40 s before its LAmax to 5 s after it (sound takes a
-// few seconds to arrive, and the clocks may differ a little), the one that came closest to the
-// receptor. Each pass then shows the loudest event it was given. It isn't a match (ARCHITECTURE.md,
-// Match, is still to be built), but two passes never both claim one event. Worked out over every
-// pass of the day, whatever the filters, so filtering never moves an event to another pass.
-const EVENT_BEFORE_S = 5, EVENT_AFTER_S = 40;
-function assignEvents(r) {
-  const passes = new Map();
-  for (const f of state.data.flights) {
-    const a = f.approaches[r];
-    const p = passes.get(f.pass_id) || { t: Infinity, ground: Infinity };
-    p.t = Math.min(p.t, a ? toT(a.t) : toT(f.first_utc));
-    if (a && a.ground_m !== null) p.ground = Math.min(p.ground, a.ground_m);
-    passes.set(f.pass_id, p);
-  }
-  const list = [...passes.entries()].sort((a, b) => a[1].t - b[1].t);
+// Each pass's noise event at the receptor, as the build's match gave it (match.py): of the events
+// matched to the pass, from sources that are switched on, the loudest. An event is matched to at
+// most one pass, and a pass has at most one event per noise source at a receptor.
+function matchedEvents(r) {
   const owner = new Map();
   for (const e of state.data.events) {
-    if (e.receptor !== r || !state.sources.has(e.source)) continue;
-    const at = toT(e.lmax_utc);
-    let best = null;
-    for (const [id, p] of list) {
-      const dt = at - p.t;
-      if (dt < -EVENT_BEFORE_S || dt > EVENT_AFTER_S) continue;
-      if (!best || p.ground < best[1].ground || (p.ground === best[1].ground && p.t < best[1].t)) best = [id, p];
-    }
-    if (!best) continue;
-    const had = owner.get(best[0]);
-    if (!had || Number(e.lmax_db) > Number(had.lmax_db)) owner.set(best[0], e);
+    if (e.receptor !== r || !e.pass_id || !state.sources.has(e.source)) continue;
+    const had = owner.get(e.pass_id);
+    if (!had || Number(e.lmax_db) > Number(had.lmax_db)) owner.set(e.pass_id, e);
   }
   return owner;
 }
+// What a match's flags mean, for the detail and tooltips
+const MATCH_FLAGS = {
+  others: "another pass may have added to the level",
+  at_track_end: "the closest point is at an edge of the track's data, so the arrival may be off",
+  no_height: "no heights, so the arrival is from the ground distance alone",
+  not_aircraft: "the noise source classed it as not an aircraft",
+};
+const matchNotes = (e) => (e.flags || "").split(";").filter((f) => MATCH_FLAGS[f]).map((f) => MATCH_FLAGS[f]);
 const eventNear = (passId) => state.eventOf.get(passId) || null;
 function drawTable(passes) {
   const r = $("f-receptor").value, sources = state.data.sources.filter((s) => state.sources.has(s));
@@ -48,7 +35,7 @@ function drawTable(passes) {
   }
   if (pair) row1.push(h("th", { rowspan: 2, class: "num", title: "Height at closest approach, the first source's minus the second's. Left out where either is at an edge of its source's data." },
     "Δ height (m)", h("div", { class: "sub-th", text: `${sourceName(pair[0])} − ${sourceName(pair[1])}` })));
-  row1.push(h("th", { rowspan: 2, class: "num", title: `The loudest noise event at the receptor whose LAmax came ${EVENT_BEFORE_S} s before to ${EVENT_AFTER_S} s after this pass's closest approach, unless another pass in that time came closer to the receptor. A guide, not a match.` }, "LAmax (dB)"));
+  row1.push(h("th", { rowspan: 2, class: "num", title: "The LAmax of the noise event at the receptor matched to this pass: the event whose LAmax came within 20 s of the pass's predicted sound arrival, where no other pass was predicted louder. Orange: another pass may have added to the level, or the match is less certain (see the pass's detail)." }, "LAmax (dB)"));
   const thead = $("table").querySelector("thead");
   thead.replaceChildren(h("tr", {}, ...row1), h("tr", {}, ...row2));
   const rows = passes.map((p) => {
@@ -78,7 +65,7 @@ function drawTable(passes) {
       cells.push(h("td", { class: "num", text: ok ? (diff >= 0 ? "+" : "") + fmt(diff, 0) : "" }));
     }
     const ev = eventNear(p.id);
-    cells.push(h("td", { class: "num", text: ev ? fmt(Number(ev.lmax_db), 1) : "" }));
+    cells.push(h("td", { class: "num" + (ev && matchNotes(ev).length ? " disagree" : ""), text: ev ? fmt(Number(ev.lmax_db), 1) : "" }));
     const tr = h("tr", { class: p.id === state.selected ? "selected" : "", tabindex: 0, "data-pass": p.id, "aria-selected": String(p.id === state.selected) }, ...cells);
     tr.addEventListener("click", () => select(p.id, "table"));
     tr.addEventListener("keydown", (e) => {
@@ -96,6 +83,14 @@ function drawTable(passes) {
   $("table").style.setProperty("--head1", thead.rows[0].cells[4] ? thead.rows[0].cells[4].offsetHeight + "px" : "29px");
   $("table-count").textContent = `${passes.length} passes`;
 }
+// The detail's lines for the pass's matched noise events at the receptor
+function eventRows(events) {
+  return events.flatMap((e) => [
+    h("dt", { text: `${sourceName(e.source)} event` }),
+    h("dd", { text: `LAmax ${fmt(Number(e.lmax_db), 1)} dB at ${hms(toT(e.lmax_utc))}, ${Number(e.offset_s) >= 0 ? "+" : ""}${fmt(Number(e.offset_s), 1)} s from the sound's predicted arrival from ${fmt(Number(e.slant_m), 0)} m (${sourceName(e.track_source)}'s track)` }),
+    ...matchNotes(e).map((note) => h("dd", { class: "disagree", text: note })),
+    ...(e.others ? [h("dt", { text: "May have added" }), h("dd", { text: e.others })] : [])]);
+}
 function drawDetail(passes) {
   const box = $("detail");
   const fs = state.data.flights.filter((f) => f.pass_id === state.selected);
@@ -107,7 +102,8 @@ function drawDetail(passes) {
   parts.push(h("dl", {}, h("dt", { text: "Pass" }), h("dd", { text: state.selected }),
     h("dt", { text: "Linked by" }), h("dd", { text: fs.length > 1 ? ([...new Set(fs.map((f) => f.evidence).filter(Boolean))].join("; ") || "not recorded") : "only one source" }),
     ...(id.type ? [h("dt", { text: "Type" }), h("dd", { text: [typeText(id.type), id.model && `model ${id.model}`].filter(Boolean).join(", ") + ` (${typeNote(id)})` })] : []),
-    ...(id.disagree ? [h("dt", { text: "Disagree" }), h("dd", { class: "disagree", text: id.disagree })] : [])));
+    ...(id.disagree ? [h("dt", { text: "Disagree" }), h("dd", { class: "disagree", text: id.disagree })] : []),
+    ...eventRows(state.data.events.filter((e) => e.pass_id === state.selected && e.receptor === r && state.sources.has(e.source)))));
   for (const f of fs.sort((a, b) => bySource(a.source, b.source))) {
     const a = f.approaches[r] || {};
     parts.push(h("div", { class: "detail-source" }, key(f.source, colourOf(f.source), isRadar(f.source)), sourceName(f.source)));

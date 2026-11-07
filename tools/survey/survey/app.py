@@ -24,6 +24,8 @@ READ_ATTEMPTS = 5  # Tries at reading a build's tables while another build is re
 DAYS_KEPT = 4  # Days whose tracks and levels are kept in memory, the most recently asked for
 # Every table but the daily ones (schema.PARTITIONED), which are read a day at a time
 SMALL_TABLES = [name for name in schema.TABLES if name not in schema.PARTITIONED]
+# What the page is given of each event's match, beside the event itself
+MATCH_FIELDS = ("pass_id", "track_source", "arrival_utc", "offset_s", "slant_m", "others", "flags")
 
 
 class BadRequest(Exception):
@@ -138,8 +140,12 @@ def index(t):
     approaches and pass membership by flight."""
     for f in t["flights"]:
         f["_first"], f["_last"] = parse_time(f["first_utc"]), parse_time(f["last_utc"])
+    matches = {(m["source"], m["receptor"], m["lmax_utc"]): m for m in t["event_matches"]}
     for e in t["noise_events"]:
         e["_lmax"] = parse_time(e["lmax_utc"])
+        # Its match (match.py); none in a build made before matching was added, until it's rebuilt
+        got = matches.get((e["source"], e["receptor"], e["lmax_utc"]), {})
+        e.update({key: got.get(key, "") for key in MATCH_FIELDS})
     for c in t["coverage"]:
         c["_start"], c["_end"] = parse_time(c["start_utc"]), parse_time(c["end_utc"])
     approaches = {}

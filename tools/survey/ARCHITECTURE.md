@@ -94,7 +94,20 @@ A pass id is stable across reruns, so notes and overrides keep pointing at the s
 
 ### Match: noise events to passes
 
-`match` matches each noise event at each receptor to the pass that best fits its LAmax time and the predicted sound arrival from that pass's closest approach. It also lists any other pass close enough to have contributed, such as a helicopter or a high Heathrow arrival. It replaces the matching steps planned in `adsb analyse` (steps 8 and 9 of the [ADS-B plan](../adsb/docs/PLAN.md)), so that it works the same for the garden and for NMT6.
+`match` matches each noise event at each receptor to the pass that made it, the same way for the garden and NMT6. It replaces the matching steps planned in `adsb analyse` (steps 8 and 9 of the [ADS-B plan](../adsb/docs/PLAN.md)).
+
+**Built** (`survey/match.py`), the rules:
+
+1. **Predicted arrival.** For each pass, where its track came closest to the microphone in three dimensions, and when the sound from there reached it, at 340.3 m/s. The core has no weather, but 20 °C either way moves an arrival from 1 km by under 0.1 s. A descending aircraft's closest point is a little after it's abeam, where it's lower. The track is the pass's flight in the highest-ranked source whose closest point isn't at an edge of its data, so an ADS-B track before WebTrak's: the match doesn't depend on WebTrak whenever an ADS-B source saw the pass.
+2. **Candidates:** the passes whose predicted arrival is within 20 s of the event's LAmax. On 5 November 2026, every NMT6 aircraft event was within 3 s of its pass's arrival except one, at 8 s. The rest of the 20 s is room for a clock that's out, or a long event.
+3. **The match:** the candidate predicted loudest, which is the closest one, since sound falls 6 dB each time the distance doubles. A pass makes at most one event of a source at a receptor. If two events want one pass, it goes to the event closer in time, and the other takes its next candidate. As in `link`, every pair is ranked first and then taken best first.
+4. **Others:** the other candidates predicted within 10 dB of the match are listed, as possibly adding to the level, for example a helicopter under an LCY departure. A pass 10 dB quieter adds under half a decibel.
+
+Each match records LAmax minus the predicted arrival (`offset_s`). Its median over a day is the clock check between the noise source and the track's source, which `checks` will report. `build.json` already gives it per receptor and noise source. Flags: `unmatched` (no candidate), `taken` (its candidates made better-fitting events), `others`, `at_track_end` (every track's closest point is at an edge, so the arrival may be off), `no_height` (the arrival is from the ground distance alone) and `not_aircraft` (matched, though the noise source said it wasn't an aircraft).
+
+**First result:** on 5 November 2026, all 22 NMT6 events that WebTrak classed as aircraft were matched to the right pass, 21 of them by OpenSky's track. The median offset was 0.3 s. The two events it classed as other had no pass near them.
+
+**Still to do:** the [match check page](#match-check-page), in Phase 1, and possibly matching from the pass side (see [Open questions](#open-questions)). Type-specific loudness isn't used: the distance decides, and `others` shows when that could matter.
 
 ### Resolve: identity, with where each answer came from
 
@@ -137,7 +150,7 @@ Written to `data/derived/deployments/<deployment>/` (git-ignored), beside `analy
 |---|---|
 | `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
 | `build.json` | when it was built, the counts per source, and the warnings |
-| `event_matches.csv` | noise event → pass, per receptor, with geometry and predicted sound arrival |
+| `common/event_matches.csv` | each noise event, the pass it's matched to, the track that predicted its sound, the predicted arrival and the offset from LAmax, the closest point, other passes that may have added, and flags (built) |
 | `common/identity.csv` | resolved type and registration per pass, where the type came from, and any disagreement (built) |
 | `checks.txt` | the checks above |
 | `match_check.html` | a page per matched event, for checking matches by eye (see [Match check page](#match-check-page)) |
@@ -235,7 +248,8 @@ tools/
       lookups/webtrak.py
       link.py  build.py               built
       resolve.py  fleet.py  registers.py  built: types from the fleet registry, and its register lookups
-      match.py  checks.py             to do
+      match.py                        built: noise events to passes
+      checks.py                       to do
       app.py  server.py               the survey app: what the page asks for, and HTTP
       ui/                             the survey app's page: index.html, style.css, a script per panel
     registry/fleet.csv                registration, type, model, engines, mass, noise certificate, register, date checked
@@ -246,7 +260,7 @@ tools/
 Commands:
 
 ```bash
-noise build 2026-11-phase0                              # analysis if out of date, adapters, link, resolve (later match, checks)
+noise build 2026-11-phase0                              # analysis if out of date, adapters, link, resolve, match (later checks)
 noise serve                                             # the survey app, at http://127.0.0.1:8766
 noise check  2026-11-phase0                             # to do: checks only, on an existing build
 noise lookup 2026-11-phase0 --pass 20261105T0812-GLCYN  # to do: settle one pass by hand
