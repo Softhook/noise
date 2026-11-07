@@ -54,7 +54,7 @@ So the design has one rule: **each source plugs in through an adapter, and the c
 
 ## Common tables
 
-CSV files, with times in UTC ISO format (`2026-11-05T08:12:31.250Z`), except the `t` column of `positions` and `levels`, which is Unix seconds (`1793866351.25`): those tables have a row for every second or so, and are read and compared as numbers. An adapter that can't establish a file's time zone stops, as the measurement plan requires. Every row carries `source` and the source's own id, so any result can be traced back to its source.
+Parquet files, one per table, queried with DuckDB (`schema.py`). Every column has a type: text, a number, a flag (true or false), or a time, stored as a UTC timestamp to the millisecond. A missing value is NULL. In Python, the core holds times as UTC ISO strings (`2026-11-05T08:12:31.250Z`), and `schema.read_rows` gives them back that way. The exception is the `t` column of `positions` and `levels`, which is a number, Unix seconds (`1793866351.25`): those tables have a row for every second or so, and are compared as numbers. An adapter that can't establish a file's time zone stops, as the measurement plan requires. Every row carries `source` and the source's own id, so any result can be traced back to its source.
 
 | Table | Key columns | Filled by |
 |---|---|---|
@@ -73,7 +73,9 @@ Normalisation is the adapters' job:
 - **Type:** ICAO type designator (`E190`, `E290`, `BCS1`, `A20N`).
 - **Height:** metres above mean sea level. WebTrak's height above the aerodrome is converted with the aerodrome's elevation, and its kind is recorded as `radar`, because we don't know how WebTrak derives it.
 
-`positions` and `levels` have a row for every second or so, so each is kept as a file per UTC day (`positions/2026-11-05.csv`). A flight's positions all go in the file for the day it started, so its track is never split. A reader can then take one day without reading the whole deployment.
+`positions` and `levels` have a row for every second or so, so each is kept as a file per UTC day (`positions/2026-11-05.parquet`). A flight's positions all go in the file for the day it started, so its track is never split. A reader can then take one day without reading the whole deployment, and a query over all of them reads only the columns it needs.
+
+Why Parquet and DuckDB, rather than CSV or a database server: a 37-day survey has tens of millions of 1 s rows. CSV makes every reader parse them all as text, and loses the types. A database server is one more thing to run and back up, for tables that can always be rebuilt. Parquet files are typed, compressed (about a seventh of the CSV's size) and readable by any tool, such as pandas or R. DuckDB queries them in place, with SQL, without importing them. The tables are files, not a DuckDB database file, because a build replaces the whole folder while the app may be reading it: files need no lock between the two. `noise sql <deployment>` opens them for querying.
 
 The core computes **closest approach to every receptor** from `positions`, so NMT6 is just another receptor, and an NMT6 event can be matched to an ADS-B track as well as to WebTrak's.
 
@@ -149,11 +151,11 @@ Written to `data/derived/deployments/<deployment>/` (git-ignored), beside `analy
 
 | File | Contents |
 |---|---|
-| `common/*.csv` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
+| `common/*.parquet` | the common tables, as the adapters wrote them, plus `coverage` (when each source has data), `approaches` (each flight's closest approach to each receptor, and its path angle there), `passes`, and `unseen` (each source missing from a pass, and why: no data then, outside its area, above its ceiling, or unexplained) |
 | `build.json` | the tables' format (`schema.FORMAT`; the app asks for a rebuild of any other), when it was built, the counts per source and per step, and the warnings |
-| `common/event_matches.csv` | each noise event, the pass it's matched to, the track that predicted its sound, the predicted arrival and the offset from LAmax, the day's clock offset, the closest point and path angle, other passes that may have added, and flags (built) |
-| `common/event_candidates.csv` | every pass that fitted an event in time, matched or not, with its offset, distance and how much quieter than the match it was predicted (built) |
-| `common/identity.csv` | resolved type and registration per pass, where the type came from, and any disagreement (built) |
+| `common/event_matches.parquet` | each noise event, the pass it's matched to, the track that predicted its sound, the predicted arrival and the offset from LAmax, the day's clock offset, the closest point and path angle, other passes that may have added, and flags (built) |
+| `common/event_candidates.parquet` | every pass that fitted an event in time, matched or not, with its offset, distance and how much quieter than the match it was predicted (built) |
+| `common/identity.parquet` | resolved type and registration per pass, where the type came from, and any disagreement (built) |
 | `checks.txt` | the checks above |
 | `match_check.html` | a page per matched event, for checking matches by eye (see [Match check page](#match-check-page)) |
 | `lookups.log` | every lookup: what was asked, why, how many requests, the answer |
@@ -229,17 +231,18 @@ Still to be built: WebTrak and the airport as lookups only (asked about single p
 pyproject.toml  Makefile              one project, one environment (.venv), one command (noise)
 data/                                 git-ignored: raw/ and derived/ (the survey README describes it)
 tools/
-  noise/cli.py                        the noise command: build, serve, fleet, and each tool's own commands
+  noise/cli.py                        the noise command: build, serve, fleet, sql, and each tool's own commands
   adsb/  opensky/  webtrak/  fusion/  collectors, each its own package; none keeps data of its own
   survey/
     ARCHITECTURE.md                   this file
     deployments/<name>.json           manifests; a source's paths are relative to data/
     survey/
-      __main__.py                     build | serve | fleet (later: lookup | check)
+      __main__.py                     build | serve | fleet | sql (later: lookup | check)
       paths.py                        where the deployments, fleet table, ADS-B tool and data folder are
       manifest.py                     reads a manifest, including private receptors
       common.py                       times, numbers, registrations, and the order of sources
-      schema.py                       table definitions and their format version, reading and writing
+      schema.py                       table definitions, their types and format version; Parquet, and DuckDB views over it
+      sql.py                          noise sql: a built deployment's tables, queried with SQL
       geometry.py                     local coordinates, closest approach to each receptor
       adapters/__init__.py            the adapter interface and registry (ADAPTERS)
       adapters/adsb.py                runs adsb analyse (--all-positions) on the raw logs when they change, and
@@ -280,7 +283,7 @@ To **add** one:
 
 Nothing else changes.
 
-To **remove** one, set it to `null` in the manifest. The build still runs. Its `_source` values disappear from `identity.csv`, and any checks that needed it say so instead of failing.
+To **remove** one, set it to `null` in the manifest. The build still runs. Its `_source` values disappear from `identity`, and any checks that needed it say so instead of failing.
 
 The test that WebTrak really is removable: from Phase 1 on, build each deployment twice, with WebTrak and without it, and compare. Apart from the NMT6 comparison, every difference should be a pass whose identity WebTrak settled, and each of those should be added to the fleet registry so that the next build doesn't need it.
 

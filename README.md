@@ -18,7 +18,7 @@ make help      # everything else: fetching data, the ADS-B logger and the Pi
 make lock      # after changing a dependency: pin the exact versions in requirements.lock
 ```
 
-`make` runs everything through `noise`, a single command for all the tools: `noise build`, `noise serve` and `noise fleet` for the survey, and `noise adsb ...`, `noise opensky ...`, `noise webtrak ...` or `noise fusion ...` for each tool's own commands. Activate `.venv` (`source .venv/bin/activate`) to run `noise` from any folder.
+`make` runs everything through `noise`, a single command for all the tools: `noise build`, `noise serve`, `noise fleet` and `noise sql` for the survey, and `noise adsb ...`, `noise opensky ...`, `noise webtrak ...` or `noise fusion ...` for each tool's own commands. Activate `.venv` (`source .venv/bin/activate`) to run `noise` from any folder.
 
 ## Layout
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import datetime as dt
 import gzip
@@ -22,7 +23,11 @@ import unittest
 import zipfile
 from unittest import mock
 
-from survey import adapters, build, explain, fleet, link, manifest, match, paths, registers, resolve, schema, server
+import duckdb
+import pyarrow.parquet as pq
+
+from survey import adapters, build, explain, fleet, link, manifest, match, paths, registers, resolve, schema, server, sql
+from survey import app as app_module
 from survey.app import TRACK_SPACING_S, App, BadRequest, minutes_covered
 from survey.adapters import adsb, webtrak
 from survey.common import iso, parse_time, ranked, registration
@@ -32,7 +37,7 @@ NMT6 = (51.50535, 0.11075)
 T0 = parse_time("2026-11-05T09:00:00Z")  # GMT, so WebTrak's local times are UTC
 M_PER_DEG_LAT = 111250.0
 M_PER_DEG_LON = M_PER_DEG_LAT * math.cos(math.radians(NMT6[0]))
-DIGEST_FORMAT_1 = "5d748cf9d9a9"  # schema.TABLES's columns at FORMAT 1 (see test_changing_a_tables_columns...)
+DIGEST_FORMAT_2 = "7080d2f908fc"  # schema.TABLES's columns and types at FORMAT 2 (see test_changing_a_tables_columns...)
 
 
 def at(east_m, north_m):
@@ -113,6 +118,60 @@ class Common(unittest.TestCase):
         self.assertEqual(parse_time("2026-11-05T09:00:00Z"), T0)
         with self.assertRaises(ValueError):
             parse_time("2026-11-05T09:00:00")
+
+
+class Storage(unittest.TestCase):
+    """The common tables as Parquet: each column stored as its type, and given back as the core holds it."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def test_every_type_is_stored_as_itself_and_read_back_as_the_core_holds_it(self):
+        rows = [{"source": "webtrak", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53.669Z", "pass_id": "p1",
+                 "matched": True, "offset_s": 1.9, "slant_m": "709.9", "track_source": "", "below_match_db": None},
+                {"source": "webtrak", "receptor": "nmt6", "lmax_utc": "2026-11-05T09:02:53+01:00", "pass_id": "",
+                 "matched": False, "offset_s": float("nan")}]  # Missing columns are empty
+        schema.write_table(self.dir, "event_candidates", rows)
+        got = schema.read_table(self.dir, "event_candidates")
+        self.assertEqual(got[0], {**rows[0], "slant_m": 709.9})
+        self.assertEqual(got[1], {"source": "webtrak", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53.000Z",
+                                  "pass_id": "", "matched": False, "offset_s": None, "slant_m": None,
+                                  "track_source": "", "below_match_db": None})
+        # In SQL they're real types, and an empty text is NULL
+        with contextlib.closing(schema.connect(self.dir)) as db:
+            self.assertEqual(db.execute(
+                "SELECT typeof(lmax_utc), typeof(matched), typeof(offset_s), epoch_ms(lmax_utc), pass_id IS NULL "
+                "FROM event_candidates").fetchall(),
+                [("TIMESTAMP WITH TIME ZONE", "BOOLEAN", "DOUBLE", 1793865773669, False),
+                 ("TIMESTAMP WITH TIME ZONE", "BOOLEAN", "DOUBLE", 1793865773000, True)])
+
+    def test_a_value_of_the_wrong_kind_is_refused(self):
+        base = {"source": "w", "receptor": "nmt6", "lmax_utc": "2026-11-05T08:02:53Z"}
+        for bad in ({"matched": "1"}, {"offset_s": "soon"}, {"lmax_utc": "2026-11-05T08:02:53"}, {"colour": "red"}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                schema.write_table(self.dir, "event_candidates", [{**base, **bad}])
+        self.assertEqual(os.listdir(self.dir), [])  # Nothing half-written is left
+
+    def test_a_table_with_no_rows_or_no_file_still_has_its_columns(self):
+        schema.write_table(self.dir, "coverage", [])
+        self.assertEqual(schema.read_table(self.dir, "coverage"), [])
+        self.assertEqual(schema.read_table(self.dir, "positions", ["2026-11-05"]), [])  # No file at all
+        with contextlib.closing(schema.connect(self.dir)) as db:
+            for name in ("coverage", "positions"):
+                cols = [d[0] for d in db.execute(f"SELECT * FROM {name}").description]
+                self.assertEqual(cols, list(schema.TABLES[name]))
+
+    def test_rows_are_written_a_batch_at_a_time_and_read_in_order(self):
+        rows = [{"source": "s", "receptor": "r", "t": T0 + i, "level_db": 50.0 + i, "flag": "5"} for i in range(7)]
+        with mock.patch.object(schema, "BATCH_ROWS", 3):
+            schema.write_tables(os.path.join(self.dir, "common"), {"levels": {"2026-11-05": iter(rows[:5]),
+                                                                              "2026-11-06": rows[5:]}})
+        common = os.path.join(self.dir, "common")
+        self.assertEqual(schema.table_days(common, "levels"), ["2026-11-05", "2026-11-06"])
+        self.assertEqual(schema.read_table(common, "levels"), rows)
+        self.assertEqual(schema.read_table(common, "levels", ["2026-11-06"]), rows[5:])
+        self.assertEqual(pq.ParquetFile(schema.table_path(common, "levels", "2026-11-05")).num_row_groups, 2)  # 3 + 2
 
 
 class Geometry(unittest.TestCase):
@@ -821,22 +880,53 @@ class BuildAndServe(unittest.TestCase):
         self.assertEqual(summary["matches"]["nmt6 webtrak"]["matched"], 1)
 
     def test_changing_a_tables_columns_means_raising_its_format(self):
-        # If this fails, a table's columns changed: raise schema.FORMAT, so the app asks for a
-        # rebuild rather than reading older builds, and then put the new FORMAT and digest here
+        # If this fails, a table's columns or their types changed: raise schema.FORMAT, so the app
+        # asks for a rebuild rather than reading older builds, and then put the new FORMAT and digest here
         digest = hashlib.sha256(json.dumps(schema.TABLES, sort_keys=True).encode()).hexdigest()[:12]
-        self.assertEqual((schema.FORMAT, digest), (1, DIGEST_FORMAT_1))
+        self.assertEqual((schema.FORMAT, digest), (2, DIGEST_FORMAT_2))
+
+    def test_fleet_counts_the_registrations_that_came_near_a_receptor(self):
+        build.build(manifest.load(os.path.join(self.deployments, "2026-11-05.json")), log=io.StringIO())
+        path = os.path.join(self.deployments, "2026-11-05.json")
+        # G-LCYN in both sources, G-LCYO in OpenSky only; WebTrak's flights have their registrations too
+        self.assertEqual(fleet.seen([path]), ({"GLCYN": 2, "GLCYO": 1}, []))
+        self.assertEqual(fleet.seen([path], km=0.1), ({}, []))  # They passed about 210 m away
+
+    def test_sql_queries_a_build(self):
+        path = os.path.join(self.deployments, "2026-11-05.json")
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
+            self.assertEqual(sql.main(mock.Mock(deployment=path, query="SELECT 1", csv=False)), 2)  # Not built yet
+        self.assertIn("isn't built yet", err.getvalue())
+        build.build(manifest.load(path), log=io.StringIO())
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.assertEqual(sql.main(mock.Mock(deployment=path, csv=True, query=(
+                "SELECT pass_id, lmax_db, offset_s IS NOT NULL AS timed FROM event_matches"))), 0)
+        self.assertEqual(out.getvalue().splitlines(), ["pass_id,lmax_db,timed", "20261105T0900-GLCYN,74.0,True"])
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.assertEqual(sql.main(mock.Mock(deployment=path, csv=False,
+                                                query="SELECT source, count(*) AS n FROM positions GROUP BY 1 ORDER BY 1")), 0)
+        lines = out.getvalue().splitlines()
+        self.assertEqual((lines[0].split(), [line.split()[0] for line in lines[2:4]], lines[-1]),
+                         (["source", "n"], ["opensky", "webtrak"], "(2 rows)"))
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            self.assertEqual(sql.main(mock.Mock(deployment=path, query="SELECT nonsense", csv=False)), 1)
+        self.assertIn("nonsense", err.getvalue())
 
     def test_a_build_replaces_the_tables_folder_whole(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))
         build.build(m, log=io.StringIO())
         out = os.path.join(self.dir, "out", "2026-11-05")
-        with open(os.path.join(out, "common", "stale.csv"), "w") as f:
+        with open(os.path.join(out, "common", "stale.parquet"), "w") as f:
             f.write("left over\n")
         build.build(m, log=io.StringIO())
-        self.assertFalse(os.path.exists(os.path.join(out, "common", "stale.csv")))
+        self.assertFalse(os.path.exists(os.path.join(out, "common", "stale.parquet")))
         self.assertEqual(sorted(os.listdir(out)), ["build.json", "common"])  # Nothing temporary left
         self.assertEqual(sorted(os.listdir(os.path.join(out, "common"))),
-                         sorted(n if n in schema.PARTITIONED else f"{n}.csv" for n in schema.TABLES))
+                         sorted(n if n in schema.PARTITIONED else f"{n}.parquet" for n in schema.TABLES))
         # The daily tables have a file per day
         self.assertEqual(schema.table_days(os.path.join(out, "common"), "positions"), ["2026-11-05"])
         positions = schema.read_table(os.path.join(out, "common"), "positions")
@@ -854,6 +944,27 @@ class BuildAndServe(unittest.TestCase):
         build.build(manifest.load(d.manifest_path), log=io.StringIO())  # As make build would
         os.utime(build_json, (stamp, stamp))  # Even if build.json's time looks unchanged
         self.assertEqual(len(d.load()["flights"]), 4)
+
+    def test_the_app_reads_again_if_a_build_swaps_the_tables_while_it_reads_them(self):
+        app = App(self.deployments)
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
+        d = app.deployment("2026-11-05")
+        real, calls = app_module.read_day, []
+
+        def swapped_midway(folder, day):
+            calls.append(day)
+            if len(calls) == 1:  # The first read loses its files to a build that finishes meanwhile
+                build.build(manifest.load(d.manifest_path), log=io.StringIO())
+                raise duckdb.IOException("No files found that match the pattern")
+            return real(folder, day)
+
+        with mock.patch.object(app_module, "read_day", swapped_midway):
+            tables, today = d.load("2026-11-05")
+        self.assertEqual((len(calls), len(tables["flights"]), len(today["levels"])), (2, 3, 30))
+        # With no build in the way, a failure to read is reported, not hidden
+        with mock.patch.object(app_module, "read_day", side_effect=duckdb.IOException("disk")), \
+                self.assertRaises(duckdb.IOException):
+            d.load("2026-11-06")
 
     def test_a_rebuild_is_refused_even_after_the_manifest_is_read_again(self):
         app = App(self.deployments)

@@ -27,13 +27,14 @@ note says what the mark is on now: a person decides which the passes were.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import os
 import sys
 import tempfile
 
 from . import manifest, paths, registers, schema
-from .common import number, registration
+from .common import registration
 
 FIELDS = ["registration", "mark", "status", "icao_type", "model", "marketing_name", "manufacturer",
           "serial_number", "year_built", "icao24", "engines", "mtow_kg", "noise_standard",
@@ -89,17 +90,16 @@ def seen(manifests, km=DEFAULT_KM, ft=DEFAULT_FT):
     for path in manifests:
         m = manifest.load(path)
         folder = os.path.join(m["out_dir"], "common")
-        if not os.path.exists(os.path.join(folder, "flights.csv")):
+        if not os.path.exists(schema.table_path(folder, "flights")):
             notes.append(f"{m['deployment']} isn't built, so it's left out (make build)")
             continue
-        near = set()
-        for a in schema.read_rows(folder, "approaches"):
-            ground, height = number(a["ground_m"]), number(a["height_m"])
-            if ground is not None and ground <= km * 1000 and (height is None or height <= ft * FT_M):
-                near.add((a["source"], a["source_id"]))
-        for f in schema.read_rows(folder, "flights"):
-            if f["registration"] and (f["source"], f["source_id"]) in near:
-                counts[f["registration"]] = counts.get(f["registration"], 0) + 1
+        with contextlib.closing(schema.connect(folder)) as db:
+            for reg, n in db.execute(
+                    "SELECT registration, count(*) FROM flights f WHERE registration IS NOT NULL AND EXISTS "
+                    "(SELECT 1 FROM approaches a WHERE a.source = f.source AND a.source_id = f.source_id"
+                    " AND a.ground_m <= ? AND (a.height_m IS NULL OR a.height_m <= ?)) GROUP BY registration",
+                    [km * 1000, ft * FT_M]).fetchall():
+                counts[reg] = counts.get(reg, 0) + n
     return counts, notes
 
 

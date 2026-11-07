@@ -188,7 +188,7 @@ def _match_group(group, members, spans, tracks, r):
         for p in ids:
             candidate_rows.append({
                 "source": e["source"], "receptor": e["receptor"], "lmax_utc": e["lmax_utc"], "pass_id": p,
-                "matched": "1" if p == pass_id else "", "offset_s": round(lmax[i] - sound[p]["arrival"], 1),
+                "matched": p == pass_id, "offset_s": round(lmax[i] - sound[p]["arrival"], 1),
                 "slant_m": rounded(sound[p]["slant"]), "track_source": sound[p]["key"][0],
                 "below_match_db": None if matched_db is None else round(matched_db - level_db(sound[p]["slant"]), 1)})
     return rows, candidate_rows, clocks

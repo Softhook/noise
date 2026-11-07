@@ -6,7 +6,9 @@
 # (index.html, js/) is a separate web page and isn't part of this.
 #
 # Each tool keeps its own package, so the ADS-B logger can still be copied to the Pi alone: the Pi
-# side (tools/adsb) uses only Python's standard library, and so does everything but OpenSky.
+# side (tools/adsb) uses only Python's standard library. The survey keeps its common tables as
+# Parquet (pyarrow) and queries them with DuckDB; the other tools use only the standard library,
+# except OpenSky.
 
 [build-system]
 requires = ["setuptools>=64"]
@@ -17,10 +19,11 @@ name = "noise-survey"
 version = "0.1.0"
 description = "Aircraft noise survey at Thamesmead: ADS-B, OpenSky, WebTrak and the Fusion, joined in the survey app"
 requires-python = ">=3.11"
-dependencies = []
+# The survey's tables: Parquet files written with pyarrow, read and queried with DuckDB (schema.py)
+dependencies = ["duckdb>=2.0,<3", "pyarrow>=20"]
 
 [project.optional-dependencies]
-# OpenSky's research database (Trino). Everything else is standard library only.
+# OpenSky's research database (Trino)
 opensky = ["pyopensky>=2.16,<3"]
 
 [project.scripts]

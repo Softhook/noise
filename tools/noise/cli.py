@@ -5,6 +5,7 @@ The survey:
                            (every deployment in tools/survey/deployments if none is named)
   serve                    the survey app, at http://127.0.0.1:8766
   fleet                    look up aircraft types in the official registers (online)
+  sql DEPLOYMENT [QUERY]   query a built deployment's tables with SQL (DuckDB); a prompt without a query
 
 Each tool's own commands (noise TOOL --help for its list):
   adsb       the garden's ADS-B logger, analysis, METARs, adsb.lol traces, simulator
@@ -35,7 +36,7 @@ def installed_in_place():
 
 TOOLS = {"adsb": "adsb.__main__", "opensky": "opensky.__main__", "webtrak": "webtrak.__main__",
          "survey": "survey.__main__", "fusion": "fusion.inspector"}
-SURVEY_COMMANDS = ("build", "serve", "fleet")
+SURVEY_COMMANDS = ("build", "serve", "fleet", "sql")
 
 
 def main(argv=None):

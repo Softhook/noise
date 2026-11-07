@@ -2,8 +2,8 @@
 
     noise build 2026-11-05
 
-Writes data/derived/deployments/<deployment>/common/ (a CSV per table, and a folder of daily CSVs for positions and
-levels) and build.json (counts, coverage and warnings), which the
+Writes data/derived/deployments/<deployment>/common/ (a Parquet file per table, and a folder of daily
+files for positions and levels: schema.py) and build.json (counts, coverage and warnings), which the
 survey app reads. The sources' own files are only ever read.
 
 The steps, each a function here, in order:
@@ -141,14 +141,13 @@ def approaches(tracks, receptors):
 
 def approach_rows(found):
     return [{"source": s, "source_id": sid, "receptor": rid, "t": iso(t), "ground_m": rounded(g),
-             "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": "1" if end else "",
+             "height_m": rounded(h), "slant_m": rounded(sl), "at_track_end": bool(end),
              "path_angle_deg": rounded(angle, 2)}
             for (s, sid, rid), (t, g, h, sl, end, angle) in sorted(found.items())]
 
 
 def receptor_rows(receptors):
-    return [{**{key: r[key] for key in schema.TABLES["receptors"]}, "public": "1" if r["public"] else ""}
-            for r in receptors.values()]
+    return [{key: r[key] for key in schema.TABLES["receptors"]} for r in receptors.values()]
 
 
 def summarise(m, tables, tracks, members, clocks, warnings):

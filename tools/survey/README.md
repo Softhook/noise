@@ -41,7 +41,7 @@ The build matches each noise event to the pass that made it (`survey/match.py`, 
 - An event then goes to the loudest predicted pass within 3 km whose arrival is within 20 s of its LAmax, and each pass gets at most one event.
 - The other passes that may have added to the level are named.
 
-The results are in `common/event_matches.csv`, and every candidate pass, matched or not, is in `common/event_candidates.csv`. `build.json`'s `matches` gives, per receptor and noise source:
+The results are in the `event_matches` table, and every candidate pass, matched or not, is in `event_candidates` (see [Querying the tables](#querying-the-tables)). `build.json`'s `matches` gives, per receptor and noise source:
 - the counts;
 - each day's clock offset;
 - the median offset of LAmax from the predicted arrival, over the matches with nothing flagged, for arrivals and departures apart. A steady value near zero says the clocks agree.
@@ -93,7 +93,19 @@ The garden's location is private, so a manifest never holds it. Instead, the gar
 
 Pass ids are dated by the closest approach to one receptor: the manifest's `pass_receptor`, or else its first public receptor, so they come out the same on a computer without the garden's `site.json`.
 
-Built tables go in `data/derived/deployments/<deployment>/common/`: `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen`, `identity`, `event_matches` and `event_candidates`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+Built tables go in `data/derived/deployments/<deployment>/common/`: `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen`, `identity`, `event_matches` and `event_candidates`, as Parquet files. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.parquet`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+
+### Querying the tables
+
+The tables are typed: numbers are numbers, flags are true or false, times are UTC timestamps, and a missing value is NULL. `noise sql` opens a built deployment's tables in DuckDB, each table as a view:
+
+```bash
+noise sql 2026-11-05                      # a prompt: end each statement with ; and .tables lists the tables
+noise sql 2026-11-05 "SELECT i.type, count(*), round(avg(m.lmax_db), 1) FROM event_matches m JOIN identity i USING (pass_id) GROUP BY 1"
+noise sql 2026-11-05 --csv "SELECT * FROM event_matches" > matches.csv   # for a spreadsheet
+```
+
+The prompt shows the first 40 rows of a result; `--csv` gives all of them. `positions` and `levels` cover every day. Their `t` is Unix seconds, so `to_timestamp(t)` gives the time. Nothing done at the prompt changes the build, because the views are in a database held in memory. Any other tool can read the files too, such as pandas (`pd.read_parquet`) or the `duckdb` command line.
 
 ## Aircraft types
 

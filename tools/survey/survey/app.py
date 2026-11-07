@@ -12,13 +12,14 @@ page asks for a rebuild rather than reading it.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import os
 import threading
 import time
 
 from . import build, manifest, paths, schema
-from .common import number, parse_time, ranked
+from .common import parse_time, ranked
 
 TRACK_SPACING_S = 2.0  # Positions closer together than this are thinned for drawing
 DAY_S = 86400
@@ -133,11 +134,19 @@ class Deployment:
                 fresh = before != self.stamp
                 if fresh and self.build_info() is None:
                     raise BadRequest(f"{self.m['deployment']} was built by an older version of the survey; rebuild it")
-                tables = index({name: schema.read_table(self.folder, name) for name in SMALL_TABLES}) if fresh else self.tables
                 kept = {} if fresh else self.days
-                got = None
-                if day is not None:
-                    got = kept.pop(day, None) or read_day(self.folder, day)
+                try:
+                    tables = index({name: schema.read_table(self.folder, name) for name in SMALL_TABLES}) if fresh else self.tables
+                    got = None
+                    if day is not None:
+                        got = kept.get(day) or read_day(self.folder, day)
+                except schema.READ_ERRORS:
+                    # A file went while it was read: a build swapped the tables in meanwhile. Read
+                    # the new ones; anything else is a real failure
+                    if self._identity() != before:
+                        continue
+                    raise
+                kept.pop(day, None)
                 if self._identity() == before:  # No build finished while they were read
                     self.tables, self.stamp, self.days = tables, before, kept
                     if day is None:
@@ -168,9 +177,7 @@ def index(t):
     approaches = {}
     for a in t["approaches"]:
         approaches.setdefault((a["source"], a["source_id"]), {})[a["receptor"]] = {
-            "t": a["t"], "ground_m": number(a["ground_m"]), "height_m": number(a["height_m"]),
-            "slant_m": number(a["slant_m"]), "at_track_end": a["at_track_end"] == "1",
-            "path_angle_deg": number(a["path_angle_deg"])}
+            key: a[key] for key in ("t", "ground_m", "height_m", "slant_m", "at_track_end", "path_angle_deg")}
     return {**t, "approach_index": approaches,
             "pass_index": {(p["source"], p["source_id"]): p for p in t["passes"]}}
 
@@ -182,14 +189,15 @@ def read_day(folder, day):
     the day it started, so one that crossed midnight is in the earlier day's file."""
     before = (dt.date.fromisoformat(day) - dt.timedelta(days=1)).isoformat()
     tracks, kinds = {}, {}
-    for p in schema.read_rows(folder, "positions", [before, day]):
-        key = (p["source"], p["source_id"])
-        tracks.setdefault(key, []).append((float(p["t"]), float(p["lat"]), float(p["lon"]), number(p["height_m"])))
-        kinds.setdefault(key, p["height_kind"])
-    for pts in tracks.values():
-        pts.sort()
-    levels = sorted((float(lv["t"]), lv["receptor"], float(lv["level_db"]))
-                    for lv in schema.read_rows(folder, "levels", [day]))
+    with contextlib.closing(schema.connect(folder, days=[before, day])) as db:
+        for source, source_id, t, lat, lon, height, kind in db.execute(
+                "SELECT source, source_id, t, lat, lon, height_m, coalesce(height_kind, '') FROM positions "
+                "ORDER BY source, source_id, t").fetchall():
+            key = (source, source_id)
+            tracks.setdefault(key, []).append((t, lat, lon, height))
+            kinds.setdefault(key, kind)
+    with contextlib.closing(schema.connect(folder, days=[day])) as db:
+        levels = db.execute("SELECT t, receptor, level_db FROM levels ORDER BY t, receptor, level_db").fetchall()
     return {"tracks": tracks, "height_kinds": kinds, "levels": levels}
 
 
@@ -245,8 +253,8 @@ def thinned(points):
 
 def receptor_view(r):
     """A receptors table row, as the page uses it."""
-    return {"id": r["id"], "name": r["name"], "label": r["label"], "lat": float(r["lat"]),
-            "lon": float(r["lon"]), "public": r["public"] == "1"}
+    return {"id": r["id"], "name": r["name"], "label": r["label"], "lat": r["lat"], "lon": r["lon"],
+            "public": r["public"]}
 
 
 class App:

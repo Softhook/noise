@@ -2,11 +2,27 @@
 
 Where the survey's tools stand, what's waiting on a decision, and what's next. Read this first when picking the work up again. The design is in [tools/survey/ARCHITECTURE.md](tools/survey/ARCHITECTURE.md), and how to use everything is in [README.md](README.md).
 
-*Last updated: 7 November 2026, after the core refactor.*
+*Last updated: 7 November 2026, after moving the common tables to Parquet and DuckDB.*
 
 ## Waiting on a decision
 
-Nothing. The restructure, `match` and the core refactor were merged into `main` and pushed on 7 November 2026.
+Whether to merge `parquet-duckdb` into `main`. The restructure, `match` and the core refactor were merged and pushed on 7 November 2026.
+
+## Done: the common tables in Parquet and DuckDB (7 November 2026, branch `parquet-duckdb`)
+
+- Each common table is a Parquet file, and `positions` and `levels` a file per day (`positions/2026-11-05.parquet`). Each column has a type in `schema.TABLES`: text, a number, a flag, or a UTC timestamp to the millisecond. A missing value is NULL. Every read goes through DuckDB (`schema.connect`, a view per table).
+- `noise sql <deployment> [query]` queries a build: one query, `--csv` for all its rows, or a prompt. The views are held in memory, so nothing done there changes the build.
+- `schema.FORMAT` is 2, so a CSV build is shown as needing a rebuild.
+- The core holds rows as before, with flags as bools instead of `"1"` or `""`. `schema.read_rows` gives back what was written.
+- Checked: both deployments rebuilt, and everything the app serves, and every table, compared with the CSV build. The only difference was the build time, once a number in a string counts as equal to the same number.
+- On 37 made-up days, 160k positions and 172,800 1 s levels a day:
+  - a day is 2.4 MB, against 16.9 MB as CSV;
+  - the app reads a day about twice as fast;
+  - a query over all 6.4 million levels takes 0.05 s.
+- Why files and not a DuckDB database file: a build replaces the tables folder while the app may be reading it, and files need no lock between the two.
+- A critical review the same day found that a read broken off by a build's swap failed instead of being tried again. That race predated the change, and it's fixed.
+- New dependencies: `duckdb` and `pyarrow`. The Pi's logger still needs only the standard library.
+- Still CSV, on purpose: `registry/fleet.csv`, which is kept in git and edited by hand, and `adsb analyse`'s output, which the Pi's standard-library code writes.
 
 ## Done: the core refactor (7 November 2026)
 
@@ -59,7 +75,7 @@ Why each choice was made: the critical review that led to it is summarised in th
 
 ## Deferred, on purpose
 
-- **Common tables to Parquet and DuckDB**, instead of CSV. Do it **before the 37-day survey**: tens of millions of 1 s rows will make CSV slow. At today's size CSV is fine.
+- **The build's memory.** The build holds every position and level in Python while it runs: about 220 MB per million positions. 37 days of the garden's logger and adsb.lol, about 12 million positions, plus 6.4 million levels, would need about 2–4 GB. A laptop can do that. If it's too much, build a day at a time, or work out the closest approaches in DuckDB.
 - **Folding the WebTrak app and the offline `viewer.html` pages into the survey app.** Only when needed. Keep a way to export a day or a match as one page that opens offline.
 - **Backups of `data/raw/`:** decided against, on 7 November 2026.
 

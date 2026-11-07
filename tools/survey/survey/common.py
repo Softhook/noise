@@ -7,15 +7,28 @@ import math
 import re
 
 
-def parse_time(text):
-    """Unix seconds from an ISO 8601 time. One without a zone is refused: the plan forbids guessing."""
+EPOCH = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+
+
+def parse_datetime(text):
+    """An aware datetime from an ISO 8601 time. One without a zone is refused: the plan forbids guessing."""
     text = text.strip().replace(" ", "T")
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     t = dt.datetime.fromisoformat(text)
     if t.tzinfo is None:
         raise ValueError(f"time without a zone: {text!r}")
-    return t.timestamp()
+    return t
+
+
+def parse_time(text):
+    """Unix seconds from an ISO 8601 time (parse_datetime's)."""
+    return parse_datetime(text).timestamp()
+
+
+def epoch_ms(text):
+    """Whole milliseconds since 1970 from an ISO 8601 time, exactly (no float rounding)."""
+    return (parse_datetime(text) - EPOCH) // dt.timedelta(milliseconds=1)
 
 
 def iso(t):

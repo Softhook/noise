@@ -74,11 +74,12 @@ class Command(unittest.TestCase):
                 return 0
 
         with mock.patch.object(cli.importlib, "import_module", side_effect=Module):
-            for argv in (["build", "2026-11-05"], ["serve"], ["webtrak", "range"], ["fusion", "strings", "f"],
+            for argv in (["build", "2026-11-05"], ["serve"], ["sql", "2026-11-05"], ["webtrak", "range"], ["fusion", "strings", "f"],
                          ["adsb", "status"], ["opensky", "logs"]):
                 self.assertEqual(self.run_cli(argv)[0], 0)
         self.assertEqual(calls, [
             ("survey.__main__", ["build", "2026-11-05"]), ("survey.__main__", ["serve"]),
+            ("survey.__main__", ["sql", "2026-11-05"]),
             ("webtrak.__main__", ["range"]), ("fusion.inspector", ["strings", "f"]),
             ("adsb.__main__", ["status"]), ("opensky.__main__", ["logs"])])
 
