@@ -6,9 +6,9 @@ Where the survey's tools stand, what's waiting on a decision, and what's next. R
 
 ## Waiting on a decision
 
-Whether to merge `parquet-duckdb` into `main`. The restructure, `match` and the core refactor were merged and pushed on 7 November 2026.
+Nothing. The restructure, `match`, the core refactor and the move to Parquet and DuckDB were merged into `main` and pushed on 7 November 2026.
 
-## Done: the common tables in Parquet and DuckDB (7 November 2026, branch `parquet-duckdb`)
+## Done: the common tables in Parquet and DuckDB (7 November 2026)
 
 - Each common table is a Parquet file, and `positions` and `levels` a file per day (`positions/2026-11-05.parquet`). Each column has a type in `schema.TABLES`: text, a number, a flag, or a UTC timestamp to the millisecond. A missing value is NULL. Every read goes through DuckDB (`schema.connect`, a view per table).
 - `noise sql <deployment> [query]` queries a build: one query, `--csv` for all its rows, or a prompt. The views are held in memory, so nothing done there changes the build.
