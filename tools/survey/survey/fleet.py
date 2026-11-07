@@ -1,8 +1,8 @@
 """The fleet table: each airframe's type, as its country's official register gives it.
 
-    python3 -m survey fleet                  check every registration the builds saw near a receptor
-    python3 -m survey fleet G-LCYN HB-AZH    check these
-    python3 -m survey fleet --dry-run        list what would be asked, and ask nothing
+    noise fleet                  check every registration the builds saw near a receptor
+    noise fleet G-LCYN HB-AZH    check these
+    noise fleet --dry-run        list what would be asked, and ask nothing
 
 registry/fleet.csv is kept in git, one row per airframe. An airframe's type doesn't change, so a
 registration is asked about once, and asked again only with --recheck. The build's resolve step
@@ -38,7 +38,6 @@ from .common import number, registration
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLEET_PATH = os.path.join(HERE, "registry", "fleet.csv")
-DEPLOYMENTS = os.path.join(os.path.dirname(HERE), "deployments")
 
 FIELDS = ["registration", "mark", "status", "icao_type", "model", "marketing_name", "manufacturer",
           "serial_number", "year_built", "icao24", "engines", "mtow_kg", "noise_standard",
@@ -190,7 +189,7 @@ def main(args):
     if args.registrations:
         regs = {registration(r): 1 for r in args.registrations}
     else:
-        regs, notes = seen(args.manifest or sorted(glob.glob(os.path.join(DEPLOYMENTS, "*.json"))), args.km, args.ft)
+        regs, notes = seen(args.manifest or sorted(glob.glob(os.path.join(manifest.DEPLOYMENTS_DIR, "*.json"))), args.km, args.ft)
     for note in notes:
         print(note, file=sys.stderr)
     ask, no_register = to_check(regs, entries, args.recheck)

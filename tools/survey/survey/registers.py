@@ -21,7 +21,7 @@ Only what the register says about the aircraft is kept: type, model, engines, ma
 certificate. Never its owner or operator, since a private aircraft's owner is a person.
 
 Requests are paced (PAUSE_S between them) and say who's asking (USER_AGENT), as WebTrak's client
-does. Nothing here is run by the build: only `python3 -m survey fleet` makes requests.
+does. Nothing here is run by the build: only `noise fleet` makes requests.
 
 Standard library only, except that Luxembourg's PDF is read with pdftotext (poppler: `brew install
 poppler`); without it, Luxembourg's lookups fail and say why, and the others carry on.

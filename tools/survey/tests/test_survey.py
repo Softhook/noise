@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 import zipfile
 from unittest import mock
@@ -93,7 +94,7 @@ def webtrak_chunks(site_dir, tracks, levels=(), events=()):
             f"event,{local(t - 10)},106,106,1,{lmax},{local(t)},{lmax + 8},{lmax - 5},0,20,{local(t + 10)}")
     for handle, lines in by_handle.items():
         start = handle * 30
-        path = os.path.join(site_dir, "raw", iso(start)[:10], f"{handle}.txt.gz")
+        path = os.path.join(site_dir, iso(start)[:10], f"{handle}.txt.gz")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with gzip.open(path, "wt") as f:
             f.write(f'<data endTime="x" handle="{handle}" radarStatus="online" startTime="'
@@ -179,10 +180,25 @@ class Manifests(unittest.TestCase):
             json.dump(spec, f)
         return path
 
-    def test_paths_are_relative_to_the_manifest_and_null_sources_are_off(self):
-        m = manifest.load(self.write())
-        self.assertEqual(list(m["sources"]), ["opensky"])
-        self.assertEqual(m["sources"]["opensky"]["results"], os.path.join(self.dir, "results"))
+    def test_a_deployment_is_found_by_name_or_path(self):
+        path = self.write()
+        with mock.patch.object(manifest, "DEPLOYMENTS_DIR", self.dir):
+            self.assertEqual(manifest.find("d1"), os.path.join(self.dir, "d1.json"))
+            self.assertEqual(manifest.find(path), path)
+            with self.assertRaises(manifest.ManifestError):
+                manifest.find("nope")
+
+    def test_data_paths_are_relative_to_the_data_folder_and_null_sources_are_off(self):
+        data = os.path.join(self.dir, "data")
+        with mock.patch.object(manifest, "DATA_DIR", data):
+            m = manifest.load(self.write(sources={
+                "opensky": {"adapter": "adsb", "results": "results"}, "adsb": None,
+                "webtrak": {"adapter": "webtrak", "tool": "code/webtrak", "chunks": "raw/webtrak/lcy"}}))
+        self.assertEqual(list(m["sources"]), ["opensky", "webtrak"])
+        self.assertEqual(m["sources"]["opensky"]["results"], os.path.join(data, "results"))
+        self.assertEqual(m["sources"]["webtrak"]["chunks"], os.path.join(data, "raw", "webtrak", "lcy"))
+        # Code, unlike data, is found from the manifest
+        self.assertEqual(m["sources"]["webtrak"]["tool"], os.path.join(self.dir, "code", "webtrak"))
         self.assertEqual(m["deployment"], "d1")
 
     def test_a_private_receptor_comes_from_its_config_or_is_left_out(self):
@@ -302,7 +318,7 @@ class Adapters(unittest.TestCase):
         webtrak_chunks(site, [("101", "GLCYN", "E190", westbound(T0)), ("102", "GFAR", "C172", westbound(T0, north_m=40000))],
                        levels=[(T0 + s, 60 + s / 10) for s in range(0, 30)], events=[(T0 + 3, 72.5)])
         receptors = {"nmt6": {"id": "nmt6", "lat": NMT6[0], "lon": NMT6[1]}}
-        spec = {"tool": os.path.join(TOOLS, "webtrak"), "site_dir": site, "monitors": {"nmt6": "106"}}
+        spec = {"tool": os.path.join(TOOLS, "webtrak"), "chunks": site, "monitors": {"nmt6": "106"}}
         got = webtrak.read("webtrak", spec, window(T0 - 600, T0 + 600, receptors), [])
         flights, positions, noise, levels, coverage = (got[t] for t in schema.SOURCE_TABLES)
         self.assertEqual([f["registration"] for f in flights], ["GLCYN"])  # The one 40 km away is left out
@@ -317,6 +333,113 @@ class Adapters(unittest.TestCase):
 
 def flight(source, sid, reg, first, last):
     return {"source": source, "source_id": sid, "registration": reg, "first_utc": iso(first), "last_utc": iso(last)}
+
+
+class AnalysisStep(unittest.TestCase):
+    """The ADS-B adapter's prepare step: adsb analyse on the window's raw logs, only when they change."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+        self.logs = os.path.join(self.dir, "raw", "garden")
+        os.makedirs(os.path.join(self.logs, "adsb"))
+        os.makedirs(os.path.join(self.logs, "health"))
+        self.log_file = self.write("adsb/2026-11-05T08.jsonl.gz", "x")
+        self.write("health/2026-11-05.jsonl", "{}")
+        self.site = os.path.join(self.dir, "site.json")
+        with open(self.site, "w") as f:
+            f.write("{}")
+        self.out = os.path.join(self.dir, "derived", "analysis", "adsb")
+        self.context = adapters.Context(parse_time("2026-11-05T00:00:00Z"), parse_time("2026-11-06T00:00:00Z"), {}, 15)
+        self.runs = []
+
+    def write(self, rel, text, root=None):
+        path = os.path.join(root or self.logs, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def fake_run(self, argv, **kwargs):
+        view = argv[argv.index("--logs") + 1]
+        seen = sorted(os.path.relpath(os.path.join(d, f), view) for d, _, names in os.walk(view) for f in names)
+        self.runs.append((argv, seen))
+        out = argv[argv.index("--out") + 1]
+        os.makedirs(out)
+        with open(os.path.join(out, "flights.csv"), "w") as f:
+            f.write("flight_id\n")
+        return subprocess.CompletedProcess(argv, 0, stdout="")
+
+    def prepare(self, **spec):
+        warnings = []
+        with mock.patch.object(adsb.subprocess, "run", self.fake_run):
+            got = adsb.prepare("adsb", {"adapter": "adsb", "logs": self.logs, "site": self.site, **spec},
+                               self.context, self.out, io.StringIO(), warnings)
+        return got, warnings
+
+    def test_analyses_the_window_once_then_again_only_when_what_it_reads_changes(self):
+        got, _ = self.prepare()
+        self.assertEqual(got["results"], self.out)
+        self.assertTrue(os.path.exists(os.path.join(self.out, "flights.csv")))
+        [(argv, seen)] = self.runs
+        self.assertIn("--all-positions", argv)
+        self.assertEqual(argv[argv.index("--from") + 1], "2026-11-04T23:00:00Z")
+        self.assertEqual(argv[argv.index("--to") + 1], "2026-11-06T01:00:00Z")
+        self.assertEqual(seen, ["adsb/2026-11-05T08.jsonl.gz", "health/2026-11-05.jsonl"])
+        self.prepare()
+        self.assertEqual(len(self.runs), 1)  # Nothing changed
+        # A later day collected, the checksum list, and a touch that changes no content: no rerun
+        self.write("adsb/2026-11-20T08.jsonl.gz", "later")
+        self.write("health/2026-11-20.jsonl", "{}")
+        self.write("SHA256SUMS", "sums")
+        os.utime(self.log_file, (1, 1))
+        self.prepare()
+        self.assertEqual(len(self.runs), 1)
+        # A change in the window: analysed again, and the links to the logs are cleared away
+        with open(self.log_file, "a") as f:
+            f.write("more")
+        self.prepare()
+        self.assertEqual(len(self.runs), 2)
+        self.assertFalse(os.path.exists(self.out + ".tmp"))
+        self.assertFalse(os.path.exists(self.out + ".logs"))
+
+    def test_the_same_data_somewhere_else_has_the_same_fingerprint(self):
+        other = os.path.join(self.dir, "copy")
+        shutil.copytree(self.logs, other)
+        site = shutil.copy(self.site, os.path.join(self.dir, "site-copy.json"))
+        window = ["2026-11-05T00:00:00Z", "2026-11-06T00:00:00Z"]
+        start, end = parse_time(window[0]), parse_time(window[1])
+
+        def stamp(logs, site):
+            return adsb.fingerprint(adsb.window_files(logs, start, end), site, None, window,
+                                    adsb.Hashes(os.path.join(self.dir, "h.json")))
+
+        self.assertEqual(stamp(self.logs, self.site), stamp(other, site))
+        self.write("adsb/2026-11-05T09.jsonl.gz", "new", root=other)
+        self.assertNotEqual(stamp(self.logs, self.site), stamp(other, site))
+
+    def test_results_given_by_hand_are_used_as_they_are(self):
+        got, _ = self.prepare(results="/somewhere/results")
+        self.assertEqual(got["results"], "/somewhere/results")
+        self.assertEqual(self.runs, [])
+
+    def test_a_missing_private_site_leaves_the_source_out(self):
+        os.remove(self.site)
+        got, warnings = self.prepare()
+        self.assertIsNone(got)
+        self.assertIn("left out", warnings[0])
+        self.assertEqual(self.runs, [])
+
+    def test_a_failed_analysis_stops_the_build_and_keeps_the_old_results(self):
+        self.prepare()
+        with open(self.log_file, "a") as f:
+            f.write("more")
+        with mock.patch.object(adsb.subprocess, "run",
+                               lambda argv, **kw: subprocess.CompletedProcess(argv, 1, stdout="bad log")):
+            with self.assertRaises(RuntimeError):
+                adsb.prepare("adsb", {"logs": self.logs, "site": self.site}, self.context, self.out, io.StringIO(), [])
+        self.assertTrue(os.path.exists(os.path.join(self.out, "flights.csv")))
 
 
 class Linking(unittest.TestCase):
@@ -508,12 +631,13 @@ class BuildAndServe(unittest.TestCase):
                 "window_utc": ["2026-11-05T00:00:00Z", "2026-11-06T00:00:00Z"],
                 "receptors": {"nmt6": {"lat": NMT6[0], "lon": NMT6[1], "label": "NMT6", "public": True,
                                        "ground_elevation_m": 3, "mic_height_m": 3}},
-                "sources": {"opensky": {"adapter": "adsb", "results": "../results"},
+                "sources": {"opensky": {"adapter": "adsb", "results": "results"},
                             "webtrak": {"adapter": "webtrak", "tool": os.path.join(TOOLS, "webtrak"),
-                                        "site_dir": "../lcy", "monitors": {"nmt6": "106"}}}}, f)
-        patcher = mock.patch.object(manifest, "OUT_DIR", os.path.join(self.dir, "out"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+                                        "chunks": "lcy", "monitors": {"nmt6": "106"}}}}, f)
+        for name, value in (("OUT_DIR", os.path.join(self.dir, "out")), ("DATA_DIR", self.dir)):
+            patcher = mock.patch.object(manifest, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # A fleet table of the test's own, never the real one in registry/
         self.fleet_path = os.path.join(self.dir, "fleet.csv")
         fleet.write({"GLCYN": {"registration": "GLCYN", "mark": "G-LCYN", "status": "registered", "icao_type": "E190",
@@ -571,7 +695,7 @@ class BuildAndServe(unittest.TestCase):
 
     def test_the_app_sees_a_build_made_outside_it(self):
         app = App(self.deployments)
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         d = app.deployment("2026-11-05")
         self.assertEqual(len(d.load()["flights"]), 3)
         build_json = os.path.join(self.dir, "out", "2026-11-05", "build.json")
@@ -593,12 +717,42 @@ class BuildAndServe(unittest.TestCase):
 
     def test_the_day_says_which_tracks_are_radar_and_classes_events(self):
         app = App(self.deployments)
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         day = app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
         self.assertEqual({(f["source"], f["height_kind"]) for f in day["flights"]}, {("opensky", "geometric"), ("webtrak", "radar")})
         self.assertEqual([e["event_class"] for e in day["events"]], ["aircraft"])
         self.assertFalse(any(k.startswith("_") for f in day["flights"] for k in f))
         self.assertEqual(day["sources"], ["opensky", "webtrak"])
+
+    def test_a_rebuild_from_the_page_runs_in_the_background_and_reports_its_progress(self):
+        app = App(self.deployments)
+        self.assertFalse(app.build_status({"deployment": "2026-11-05"})["running"])
+        started = app.rebuild({"deployment": "2026-11-05"})
+        self.assertEqual(started["deployment"], "2026-11-05")
+        for _ in range(200):
+            status = app.build_status({"deployment": "2026-11-05"})
+            if not status["running"]:
+                break
+            time.sleep(0.05)
+        self.assertFalse(status["running"])
+        self.assertIsNone(status["error"])
+        self.assertTrue(any("passes" in line for line in status["log"]))
+        self.assertTrue(app.deployments()[0]["built"])
+        with self.assertRaises(BadRequest):
+            app.build_status({"deployment": "nope"})
+
+    def test_a_failed_background_rebuild_says_why(self):
+        app = App(self.deployments)
+        with mock.patch.object(build, "build", side_effect=RuntimeError("source opensky: adsb analyse failed")):
+            app.rebuild({"deployment": "2026-11-05"})
+            for _ in range(200):
+                status = app.build_status({"deployment": "2026-11-05"})
+                if not status["running"]:
+                    break
+                time.sleep(0.05)
+        self.assertIn("adsb analyse failed", status["error"])
+        # The lock is released, so it can be tried again
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
 
     def test_the_server_answers_only_this_computer_and_json_posts(self):
         server.Handler.app = App(self.deployments)
@@ -652,7 +806,7 @@ class BuildAndServe(unittest.TestCase):
         self.assertFalse(d["built"])
         with self.assertRaises(BadRequest):
             app.day({"deployment": "2026-11-05", "day": "2026-11-05"})
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         [d] = app.deployments()
         self.assertTrue(d["built"])
         self.assertEqual(d["days"][0]["minutes"]["webtrak"], 2)
@@ -682,7 +836,7 @@ class BuildAndServe(unittest.TestCase):
         with open(path, "w") as f:
             json.dump(spec, f)
         app = App(self.deployments)
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         common = os.path.join(self.dir, "out", "2026-11-05", "common")
         self.assertEqual(schema.table_days(common, "positions"), ["2026-11-05"])  # Filed by the day it started
         day = app.day({"deployment": "2026-11-05", "day": "2026-11-06"})
@@ -705,7 +859,7 @@ class BuildAndServe(unittest.TestCase):
 
     def test_listing_deployments_reads_only_their_coverage(self):
         app = App(self.deployments)
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         d = app.deployment("2026-11-05")
         d.tables = d.stamp = None
         [listed] = app.deployments()
@@ -714,7 +868,7 @@ class BuildAndServe(unittest.TestCase):
 
     def test_a_rebuild_blocks_only_its_own_deployment(self):
         app = App(self.deployments)
-        app.rebuild({"deployment": "2026-11-05"})
+        app.rebuild({"deployment": "2026-11-05"}, background=False)
         d = app.deployment("2026-11-05")
         with d.building:  # As if a rebuild were running
             self.assertTrue(app.deployments()[0]["built"])  # The list doesn't wait for it
@@ -725,7 +879,7 @@ class BuildAndServe(unittest.TestCase):
         app = App(self.deployments)
         d = app.deployment("2026-11-05")
         with d.lock:  # As if a day's tables were being read
-            app.rebuild({"deployment": "2026-11-05"})
+            app.rebuild({"deployment": "2026-11-05"}, background=False)
         self.assertEqual(len(d.load()["flights"]), 3)
 
     def test_a_build_outside_the_app_refuses_a_rebuild_from_it(self):
@@ -735,8 +889,15 @@ class BuildAndServe(unittest.TestCase):
             with self.assertRaises(build.Busy):
                 build.build(d.m, log=io.StringIO(), wait=False)
             with self.assertRaises(BadRequest):
-                app.rebuild({"deployment": "2026-11-05"})
-        app.rebuild({"deployment": "2026-11-05"})  # And once it's done, a rebuild goes ahead
+                app.rebuild({"deployment": "2026-11-05"}, background=False)
+            app.rebuild({"deployment": "2026-11-05"})  # From the page: the job ends saying why
+            for _ in range(200):
+                status = app.build_status({"deployment": "2026-11-05"})
+                if not status["running"]:
+                    break
+                time.sleep(0.05)
+            self.assertIn("being built", status["error"] or "")
+        app.rebuild({"deployment": "2026-11-05"}, background=False)  # And once it's done, a rebuild goes ahead
 
     def test_a_build_clears_what_a_killed_build_left_behind(self):
         m = manifest.load(os.path.join(self.deployments, "2026-11-05.json"))

@@ -13,19 +13,19 @@
       "mic_height_m": 3.0,
       "public": true
     },
-    "garden": {"config": "../adsb/site.json", "name": "Garden", "label": "Garden"}
+    "garden": {"config": "../../adsb/site.json", "name": "Garden", "label": "Garden"}
   },
   "sources": {
     "adsb": null,
     "opensky": {
       "adapter": "adsb",
-      "results": "../opensky/data/2026-11-05/results",
-      "logs": "../opensky/data/2026-11-05/adsb"
+      "logs": "raw/opensky/2026-11-05",
+      "site": "../../opensky/nmt6-site.json",
+      "weather": "raw/metars/eglc-2026-11-05.csv"
     },
     "webtrak": {
       "adapter": "webtrak",
-      "tool": "../webtrak",
-      "site_dir": "../webtrak/data/lcy",
+      "chunks": "raw/webtrak/lcy",
       "monitors": {"nmt6": "106"}
     }
   }

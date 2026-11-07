@@ -1,11 +1,11 @@
 """The survey app's web server: every source's tracks, heights and noise for a day, on one page.
 
-    python3 -m survey serve            then open http://127.0.0.1:8766
+    noise serve            then open http://127.0.0.1:8766
 
-It only listens on this computer, and reads only built deployments (python3 -m survey build), so
+It only listens on this computer, and reads only built deployments (noise build), so
 it never touches a source's own files. Rebuild from the page, or on the command line, after
-fetching more data. Downloads stay in each tool: the WebTrak app (python3 -m webtrak serve) and
-`make viewer` in tools/opensky.
+fetching more data. Downloads stay in each tool, into data/raw/: the WebTrak app (make webtrak),
+make opensky, make pi-collect.
 
 This module is only HTTP: the page's files come from ui/, and the answers from app.App.
 """
@@ -25,7 +25,8 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
                  ".css": "text/css; charset=utf-8"}
 # path -> what answers it, given the App and the request's query (GET) or JSON body (POST)
 GET_ROUTES = {"/api/deployments": lambda app, query: app.deployments(),
-              "/api/day": lambda app, query: app.day(query)}
+              "/api/day": lambda app, query: app.day(query),
+              "/api/build": lambda app, query: app.build_status(query)}
 POST_ROUTES = {"/api/build": lambda app, body: app.rebuild(body)}
 
 

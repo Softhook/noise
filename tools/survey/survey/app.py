@@ -11,7 +11,6 @@ small tables in memory, and reads positions and levels a day at a time, as the p
 from __future__ import annotations
 
 import datetime as dt
-import io
 import os
 import threading
 import time
@@ -29,6 +28,41 @@ SMALL_TABLES = [name for name in schema.TABLES if name not in schema.PARTITIONED
 
 class BadRequest(Exception):
     """A request the app can't answer as asked. The page is told why."""
+
+
+class BuildJob:
+    """A rebuild started from the page: its progress, as the build prints it, and how it ended.
+
+    It's a file-like log for build.build, so its lines (such as "opensky: analysing ...") can be
+    shown while it runs. Only the last LOG_LINES are kept."""
+
+    LOG_LINES = 200
+
+    def __init__(self, deployment):
+        self.deployment = deployment
+        self.started = time.time()
+        self.finished = None
+        self.lines = []
+        self.partial = ""
+        self.error = None
+        self.summary = None
+        self._lock = threading.Lock()
+
+    def write(self, text):
+        with self._lock:
+            self.partial += text
+            *done, self.partial = self.partial.split("\n")
+            self.lines = (self.lines + [line for line in done if line])[-self.LOG_LINES:]
+        return len(text)
+
+    def flush(self):
+        pass
+
+    def status(self):
+        with self._lock:
+            return {"deployment": self.deployment, "running": self.finished is None, "started": self.started,
+                    "finished": self.finished, "log": list(self.lines), "error": self.error,
+                    "passes": (self.summary or {}).get("passes")}
 
 
 class Deployment:
@@ -198,6 +232,7 @@ class App:
         self.dir = deployments_dir or manifest.DEPLOYMENTS_DIR
         self.cache = {}
         self.locks = {}  # Deployment name -> its lock, kept when its manifest is read again
+        self.jobs = {}  # Deployment name -> its latest BuildJob, started from the page
         self.lock = threading.Lock()
 
     def deployment(self, name):
@@ -241,18 +276,47 @@ class App:
                 found.append({"deployment": name, "error": str(error)})
         return found
 
-    def rebuild(self, body):
-        """Build a deployment again, unless it's being built already, here or by `make build`."""
-        d = self.deployment(str(body.get("deployment", "")))
+    def rebuild(self, body, background=True):
+        """Build a deployment again, unless it's being built already, here or by `make build`.
+
+        In the background (as the page asks for it), this returns at once with the job's status,
+        and build_status() follows it: a build may run adsb analyse, which can take minutes. With
+        background=False it returns the build's summary when done, or raises BadRequest."""
+        name = str(body.get("deployment", ""))
+        d = self.deployment(name)
         if not d.building.acquire(blocking=False):
             raise BadRequest(f"{d.m['deployment']} is already being rebuilt")
-        try:
-            d.m = manifest.load(d.manifest_path)
-            return build.build(d.m, log=io.StringIO(), wait=False)
-        except build.Busy as error:
-            raise BadRequest(str(error)) from None
-        finally:
-            d.building.release()
+        job = BuildJob(name)
+        with self.lock:
+            self.jobs[name] = job
+
+        def run():
+            try:
+                d.m = manifest.load(d.manifest_path)
+                job.summary = build.build(d.m, log=job, wait=False)
+            except build.Busy as error:
+                job.error = str(error)
+            except Exception as error:  # reported to the page, which polls for it
+                job.error = f"{type(error).__name__}: {error}"
+            finally:
+                job.finished = time.time()
+                d.building.release()
+
+        if background:
+            threading.Thread(target=run, name=f"build {name}", daemon=True).start()
+            return job.status()
+        run()
+        if job.error:
+            raise BadRequest(job.error)
+        return job.summary
+
+    def build_status(self, query):
+        """The latest rebuild started from the page for a deployment, or {"running": False} if none."""
+        name = str(query.get("deployment", ""))
+        self.deployment(name)  # BadRequest if there's no such deployment
+        with self.lock:
+            job = self.jobs.get(name)
+        return job.status() if job else {"deployment": name, "running": False, "log": [], "error": None}
 
     def day(self, query):
         """Everything the page draws for one day of a deployment."""

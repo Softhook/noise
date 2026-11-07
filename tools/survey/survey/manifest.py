@@ -1,6 +1,8 @@
 """Read a deployment's manifest: its period, receptors and sources. See ARCHITECTURE.md, Manifest.
 
-Paths in a manifest are relative to the manifest file. A receptor whose location is private (the
+A source's data paths (its adapter's PATHS) are relative to the data folder, DATA_DIR, so a
+manifest still works when the data is moved with NOISE_DATA. Other paths (a receptor's config, an
+adapter's MANIFEST_PATHS, such as webtrak's tool or an ADS-B source's site) are relative to the manifest file. A receptor whose location is private (the
 garden) gives `"config"`: the path to a git-ignored site.json (tools/adsb's format). If that file
 isn't there, the receptor is left out and a warning given, so a manifest in git never needs the
 garden's location in it.
@@ -15,9 +17,15 @@ import os
 from .adapters import ADAPTERS
 from .common import parse_time
 
-TOOLS_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEPLOYMENTS_DIR = os.path.join(TOOLS_DIR, "deployments")
-OUT_DIR = os.path.join(TOOLS_DIR, "survey", "data")
+SURVEY_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TOOLS_DIR = os.path.dirname(SURVEY_DIR)
+DEPLOYMENTS_DIR = os.path.join(SURVEY_DIR, "deployments")
+# Every tool's data lives in one local folder outside the tools: the repository's data/
+# (git-ignored), or wherever NOISE_DATA says. raw/ holds what was collected or downloaded, written
+# once; derived/ what is worked out from it, which can be deleted and rebuilt. A deployment's build
+# goes in derived/deployments/<name>/. A manifest's data paths are relative to DATA_DIR.
+DATA_DIR = os.path.abspath(os.environ.get("NOISE_DATA") or os.path.join(os.path.dirname(TOOLS_DIR), "data"))
+OUT_DIR = os.path.join(DATA_DIR, "derived", "deployments")
 
 
 class ManifestError(ValueError):
@@ -50,14 +58,16 @@ def _receptor(rid, spec, base, warnings):
 
 
 def _source(name, spec, base):
-    """A source's entry, with its adapter's paths made absolute."""
+    """A source's entry, with its paths made absolute: data paths from DATA_DIR, code paths from
+    the manifest's folder."""
     spec = dict(spec)
     adapter = ADAPTERS.get(str(spec.get("adapter")))
     if adapter is None:
         raise ManifestError(f"source {name}: adapter must be one of {', '.join(ADAPTERS)}")
-    for key in adapter.PATHS:
-        if key in spec:
-            spec[key] = os.path.normpath(os.path.join(base, spec[key]))
+    for keys, root in ((adapter.PATHS, DATA_DIR), (getattr(adapter, "MANIFEST_PATHS", ()), base)):
+        for key in keys:
+            if key in spec:
+                spec[key] = os.path.normpath(os.path.join(root, spec[key]))
     return spec
 
 
@@ -110,6 +120,17 @@ def load(path):
         "out_dir": os.path.join(OUT_DIR, name),
         "warnings": warnings,
     }
+
+
+def find(name):
+    """A deployment's manifest: a path to one, or the name of one in DEPLOYMENTS_DIR."""
+    if os.path.exists(name):
+        return name
+    path = os.path.join(DEPLOYMENTS_DIR, f"{name}.json")
+    if not os.path.exists(path):
+        known = ", ".join(os.path.splitext(os.path.basename(p))[0] for p in all_manifests())
+        raise ManifestError(f"no deployment {name!r} (there are: {known or 'none'})")
+    return path
 
 
 def all_manifests(folder=None):

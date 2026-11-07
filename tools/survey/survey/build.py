@@ -1,13 +1,14 @@
 """Build a deployment: run its adapters, work out closest approaches, link passes, write the tables.
 
-    python3 -m survey build --manifest ../deployments/2026-11-05.json
+    noise build 2026-11-05
 
-Writes data/<deployment>/common/ (a CSV per table, and a folder of daily CSVs for positions and
+Writes data/derived/deployments/<deployment>/common/ (a CSV per table, and a folder of daily CSVs for positions and
 levels) and build.json (counts, coverage and warnings), which the
 survey app reads. The sources' own files are only ever read.
 
 The steps, each a function here, in order:
-    read_sources   each source's adapter -> the source tables, a time-ordered track per flight,
+    read_sources   each source's adapter, after its prepare step (the ADS-B sources' analysis,
+                   rerun only when its inputs change) -> the source tables, a time-ordered track per flight,
                    and what each source can see
     approaches     each flight's closest approach to each receptor
     link           flights -> passes (link.py)
@@ -54,7 +55,7 @@ def build_lock(m, wait=True):
 
 def clear_leftovers(m):
     """Remove the staging and old tables folders a build that was killed part-way left behind."""
-    for path in glob.glob(os.path.join(m["out_dir"], ".common.*")):
+    for path in glob.glob(os.path.join(m["out_dir"], ".common.*")) + glob.glob(os.path.join(m["out_dir"], "analysis", "*.tmp")) + glob.glob(os.path.join(m["out_dir"], "analysis", "*.logs")):
         shutil.rmtree(path, ignore_errors=True)
 
 
@@ -71,6 +72,10 @@ def read_sources(m, warnings, log):
     tracks, levels, limits = {}, [], {}
     for name, spec in m["sources"].items():
         adapter = adapters.ADAPTERS[spec["adapter"]]
+        if hasattr(adapter, "prepare"):
+            spec = adapter.prepare(name, spec, context, os.path.join(m["out_dir"], "analysis", name), log, warnings)
+            if spec is None:
+                continue
         got = adapter.read(name, spec, context, warnings)
         counts = {}
         for table in tables:
@@ -221,5 +226,7 @@ def _build(m, log, fleet_path=None):
 
 
 def main(args):
-    build(manifest.load(args.manifest))
+    """Build the deployments named (a name in deployments/, or a manifest's path), or every one."""
+    for path in [manifest.find(d) for d in args.deployments] or manifest.all_manifests():
+        build(manifest.load(path))
     return 0

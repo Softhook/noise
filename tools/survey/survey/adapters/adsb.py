@@ -1,29 +1,44 @@
 """ADS-B-family sources: our logger, adsb.lol and OpenSky, all as `adsb analyse` results.
 
 Each of them reaches the survey the same way: hourly log files (the logger's own, or converted by
-`adsb traces` or `opensky logs`), then `adsb analyse --all-positions`. This adapter reads that
-results folder (flights.csv, positions.csv, summary.txt), and the logs folder's SOURCE.txt if
-the manifest gives `logs`. It never imports the adsb package.
+`adsb traces` or `opensky logs`), then `adsb analyse --all-positions`. The build runs that
+analysis itself (prepare(), below), for the deployment's window, into its derived folder, and only
+when what it reads has changed: the window's log files, the site config, the weather, the adsb
+code or the Python version, compared by content. This adapter then reads
+the results folder (flights.csv, positions.csv, summary.txt), and the logs folder's SOURCE.txt.
+It runs adsb as a separate program and never imports it.
 
-Manifest entries:
-    "opensky": {"adapter": "adsb", "results": "../opensky/data/2026-11-05/results",
-                "logs": "../opensky/data/2026-11-05/adsb"}
-    "adsb": {"adapter": "adsb", "results": "../adsb/data/phase0/results", "logs": "../adsb/data/phase0/logs"}
+Manifest entries (data paths relative to the data folder, `site` relative to the manifest):
+    "opensky": {"adapter": "adsb", "logs": "raw/opensky/2026-11-05",
+                "site": "../../opensky/nmt6-site.json", "weather": "raw/metars/eglc-2026-11-05.csv"}
+    "adsb": {"adapter": "adsb", "logs": "raw/adsb/garden", "site": "../../adsb/site.json",
+             "weather": "raw/metars/eglc-2026-11-20.csv"}
 
-For our logger, `logs` is a copy of its log_dir, whose health log says when it was listening.
+`weather` is optional. A source can give `results` instead of `site`, for results analysed by
+hand; then nothing is run. For our logger, `logs` is a copy of its log_dir, whose health log says
+when it was listening.
 """
 
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
 
 from ..common import iso, number, parse_time, registration, stamp
 
-PATHS = ("results", "logs")
+PATHS = ("results", "logs", "weather")
+MANIFEST_PATHS = ("site",)
+# tools/adsb, beside tools/survey: run as `python -m adsb`, never imported
+ADSB_TOOL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "adsb")
+INPUTS_FILE = ".inputs.sha256"  # In a results folder: the fingerprint of what it was analysed from
 
 KNOTS_TO_MS = 0.514444
 HEIGHT_KINDS = ("geometric", "qnh")  # adsb analyse's height_source, as the positions table keeps it
@@ -43,9 +58,156 @@ GAP = re.compile(r"^GAP over 30 minutes.*?: (\S+) to (\S+)$")
 HEALTH_SPACING_S = 900
 
 
+# What adsb analyse reads from a logs folder: SOURCE.txt, hourly log files (in any subfolder) and
+# the health log's daily files. Nothing else there (SHA256SUMS, notes) changes an analysis.
+LOG_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2})(?:\.\d+)?\.jsonl\.gz$")
+HEALTH_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.jsonl$")
+# The window's analysis reads positions from this long either side of it, so a flight crossing its
+# edge is whole. A log file is taken if its hour is within FILE_MARGIN_S of that (adsb.logs reads
+# lines up to 2 hours outside their file's hour, so this is more than it needs), a health file if
+# its day is within a day of it.
+ANALYSIS_PAD_S = 3600
+FILE_MARGIN_S = 3 * 3600
+
+
+def _utc(text, fmt):
+    return dt.datetime.strptime(text, fmt).replace(tzinfo=dt.timezone.utc).timestamp()
+
+
+def window_files(logs, start, end):
+    """The files of a logs folder that adsb analyse reads for start to end: {relative path: path}."""
+    picked = {}
+    for folder, _, names in os.walk(logs):
+        for name in names:
+            path = os.path.join(folder, name)
+            rel = os.path.relpath(path, logs)
+            log, health = LOG_FILE.match(name), HEALTH_FILE.match(name)
+            if rel == "SOURCE.txt":
+                picked[rel] = path
+            elif log:
+                hour = _utc(log.group(1), "%Y-%m-%dT%H")
+                if start - FILE_MARGIN_S <= hour + 3600 and hour - FILE_MARGIN_S < end:
+                    picked[rel] = path
+            elif health and os.path.basename(folder) == "health":
+                day = _utc(health.group(1), "%Y-%m-%d")
+                if start - 86400 <= day + 86400 and day - 86400 < end:
+                    picked[rel] = path
+    return dict(sorted(picked.items()))
+
+
+class Hashes:
+    """Content hashes of files, kept beside the analysis (out_dir + ".hashes.json") by path, size
+    and modification time, so a file is only read again when it may have changed."""
+
+    def __init__(self, path):
+        self.path = path
+        try:
+            with open(path) as f:
+                self.old = json.load(f)
+        except (OSError, ValueError):
+            self.old = {}
+        self.new = {}
+
+    def __call__(self, path):
+        st = os.stat(path)
+        key = [st.st_size, st.st_mtime_ns]
+        got = self.old.get(path)
+        if not got or got[:2] != key:
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    h.update(block)
+            got = key + [h.hexdigest()]
+        self.new[path] = got
+        return got[2]
+
+    def save(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        with open(self.path + ".tmp", "w") as f:
+            json.dump(self.new, f)
+        os.replace(self.path + ".tmp", self.path)
+
+
+def fingerprint(files, site, weather, window, hashes):
+    """What an analysis depends on, by content, never by where it is: the window, the files it
+    reads (by their path in the logs folder), the site config, the weather, the adsb code and the
+    Python version. The same data copied to another folder or computer gives the same fingerprint."""
+    code = sorted(os.path.join(d, f) for d, _, names in os.walk(os.path.join(ADSB_TOOL, "adsb"))
+                  for f in names if f.endswith((".py", ".html")))
+    parts = {
+        "window": window,
+        "python": list(sys.version_info[:2]),
+        "logs": [[rel, hashes(path)] for rel, path in files.items()],
+        "site": hashes(site),
+        "weather": hashes(weather) if weather else None,
+        "code": [[os.path.relpath(path, ADSB_TOOL), hashes(path)] for path in code],
+    }
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode()).hexdigest()
+
+
+def prepare(name, spec, context, out_dir, log, warnings):
+    """Run `adsb analyse` on the source's logs for the deployment's window, into out_dir, unless
+    it's already been run on the same inputs; return the spec with `results` set to it, or None to
+    leave the source out. A spec that gives `results` is returned as it is.
+
+    analyse is given a folder of links to just the window's files (window_files), so a logs
+    folder that grows over the survey, such as the garden's, never makes it read or redo more."""
+    if spec.get("results"):
+        return spec
+    logs, site, weather = spec.get("logs"), spec.get("site"), spec.get("weather")
+    if not logs or not site:
+        raise ValueError(f"source {name}: give logs and site (to analyse), or results")
+    for label, path in (("site", site), ("logs", logs)):
+        if not os.path.exists(path):
+            warnings.append(f"source {name}: its {label} {path} isn't there, so it's left out")
+            return None
+    if weather and not os.path.exists(weather):
+        warnings.append(f"source {name}: its weather {weather} isn't there, so heights aren't corrected for it")
+        weather = None
+    start, end = context.start - ANALYSIS_PAD_S, context.end + ANALYSIS_PAD_S
+    # In whole seconds: adsb analyse doesn't read fractions
+    window = [dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") for t in (start, end)]
+    files = window_files(logs, start, end)
+    hashes = Hashes(out_dir + ".hashes.json")
+    stamp_now = fingerprint(files, site, weather, window, hashes)
+    hashes.save()
+    try:
+        with open(os.path.join(out_dir, INPUTS_FILE)) as f:
+            if f.read().strip() == stamp_now:
+                return {**spec, "results": out_dir}
+    except OSError:
+        pass
+    print(f"{name}: analysing {len(files)} files of {os.path.relpath(logs)} (adsb analyse)", file=log)
+    temp, view = out_dir + ".tmp", out_dir + ".logs"
+    for path in (temp, view):
+        shutil.rmtree(path, ignore_errors=True)
+    for rel, path in files.items():
+        link = os.path.join(view, rel)
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        os.symlink(os.path.abspath(path), link)
+    os.makedirs(view, exist_ok=True)
+    command = ["analyse", "--config", site, "--logs", view, "--out", temp, "--all-positions",
+               "--from", window[0], "--to", window[1]] + (["--weather", weather] if weather else [])
+    env = dict(os.environ, PYTHONPATH=ADSB_TOOL + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    try:
+        done = subprocess.run([sys.executable, "-m", "adsb", *command], env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    finally:
+        shutil.rmtree(view, ignore_errors=True)
+    if done.returncode:
+        shutil.rmtree(temp, ignore_errors=True)
+        raise RuntimeError(f"source {name}: adsb analyse failed:\n{done.stdout[-3000:]}")
+    with open(os.path.join(temp, INPUTS_FILE), "w") as f:
+        f.write(stamp_now + "\n")
+    shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(os.path.dirname(out_dir), exist_ok=True)
+    os.rename(temp, out_dir)
+    return {**spec, "results": out_dir}
+
+
 def _rows(path):
     if not os.path.exists(path):
-        raise FileNotFoundError(f"{path} not found; run adsb analyse first")
+        raise FileNotFoundError(f"{path} not found; the analysis has no {os.path.basename(path)}")
     with open(path, newline="") as f:
         yield from csv.DictReader(f)
 

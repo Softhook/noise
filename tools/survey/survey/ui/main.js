@@ -46,7 +46,7 @@ async function loadDay() {
   if (!d || !d.built || !$("f-day").value) {
     state.data = null;
     $("content").hidden = true;
-    if (d && !d.built && !d.error) $("subtitle").textContent = `${d.deployment} isn't built yet. Press Rebuild, or run: python3 -m survey build --manifest ../${d.manifest}`;
+    if (d && !d.built && !d.error) $("subtitle").textContent = `${d.deployment} isn't built yet. Press Rebuild, or run: make build DEPLOYMENT=${d.deployment}`;
     return;
   }
   $("content").hidden = false;
@@ -108,7 +108,14 @@ async function start() {
     $("rebuild").disabled = true;
     $("rebuild").textContent = "Rebuilding…";
     try {
-      await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deployment: d.deployment }) });
+      // The build runs in the background (it may analyse logs for minutes); follow it until it ends
+      let job = await api("/api/build", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deployment: d.deployment }) });
+      while (job.running) {
+        if (job.log.length) $("subtitle").textContent = `Rebuilding: ${job.log[job.log.length - 1]}`;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        job = await api(`/api/build?deployment=${encodeURIComponent(d.deployment)}`);
+      }
+      if (job.error) throw new Error(job.error);
       await loadDeployments(d.deployment);
       await loadDay();
     } catch (error) {

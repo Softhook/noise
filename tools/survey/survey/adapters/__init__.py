@@ -2,8 +2,15 @@
 
 An adapter is a module with:
 
-    PATHS                                   keys of its manifest entry that are paths; manifest.load
-                                            makes them absolute, relative to the manifest
+    PATHS                                   keys of its manifest entry that are data paths; manifest.load
+                                            makes them absolute, relative to the data folder (tools/data
+                                            or NOISE_DATA)
+    MANIFEST_PATHS (optional)               keys that are paths to code or config, relative to the manifest
+    prepare(name, spec, context, out_dir, log, warnings) (optional)
+                                            -> the spec to read with, or None to leave the source out.
+                                            Run before read, to work out derived files from raw
+                                            ones into out_dir (the deployment's analysis/<name>),
+                                            only when they're out of date
     read(name, spec, context, warnings)     -> {table: rows}, for any of schema.SOURCE_TABLES; a
                                             table it doesn't fill can be left out. Rows may be any
                                             iterable: a generator for positions or levels keeps a
