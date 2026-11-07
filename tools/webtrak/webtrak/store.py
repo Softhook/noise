@@ -214,10 +214,11 @@ def is_locked(monitor_dir):
 
 
 class RawCache:
-    """Chunks as received, gzipped, shared by all monitors of a site."""
+    """Chunks as received, gzipped, shared by all monitors of a site: <dir>/<UTC day>/<handle>.txt.gz.
+    dir is the site's raw folder (raw/webtrak/<site>/), apart from the monitors' derived files."""
 
-    def __init__(self, site_dir):
-        self.dir = os.path.join(site_dir, "raw")
+    def __init__(self, raw_dir):
+        self.dir = raw_dir
 
     def path(self, handle):
         day = dt.datetime.fromtimestamp(parse.utc_for_handle(handle), dt.timezone.utc).strftime("%Y-%m-%d")

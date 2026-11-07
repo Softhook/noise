@@ -7,8 +7,13 @@ import math
 import os
 
 TOOL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_DIR = os.path.join(TOOL_DIR, "data")
-WEBTRAK_DIR = os.path.join(TOOL_DIR, "..", "webtrak", "data", "lcy", "nmt106")
+# Every tool's data lives in one local folder, the repository's data/ (or NOISE_DATA): what was
+# downloaded in raw/, what is worked out from it in derived/
+DATA_DIR = os.path.abspath(os.environ.get("NOISE_DATA")
+                           or os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "data"))
+RAW_DIR = os.path.join(DATA_DIR, "raw", "opensky")
+OUT_DIR = os.path.join(DATA_DIR, "derived", "opensky")
+WEBTRAK_DIR = os.path.join(DATA_DIR, "derived", "webtrak", "lcy", "nmt106")
 
 NMT6 = (51.50535, 0.11075)  # St Pauls Church, Thamesmead, from WebTrak's monitor list
 EARTH_RADIUS_M = 6371000

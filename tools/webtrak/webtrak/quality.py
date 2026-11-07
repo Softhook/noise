@@ -2,7 +2,7 @@
 
   python3 -m webtrak quality [--nmt 106] [--from 'YYYY-MM-DD HH:MM'] [--to ...] [--json report.json]
 
-Reads only what is saved under data/<site>/nmt<id>/ (and the raw cache for the radar status); it
+Reads only what is saved under data/derived/webtrak/<site>/nmt<id>/ (and data/raw/webtrak/<site>/ for the radar status); it
 never downloads and never changes a file. Without --from/--to it checks everything saved.
 
 Each check gives a count and a few examples. The thresholds below are rules of thumb, not
@@ -128,10 +128,10 @@ def _is_placeholder_time(t):
     return local.hour in (0, 12) and local.minute < 2
 
 
-def check(monitor_dir, start=None, end=None, site_dir=None):
+def check(monitor_dir, start=None, end=None, raw_dir=None):
     """Check one monitor folder over [start, end) (UTC seconds; default everything saved). Returns a Report.
 
-    With site_dir, the radar status of each saved chunk is read from the site's raw cache."""
+    With raw_dir, the radar status of each saved chunk is read from the site's raw chunk cache."""
     report = Report()
     state = store.read_state(monitor_dir)
     saved = state.get("saved", [])
@@ -195,8 +195,8 @@ def check(monitor_dir, start=None, end=None, site_dir=None):
                    [f"{_local(t)} x{n}" for t, n in sorted(by_second.items()) if n > 1],
                    "a chunk appended twice")
 
-    if site_dir:
-        cache = store.RawCache(site_dir)
+    if raw_dir:
+        cache = store.RawCache(raw_dir)
         statuses = collections.Counter()
         offline, uncached = [], 0
         for h in handles:

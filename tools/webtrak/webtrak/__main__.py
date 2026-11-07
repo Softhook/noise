@@ -29,7 +29,12 @@ from . import client as client_mod
 from . import parse, store
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_OUT = os.path.join(HERE, "data")
+# Every tool's data lives in one local folder, the repository's data/ (or NOISE_DATA). What WebTrak
+# sends is raw (raw/webtrak/<site>/: the chunks and the monitor list); what is worked out from it,
+# each monitor's events, levels and radar, and the web app's jobs, is derived (derived/webtrak/<site>/).
+DATA_DIR = os.path.abspath(os.environ.get("NOISE_DATA") or os.path.join(os.path.dirname(os.path.dirname(HERE)), "data"))
+DEFAULT_RAW = os.path.join(DATA_DIR, "raw", "webtrak")
+DEFAULT_OUT = os.path.join(DATA_DIR, "derived", "webtrak")
 DEFAULT_MONITOR = "106"
 
 # Used if the site configuration can't be read. From WebTrak's configuration on 5 Nov 2026.
@@ -49,12 +54,12 @@ def log(message):
     print(f"[{dt.datetime.now().strftime('%H:%M:%S')}] {message}", flush=True)
 
 
-def load_monitors(client, site, out_dir):
+def load_monitors(client, site, raw_dir):
     """The site's monitors: from WebTrak, else the copy saved last time, else the built-in list."""
-    cache = os.path.join(out_dir, "monitors.json")
+    cache = os.path.join(raw_dir, "monitors.json")
     try:
         monitors = client.monitors()
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(raw_dir, exist_ok=True)
         with open(cache, "w") as f:
             json.dump(monitors, f, indent=1)
         return monitors
@@ -222,7 +227,8 @@ def common_args(parser, delay):
     parser.add_argument("--site", default="lcy", help="WebTrak site name (default lcy)")
     parser.add_argument("--nmt", default=DEFAULT_MONITOR, help="monitor id, or several separated by commas "
                         "(default 106, NMT6 St Pauls Thamesmead)")
-    parser.add_argument("--out", default=DEFAULT_OUT, help="output folder (default tools/webtrak/data)")
+    parser.add_argument("--out", default=DEFAULT_OUT, help="folder for each monitor's events, levels and radar (default data/derived/webtrak)")
+    parser.add_argument("--raw", default=DEFAULT_RAW, help="folder for what WebTrak sends: chunks and the monitor list (default data/raw/webtrak)")
     parser.add_argument("--radius", type=float, default=3000, help="save radar positions within this many metres "
                         "of the monitor (default 3000)")
     parser.add_argument("--no-raw", action="store_true", help="don't keep downloaded chunks (they are kept by "
@@ -235,17 +241,18 @@ def common_args(parser, delay):
 def setup(args):
     client = client_mod.Client(site=args.site, min_interval=max(0.5, args.delay))
     out_dir = os.path.join(args.out, args.site)
+    raw_dir = os.path.join(args.raw, args.site)
     ids = list(dict.fromkeys(m.strip() for m in str(args.nmt).split(",") if m.strip()))
     if not ids:
         raise SystemExit("--nmt needs at least one monitor id")
-    monitors = load_monitors(client, args.site, out_dir)
+    monitors = load_monitors(client, args.site, raw_dir)
     stores = []
     for monitor_id in ids:
         monitor = find_monitor(monitors, monitor_id)
         monitor_store = store.MonitorStore(out_dir, monitor, radius_m=args.radius)
         monitor_store.lock()
         stores.append((monitor, monitor_store))
-    cache = None if args.no_raw else store.RawCache(out_dir)
+    cache = None if args.no_raw else store.RawCache(raw_dir)
     return client, cache, stores
 
 
@@ -351,8 +358,7 @@ def cmd_monitors(argv, prog):
     parser = argparse.ArgumentParser(prog=prog, description="List the site's noise monitors.")
     parser.add_argument("--site", default="lcy")
     args = parser.parse_args(argv)
-    out_dir = os.path.join(DEFAULT_OUT, args.site)
-    for m in load_monitors(client_mod.Client(site=args.site), args.site, out_dir):
+    for m in load_monitors(client_mod.Client(site=args.site), args.site, os.path.join(DEFAULT_RAW, args.site)):
         print(f"{m['id']:>5}  {m['lat']:.5f} {m['lon']:.5f}  {m['name']}  {m.get('status', '')}")
     return 0
 
@@ -372,12 +378,14 @@ def cmd_range(argv, prog):
 def cmd_serve(argv, prog):
     parser = argparse.ArgumentParser(prog=prog, description="Run the local web app (http://127.0.0.1:PORT).")
     parser.add_argument("--site", default="lcy")
-    parser.add_argument("--out", default=DEFAULT_OUT, help="data folder (default tools/webtrak/data)")
+    parser.add_argument("--out", default=DEFAULT_OUT, help="folder for each monitor's events, levels and radar (default data/derived/webtrak)")
+    parser.add_argument("--raw", default=DEFAULT_RAW, help="folder for what WebTrak sends: chunks and the monitor list (default data/raw/webtrak)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     args = parser.parse_args(argv)
     from . import server
-    return server.serve(os.path.abspath(args.out), args.site, args.port, open_browser=not args.no_browser)
+    return server.serve(os.path.abspath(args.out), args.site, args.port, open_browser=not args.no_browser,
+                        raw_root=os.path.abspath(args.raw))
 
 
 def cmd_quality(argv, prog):
@@ -386,7 +394,8 @@ def cmd_quality(argv, prog):
                                      epilog="Reads the saved files only: nothing is downloaded or changed.")
     parser.add_argument("--site", default="lcy")
     parser.add_argument("--nmt", default=DEFAULT_MONITOR, help="monitor id (default 106, NMT6)")
-    parser.add_argument("--out", default=DEFAULT_OUT, help="data folder (default tools/webtrak/data)")
+    parser.add_argument("--out", default=DEFAULT_OUT, help="folder for each monitor's events, levels and radar (default data/derived/webtrak)")
+    parser.add_argument("--raw", default=DEFAULT_RAW, help="folder for what WebTrak sends: chunks and the monitor list (default data/raw/webtrak)")
     parser.add_argument("--from", dest="start", help="local start, 'YYYY-MM-DD HH:MM' (default: first saved)")
     parser.add_argument("--to", dest="end", help="local end, 'YYYY-MM-DD HH:MM' (default: last saved)")
     parser.add_argument("--json", help="also write the full report to this JSON file")
@@ -397,7 +406,7 @@ def cmd_quality(argv, prog):
         raise SystemExit(f"nothing saved for monitor {args.nmt} in {site_dir}")
     start = parse.local_to_utc(args.start) if args.start else None
     end = parse.local_to_utc(args.end) if args.end else None
-    report = quality.check(monitor_dir, start, end, site_dir=site_dir)
+    report = quality.check(monitor_dir, start, end, raw_dir=os.path.join(args.raw, args.site))
     print(report.text())
     if args.json:
         quality.write_json(report, args.json)

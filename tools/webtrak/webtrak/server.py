@@ -73,10 +73,14 @@ def _tail(path, lines=12):
 
 
 class App:
-    def __init__(self, out_root, site="lcy", python=sys.executable, client=None):
+    def __init__(self, out_root, site="lcy", python=sys.executable, client=None, raw_root=None):
+        """out_root: the derived folder (each monitor's files, the jobs); raw_root: the raw one
+        (chunks, the monitor list), out_root if None."""
         self.out_root = out_root
+        self.raw_root = raw_root or out_root
         self.site = site
         self.site_dir = os.path.join(out_root, site)
+        self.raw_dir = os.path.join(self.raw_root, site)
         self.jobs_dir = os.path.join(self.site_dir, "jobs")
         self.python = python
         self.client = client or client_mod.Client(site=site)
@@ -89,7 +93,7 @@ class App:
 
     def monitors(self):
         try:
-            with open(os.path.join(self.site_dir, "monitors.json")) as f:
+            with open(os.path.join(self.raw_dir, "monitors.json")) as f:
                 known = json.load(f)
         except (OSError, ValueError):
             from .__main__ import KNOWN_MONITORS
@@ -125,7 +129,7 @@ class App:
         for mid in ids:
             saved = store.read_state(self.monitor_dir(mid)).get("saved", [])
             todo.update(h for a, b in store.gaps(saved, first, last) for h in range(a, b + 1))
-        cache = store.RawCache(self.site_dir)
+        cache = store.RawCache(self.raw_dir)
         downloads = sum(1 for h in todo if not cache.has(h))
         delay = max(0.5, float(query.get("delay", 2.0)))
         return {"chunks": last - first + 1, "to_save": len(todo), "to_download": downloads,
@@ -209,7 +213,7 @@ class App:
         if busy:
             raise BadRequest(f"NMT{', NMT'.join(busy)} already has a download writing to it; stop that first")
         delay = max(0.5, float(body.get("delay", 2.0 if kind == "fetch" else 1.0)))
-        args = [kind, "--site", self.site, "--out", self.out_root, "--nmt", ",".join(ids), "--delay", f"{delay:g}"]
+        args = [kind, "--site", self.site, "--out", self.out_root, "--raw", self.raw_root, "--nmt", ",".join(ids), "--delay", f"{delay:g}"]
         job = {"kind": kind, "nmt": ids, "delay": delay, "started": time.time()}
         if kind == "fetch":
             start, end, _ = self._period(body)
@@ -381,8 +385,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
 
-def serve(out_root, site="lcy", port=8765, open_browser=True):
-    Handler.app = App(out_root, site)
+def serve(out_root, site="lcy", port=8765, open_browser=True, raw_root=None):
+    Handler.app = App(out_root, site, raw_root=raw_root)
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
     print(f"WebTrak app at {url}  (Ctrl-C to close it; downloads carry on)", flush=True)

@@ -1,5 +1,5 @@
 {
-  "_comment": "For running the logger on a laptop against the simulator (make dev-serve, then make dev-log). The location is the simulator's placeholder, not the garden.",
+  "_comment": "For running the logger on a laptop against the simulator (make dev-serve, then make dev-log, from the top of the repository; log_dir is relative to tools/adsb). The location is the simulator's placeholder, not the garden.",
   "site": {
     "name": "Simulator site",
     "lat": 51.5,
@@ -12,7 +12,7 @@
   "logger": {
     "host": "127.0.0.1",
     "port": 30154,
-    "log_dir": "data/dev-logs",
+    "log_dir": "../../data/derived/adsb/dev-logs",
     "health_seconds": 30,
     "min_free_gb": 0.5
   }

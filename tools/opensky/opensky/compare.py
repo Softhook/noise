@@ -2,7 +2,7 @@
 
   .venv/bin/python -m opensky compare --from 2026-11-05T08:01Z --to 2026-11-05T11:01Z
 
-Passes within --radius of NMT6 are written to data/nmt6-trino-<from>.csv, then paired with
+Passes within --radius of NMT6 are written to data/derived/opensky/compare/nmt6-trino-<from>.csv, then paired with
 WebTrak's radar tracks by time and listed with NMT6's noise events.
 
 Both sources are read for PAD_S either side of the period, so an aircraft passing NMT6 near the
@@ -100,7 +100,7 @@ def add_arguments(parser):
     parser.add_argument("--to", dest="end", required=True)
     parser.add_argument("--radius", type=float, default=3000, help="metres from NMT6 (default 3000, as WebTrak)")
     parser.add_argument("--geoid", type=float, default=45.0, help="geoid height at NMT6 in metres (default 45)")
-    parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/aircraft-db)")
+    parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/raw/opensky/aircraft-db)")
 
 
 def add_types(passes, db):
@@ -121,7 +121,7 @@ def run(args, client=None, db=None):
     add_types(passes, db)
     aircraft.report_unknown(db, [(p.icao24, p.callsign) for p in passes])
 
-    out = os.path.join(OUT_DIR, f"nmt6-trino-{iso(begin)[:16].replace(':', '')}.csv")
+    out = os.path.join(OUT_DIR, "compare", f"nmt6-trino-{iso(begin)[:16].replace(':', '')}.csv")
     write_csv(passes, out)
     print(f"{len(passes)} aircraft passes within {args.radius:.0f} m of NMT6 -> {os.path.relpath(out)}")
 

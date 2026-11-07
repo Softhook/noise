@@ -270,7 +270,7 @@ class TestCompare(unittest.TestCase):
                 mock.patch("opensky.webtrak.events", return_value=[]), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             compare.run(args, client, DB)
-            written = os.listdir(tmp)
+            written = os.listdir(os.path.join(tmp, "compare"))
         self.assertEqual(written, ["nmt6-trino-2026-11-05T0900.csv"])
         self.assertIn(" E190 ", out.getvalue())
         self.assertIn("In both: 0. WebTrak only: 0. OpenSky only: 1.", out.getvalue())

@@ -2,10 +2,10 @@
 # Copy the logs from the Pi to this laptop and check every copy against its SHA-256 checksum.
 # Runs on the laptop; usually as `make pi-collect`.
 #
-#   sh deploy/collect.sh [--all] PI [FOLDER]
+#   sh deploy/collect.sh [--all] PI FOLDER
 #
-# PI is anything ssh accepts, such as adsb-pi.local or pi@10.42.0.1. FOLDER defaults to
-# data/collected. Files the logger is still writing to are left for the next visit, so every
+# PI is anything ssh accepts, such as adsb-pi.local or pi@10.42.0.1. FOLDER is where the logs go:
+# `make pi-collect` gives data/raw/adsb/garden (or $NOISE_DATA's), beside every other source's raw data. Files the logger is still writing to are left for the next visit, so every
 # copied file is final and its checksum never changes. The logger lists them in
 # /run/adsb-logger/open-files. They aren't found by date, because after a power cut the Pi's
 # clock can start behind. --all copies those too: use it only after
@@ -21,9 +21,9 @@ OPEN_FILES=${OPEN_FILES:-/run/adsb-logger/open-files}  # On the Pi, written by t
 
 ALL=0
 [ "${1:-}" != "--all" ] || { ALL=1; shift; }
-[ $# -ge 1 ] || { echo "usage: sh deploy/collect.sh [--all] PI [FOLDER]" >&2; exit 2; }
+[ $# -eq 2 ] || { echo "usage: sh deploy/collect.sh [--all] PI FOLDER   (usually: make pi-collect)" >&2; exit 2; }
 PI=$1
-DEST=${2:-data/collected}
+DEST=$2
 
 if command -v sha256sum >/dev/null; then sha256() { sha256sum "$@"; }
 else sha256() { shasum -a 256 "$@"; }

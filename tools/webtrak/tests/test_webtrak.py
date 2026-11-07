@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import unittest
 import urllib.error
+from unittest import mock
 
 from webtrak import __main__ as cli
 from webtrak import client, parse, quality, server, stats, store
@@ -270,7 +271,7 @@ class StoreTests(unittest.TestCase):
             store.MonitorStore(self.dir, MONITOR).lock()
 
     def test_raw_cache_round_trip(self):
-        cache = store.RawCache(self.dir)
+        cache = store.RawCache(os.path.join(self.dir, "raw"))
         self.assertIsNone(cache.get(WINTER))
         cache.put(WINTER, SAMPLE)
         self.assertTrue(cache.path(WINTER).endswith(os.path.join("raw", "2026-11-05", f"{WINTER}.txt.gz")))
@@ -548,6 +549,75 @@ class StatsTests(unittest.TestCase):
     def test_a_period_with_nothing_saved(self):
         summary = stats.summary(self.mdir, parse.utc_for_handle(WINTER + 100), parse.utc_for_handle(WINTER + 110))
         self.assertEqual((summary["coverage"]["seconds"], summary["laeq"], summary["events"]), (0, None, 0))
+
+
+class RawAndDerivedTests(unittest.TestCase):
+    """What WebTrak sends (chunks, the monitor list) goes in the raw folder; each monitor's files and
+    the app's jobs in the derived one, and every reader looks for each in its own place."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root)
+        self.raw, self.out = os.path.join(self.root, "raw"), os.path.join(self.root, "derived")
+        self.raw_site, self.out_site = os.path.join(self.raw, "lcy"), os.path.join(self.out, "lcy")
+        cache = store.RawCache(self.raw_site)
+        s = store.MonitorStore(self.out_site, MONITOR)
+        for text in [SAMPLE] + FOLLOWING:
+            chunk = parse.parse_chunk(text)
+            cache.put(chunk.handle, text)
+            s.save(chunk)
+        os.makedirs(self.raw_site, exist_ok=True)
+        with open(os.path.join(self.raw_site, "monitors.json"), "w") as f:
+            json.dump([{**MONITOR, "name": "From the raw folder"}], f)
+        self.app = server.App(self.out, "lcy", client=None, raw_root=self.raw)
+
+    def test_the_chunks_are_in_the_raw_folder_and_the_monitor_files_in_the_derived_one(self):
+        self.assertTrue(os.path.exists(os.path.join(self.raw_site, "2026-11-05", f"{WINTER}.txt.gz")))
+        self.assertFalse(os.path.exists(os.path.join(self.raw_site, "nmt106")))
+        self.assertTrue(os.path.exists(os.path.join(self.out_site, "nmt106", "state.json")))
+        self.assertTrue(os.path.isdir(os.path.join(self.out_site, "nmt106", "levels")))
+        self.assertFalse(os.path.exists(os.path.join(self.out_site, "2026-11-05")))
+
+    def test_the_app_reads_each_from_its_own_folder(self):
+        self.assertEqual(self.app.monitors()[0]["name"], "From the raw folder")
+        self.assertEqual([m["id"] for m in self.app.status()["monitors"]], ["106"])
+        # Saved chunks are found in the raw cache, so a plan to fetch them downloads nothing
+        plan = self.app.plan({"nmt": "101", "from": "2026-11-05 08:03", "to": "2026-11-05 08:04", "delay": "2"})
+        self.assertGreater(plan["to_save"], 0)
+        self.assertEqual(plan["to_download"], 0)
+
+    def test_a_job_from_the_app_is_told_both_folders(self):
+        class Proc:
+            pid = 1
+
+            def poll(self):
+                return None
+
+        with mock.patch.object(server.subprocess, "Popen", return_value=Proc()) as popen:
+            self.app.start_job({"kind": "follow", "nmt": "106"})
+        argv = popen.call_args[0][0]
+        self.assertEqual(argv[argv.index("--out") + 1], self.out)
+        self.assertEqual(argv[argv.index("--raw") + 1], self.raw)
+        self.assertTrue(os.path.isdir(os.path.join(self.out_site, "jobs")))
+
+    def test_the_monitor_list_is_saved_in_the_raw_folder(self):
+        class Client:
+            def monitors(self):
+                return [MONITOR]
+
+        other = os.path.join(self.root, "raw2", "lcy")
+        self.assertEqual(cli.load_monitors(Client(), "lcy", other), [MONITOR])
+        self.assertTrue(os.path.exists(os.path.join(other, "monitors.json")))
+
+    def test_the_quality_check_reads_the_radar_status_from_the_raw_folder(self):
+        with_raw = quality.check(os.path.join(self.out_site, "nmt106"), raw_dir=self.raw_site)
+        without = quality.check(os.path.join(self.out_site, "nmt106"))
+        self.assertNotEqual(json.dumps(with_raw, sort_keys=True, default=str), json.dumps(without, sort_keys=True, default=str))
+
+    def test_the_defaults_are_the_shared_data_folder(self):
+        self.assertEqual(os.path.dirname(os.path.dirname(cli.DEFAULT_RAW)), os.path.dirname(os.path.dirname(cli.DEFAULT_OUT)))
+        self.assertEqual(os.path.basename(os.path.dirname(cli.DEFAULT_RAW)), "raw")
+        self.assertEqual(os.path.basename(os.path.dirname(cli.DEFAULT_OUT)), "derived")
 
 
 class ServerTests(unittest.TestCase):

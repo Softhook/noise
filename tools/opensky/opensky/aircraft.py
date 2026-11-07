@@ -4,7 +4,7 @@ OpenSky's state vectors give no aircraft type, so it's looked up here in the sam
 uses on the garden Pi (https://github.com/wiedehopf/tar1090-db, csv branch), so both sources give the
 same ICAO type codes, such as E190, BCS1 or A20N.
 
-Copies are kept in data/aircraft-db/ as aircraft-<date downloaded>.csv.gz, and the newest is used.
+Copies are kept in data/raw/opensky/aircraft-db/ as aircraft-<date downloaded>.csv.gz, and the newest is used.
 If there's none, one is downloaded. `opensky aircraft --update` downloads a newer one. To reproduce
 a result, pass the copy it used (printed with every run) as --aircraft-db.
 
@@ -25,9 +25,9 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 
-from .common import OUT_DIR
+from .common import RAW_DIR
 
-DB_DIR = os.path.join(OUT_DIR, "aircraft-db")
+DB_DIR = os.path.join(RAW_DIR, "aircraft-db")
 DB_URL = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
 MIN_ROWS = 100000  # A download with fewer aircraft than this is taken to be broken
 

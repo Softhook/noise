@@ -1,7 +1,9 @@
 """OpenSky positions near NMT6 as the ADS-B logger's hourly files, so `adsb analyse` and its viewer read them unchanged.
 
-  .venv/bin/python -m opensky logs --from 2026-10-28T00:00Z --to 2026-10-29T00:00Z --out data/2026-10-28/adsb
-  python3 -m adsb analyse --config ../opensky/nmt6-site.json --logs data/2026-10-28/adsb --out data/2026-10-28/results
+  noise opensky logs --from 2026-10-28T00:00Z --to 2026-10-29T00:00Z --out data/raw/opensky/2026-10-28
+
+`noise build` then analyses them, with tools/opensky/nmt6-site.json as the site, for any
+deployment whose manifest names that folder.
 
 It uses the same whole-hour queries as `compare`, so hours already fetched come from pyopensky's
 cache. Each record has the logger's field names: heights in feet, as readsb gives them, with
@@ -22,7 +24,7 @@ import json
 import os
 
 from . import aircraft, trino
-from .common import NMT6, iso, number, parse_time
+from .common import NMT6, RAW_DIR, iso, number, parse_time
 from .compare import QUERY_BOX_M
 from .geometry import box_around
 from .passes import positions
@@ -124,14 +126,16 @@ def write_logs(recs, out_dir, begin, end, db_name="none", replace=False):
 def add_arguments(parser):
     parser.add_argument("--from", dest="begin", required=True, help="UTC, e.g. 2026-10-28T00:00Z")
     parser.add_argument("--to", dest="end", required=True)
-    parser.add_argument("--out", required=True, help="an empty folder for the hourly files")
+    parser.add_argument("--out", help="an empty folder for the hourly files (default data/raw/opensky/<FROM's UTC date>)")
     parser.add_argument("--replace", action="store_true",
                         help="replace the files of an earlier `opensky logs` run in --out (and nothing else)")
-    parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/aircraft-db)")
+    parser.add_argument("--aircraft-db", help="a saved copy of tar1090-db (default: the newest in data/raw/opensky/aircraft-db)")
 
 
 def run(args, client=None, db=None, db_path="given"):
     begin, end = parse_time(args.begin), parse_time(args.end)
+    if not getattr(args, "out", None):
+        args.out = os.path.join(RAW_DIR, iso(begin)[:10])
     if db is None:
         db_path, db = aircraft.database(getattr(args, "aircraft_db", None))
     states = trino.fetch_states(begin, end, box_around(NMT6, QUERY_BOX_M), client)

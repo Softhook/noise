@@ -1,17 +1,18 @@
 # Acoem manual: third-party copy, copyright notice prohibits reproduction
 Documents/37_Acoem_Fusion_User_Manual_DOC1130_Mar2024_FR.pdf
 
-# Python bytecode
+# Python: bytecode, the environment (make setup) and the editable install's metadata
 __pycache__/
+.venv/
+*.egg-info/
+# macOS folder files
+.DS_Store
 
-# ADS-B logger: site config holds the garden's location; logs and results stay local
+# All the data stays local: raw/ as collected or downloaded, derived/ worked out from it.
+# Set NOISE_DATA to keep it elsewhere. See tools/survey/README.md, Where the data lives.
+/data/
+
+# ADS-B logger: site config holds the garden's location; a Pi's own logs and results stay local
 tools/adsb/site.json
 tools/adsb/logs/
 tools/adsb/results/
-tools/adsb/data/
-
-# WebTrak scraper: scraped monitor data stays local
-tools/webtrak/data/
-tools/opensky/data/
-tools/opensky/.venv/
-tools/survey/data/
