@@ -1,10 +1,10 @@
 # The simulated day
 
-Make one, analyse it and open the viewer, from `tools/adsb`:
+Make one, analyse it and open the viewer, from the top of the repository:
 
 ```bash
-make demo        # or: python3 -m adsb simulate demo
-open data/demo/results/viewer.html
+make demo        # or: noise adsb simulate demo --out data/derived/adsb/demo
+open data/derived/adsb/demo/results/viewer.html
 ```
 
 The simulated day isn't real data, though it includes the main kinds of error real data has. Its fleet of E190s, E190-E2s, E195-E2s, A220-100s and A320neos flies straight paths with no wind, turbulence or speed changes. Arrivals use 5.5°, or 4.49° for the A320neo, and the garden is 500 m north of the RWY 27 centreline, 4 km from the threshold. RWY 27 is in use until 13:15, then RWY 09. It includes overflights, two helicopter passes and some deliberate problems:

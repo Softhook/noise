@@ -1,0 +1,43 @@
+# The Thamesmead aircraft noise survey's tools, as one project with one environment and one
+# command, `noise`. Install it with `make setup`. It must be an editable install (pip install -e):
+# the tools find data/, the deployments and the fleet table beside their code, so a copy in
+# site-packages wouldn't find them, and `noise` refuses to run from one. Exact versions are in
+# requirements.lock (make lock). The London City approach noise model in the repository's top folder
+# (index.html, js/) is a separate web page and isn't part of this.
+#
+# Each tool keeps its own package, so the ADS-B logger can still be copied to the Pi alone: the Pi
+# side (tools/adsb) uses only Python's standard library, and so does everything but OpenSky.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "noise-survey"
+version = "0.1.0"
+description = "Aircraft noise survey at Thamesmead: ADS-B, OpenSky, WebTrak and the Fusion, joined in the survey app"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# OpenSky's research database (Trino). Everything else is standard library only.
+opensky = ["pyopensky>=2.16,<3"]
+
+[project.scripts]
+noise = "noise.cli:main"
+
+[tool.setuptools]
+packages = ["noise", "adsb", "opensky", "webtrak", "survey", "survey.adapters", "fusion"]
+
+[tool.setuptools.package-dir]
+noise = "tools/noise"
+fusion = "tools/fusion/fusion"
+adsb = "tools/adsb/adsb"
+opensky = "tools/opensky/opensky"
+webtrak = "tools/webtrak/webtrak"
+survey = "tools/survey/survey"
+
+[tool.setuptools.package-data]
+adsb = ["*.html"]
+webtrak = ["ui.html"]
+survey = ["ui/*"]

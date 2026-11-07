@@ -9,8 +9,8 @@ We don't keep readsb's track files on our own Pi: they'd be a second copy of the
 ## Converting
 
 ```bash
-python3 -m adsb traces --config site.json --out OUT/adsb --source "WHERE FROM" INPUT [INPUT ...]
-python3 -m adsb analyse --config site.json --logs OUT/adsb --out OUT/results --weather eglc.csv
+noise adsb traces --config site.json --out data/raw/adsblol/DAY --source "WHERE FROM" INPUT [INPUT ...]
+noise adsb analyse --config site.json --logs data/raw/adsblol/DAY --out RESULTS --weather eglc.csv   # or let make build do it
 ```
 
 `INPUT` is any of these:
@@ -30,12 +30,12 @@ Each line has the logger's field names. `seen_pos` is 0, `trace_flags` holds rea
 [adsb.lol](https://adsb.lol) publishes each day's tracks from its whole network as GitHub releases, a day or so later, in one repository per year: [adsblol/globe_history_2026](https://github.com/adsblol/globe_history_2026). Each day comes as a split tar archive (`.tar.aa`, `.tar.ab`), with separate `prod` and `staging` releases. The repository's README says to use `staging` if `prod` is much smaller. Each archive is a copy of readsb's `globe_history` folder for that day. A day is about 4 GB (5 November 2026), because it covers the world, so download only the days you need. The data is under the [ODbL](http://opendatacommons.org/licenses/odbl/1.0/), so credit adsb.lol in anything published from it.
 
 ```bash
-gh release download v2026.11.05-planes-readsb-prod-0 --repo adsblol/globe_history_2026 --dir data/adsblol/raw
-python3 -m adsb traces --config site.json --out data/adsblol/2026-11-05/adsb \
-    --source "adsb.lol prod 2026-11-05" data/adsblol/raw/v2026.11.05-planes-readsb-prod-0.tar.*
+gh release download v2026.11.05-planes-readsb-prod-0 --repo adsblol/globe_history_2026 --dir ~/Downloads/adsblol
+noise adsb traces --config tools/adsb/site.json --out data/raw/adsblol/2026-11-05 \
+    --source "adsb.lol prod 2026-11-05" ~/Downloads/adsblol/v2026.11.05-planes-readsb-prod-0.tar.*
 ```
 
-The conversion reads the whole archive, which takes a while for a day of the world. Once converted, the raw archive can be deleted.
+The conversion reads the whole archive, which takes a while for a day of the world. Once converted, the archive can be deleted: the hourly files in `data/raw/adsblol/` are what's kept, as the raw data, and a deployment's manifest names them like the logger's (`"adsblol": {"adapter": "adsb", "logs": "raw/adsblol/2026-11-05", "site": ...}`), so `make build` analyses them.
 
 What it's good for:
 

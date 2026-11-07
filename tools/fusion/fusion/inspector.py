@@ -4,11 +4,11 @@
 This finds evidence for decoding the format; it isn't a decoder. Every result is a lead to
 test against a controlled recording. See Documents/Fusion_Data_Format_Reverse_Engineering.md.
 
-  fusion_inspect.py survey   SESSION [--out report.json]
-  fusion_inspect.py strings  FILE [--min 4]
-  fusion_inspect.py level    FILE --db 94.0 [--tol 0.5]
-  fusion_inspect.py time     FILE --at 2026-11-05T14:30:00 [--window-hours 14]
-  fusion_inspect.py compare  SESSION_A SESSION_B
+  noise fusion survey   SESSION [--out report.json]
+  noise fusion strings  FILE [--min 4]
+  noise fusion level    FILE --db 94.0 [--tol 0.5]
+  noise fusion time     FILE --at 2026-11-05T14:30:00 [--window-hours 14]
+  noise fusion compare  SESSION_A SESSION_B
 
 Add --json before the command for machine-readable output. Files are only ever opened for reading.
 """
@@ -344,7 +344,7 @@ def print_compare(report):
 
 
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Inspect Fusion session folders, read-only.")
+    parser = argparse.ArgumentParser(prog="noise fusion", description="Inspect Fusion session folders, read-only.")
     parser.add_argument("--json", action="store_true", help="print JSON")
     commands = parser.add_subparsers(dest="command", required=True)
 

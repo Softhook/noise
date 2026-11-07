@@ -1,6 +1,6 @@
 # Setting up the Pi
 
-The Pi runs headless: no screen or keyboard, ever. You set it up at home over Wi-Fi, where it has internet, and run everything from a laptop with `make pi-*` commands in `tools/adsb`. The garden has no network, so there the Pi makes its own Wi-Fi hotspot. A phone can join it to see the status page, and a laptop can join it to copy the logs.
+The Pi runs headless: no screen or keyboard, ever. You set it up at home over Wi-Fi, where it has internet, and run everything from a laptop with `make pi-*` commands, at the top of the repository. The garden has no network, so there the Pi makes its own Wi-Fi hotspot. A phone can join it to see the status page, and a laptop can join it to copy the logs.
 
 These steps come from the project documentation and haven't yet been run on our Pi.
 
@@ -94,7 +94,7 @@ To make resets rare:
 
 ## 4. The logger, GPS clock and hotspot (at home)
 
-From `tools/adsb` on the laptop:
+From the top of the repository, on the laptop:
 
 ```bash
 make pi-deploy ARGS="--watchdog --gps --hotspot"
@@ -160,7 +160,7 @@ The page is written to `/run/adsb-status`, which is in memory, so it costs no di
 ## On each site visit
 
 1. Join the Pi's Wi-Fi (`adsb-pi`) with a phone, and open `http://10.42.0.1/adsb-status/`. For a quick check, that's all you need.
-2. To collect data, join it with the laptop and, from `tools/adsb`:
+2. To collect data, join it with the laptop and, from the top of the repository:
 
    ```bash
    make pi-status PI=10.42.0.1
@@ -190,12 +190,12 @@ After a power cut the Pi's clock starts from the time it last saved, which is be
 
 ### Collecting the logs
 
-`make pi-collect` copies the logs to `data/collected/` on the laptop (git ignores it; choose another folder with `COLLECT_DIR=...`). It does the following:
+`make pi-collect` copies the logs to `data/raw/adsb/garden/` on the laptop, with the survey's other raw data (git ignores it; choose another folder with `COLLECT_DIR=...`). It does the following:
 
 - checksums the files on the Pi
 - copies only the new ones
 - checks every copy against the Pi's SHA-256 checksum
-- adds the checksums to `data/collected/SHA256SUMS`, which then lists every file collected so far
+- adds the checksums to `collected/SHA256SUMS`, which then lists every file collected so far
 
 It prints `OK` or `FAILED`.
 
@@ -205,5 +205,5 @@ At the end of the survey, stop the logger first so its last files are closed, th
 
 ```bash
 make pi-ssh PI=10.42.0.1          # then: sudo systemctl stop adsb-logger
-sh deploy/collect.sh --all 10.42.0.1
+sh tools/adsb/deploy/collect.sh --all 10.42.0.1 data/raw/adsb/garden
 ```

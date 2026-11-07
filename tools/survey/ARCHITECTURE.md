@@ -2,7 +2,7 @@
 
 The Thamesmead survey has several data sources that each know part of the story: the Fusion in the garden measures the sound, the ADS-B logger in the garden records the aircraft, WebTrak gives NMT6's levels and the airport's radar, adsb.lol's public archive gives other receivers' ADS-B, and the airport may give us its own records. This document describes how they fit together so that any source can be added or removed without changing the rest.
 
-**Status:** part of Phase 0 is built (see [README.md](README.md)): the manifest, the common tables, the `adsb` and `webtrak` adapters, closest approaches, `link`, the fleet registry with its register lookups (`python3 -m survey fleet`), the first part of `resolve`, and the survey app (`python3 -m survey serve`), which shows every source together. `checks`, `match`, the rest of `resolve` and the other lookups are still to do. OpenSky now stands in for the Pi until the Pi has real data.
+What's built and what's still to do is in the [README](README.md#status); this document is the design.
 
 ## Why
 
@@ -36,20 +36,21 @@ So the design has one rule: **each source plugs in through an adapter, and the c
                                         └───────────┘
 ```
 
-1. **Collectors** are the existing tools: [`tools/adsb`](../adsb/README.md), [`tools/webtrak`](../webtrak/README.md) and [`tools/fusion`](../fusion). They don't know about each other or about this package. The Pi side stays standard-library only and is never changed for the sake of the core.
-   - [adsb.lol's daily archive](../adsb/docs/traces.md), not shown in the diagram, comes in through `tools/adsb` too. `adsb traces` turns its track files into logs, and `adsb analyse` turns those into flights and positions, as for our logger. The same `adsb` adapter then reads it, with the source named in the manifest (`adsb` or `adsblol`).
+1. **Collectors** are the existing tools: [`tools/adsb`](../adsb/README.md), [`tools/webtrak`](../webtrak/README.md) and [`tools/fusion`](../fusion). They don't know about each other or about this package, but on the laptop they all save into one shared data folder, `data/` at the top of the repository, which belongs to none of them: `raw/` for what they collect or download, `derived/` for what's worked out from it ([README](README.md#where-the-data-lives)). The Pi side stays standard-library only and is never changed for the sake of the core.
+   - [adsb.lol's daily archive](../adsb/docs/traces.md), not shown in the diagram, comes in through `tools/adsb` too. `adsb traces` turns its track files into logs, and `adsb analyse` turns those into flights and positions, as for our logger; the build runs the analysis (see Adapters). The same `adsb` adapter then reads it, with the source named in the manifest (`adsb` or `adsblol`).
    - [OpenSky's research database](../opensky/README.md), also not shown, comes in the same way. `opensky logs` turns its Trino state vectors into logs, with each aircraft's type from tar1090-db, and `adsb analyse` does the rest. Unlike adsb.lol, it can be queried for any window rather than downloaded a day at a time, and it gives positions about once a second. It only covers the box it was queried for: today, 5 km either side of NMT6.
-2. **Adapters** turn one source's own output into the [common tables](#common-tables). There is one adapter per source. Removing a source means removing it from the deployment's manifest.
+2. **Adapters** turn one source's own output into the [common tables](#common-tables). There is one adapter per source. Removing a source means removing it from the deployment's manifest. An adapter may first make derived files from its source's raw ones: the ADS-B adapter runs `adsb analyse` on the deployment's window of the raw logs, as a separate program, into the deployment's `analysis/` folder, and only when what that reads has changed, by content. So one `noise build` goes from raw data to the common tables, and never uses a stale analysis.
 3. **The core** links flights across sources, matches noise events to them and settles each one's identity, using only the common tables. It never imports `adsb`, `webtrak` or `fusion`.
 4. **Lookups** answer a question about one flight when the core can't settle it from what it has. They are optional, limited by a budget, and their answers are kept.
-5. **Products** are the analyses, reports and viewers. They read the core's outputs, not the sources. The main one is the **survey app** (`python3 -m survey serve`). For any day of a deployment, it shows every source's tracks and heights around a chosen receptor, and the receptor's levels and events, with each pass linked across sources. It's a local web app on the pattern of WebTrak's own, so it can choose the deployment, day and sources itself. Each collector keeps its own downloads (the WebTrak app, `make viewer` for OpenSky).
+5. **Products** are the analyses, reports and viewers. They read the core's outputs, not the sources. The main one is the **survey app** (`noise serve`). For any day of a deployment, it shows every source's tracks and heights around a chosen receptor, and the receptor's levels and events, with each pass linked across sources. It's a local web app on the pattern of WebTrak's own, so it can choose the deployment, day and sources itself. Each collector still does its own downloading (the WebTrak app, `make opensky`, `make pi-collect`), into `data/raw/`.
 
 ### Dependency rules
 
-- Only an adapter or lookup may import its source's package or read its files.
+- Only an adapter or lookup may import its source's package, run its program or read its files. The ADS-B adapter runs `adsb analyse` as a separate process rather than importing it.
+- Raw data is only ever read. Everything an adapter or the core writes goes in `data/derived/`, and can be made again from `data/raw/`.
 - The core has its own geometry module rather than importing `adsb.geometry`, so the Pi's code can change without touching the core, and the other way round.
 - Source-specific physics stays in its adapter or collector. The QNH and temperature correction of ADS-B heights belongs to `adsb analyse`, for example. The core takes heights as given, along with what kind of height each one is.
-- Everything is standard-library Python, like the collectors.
+- The survey is standard-library Python, like the collectors except OpenSky's (pyopensky). They're one project (`pyproject.toml`) with one environment, but each stays its own package, so the Pi still gets `tools/adsb` alone.
 
 ## Common tables
 
@@ -101,7 +102,7 @@ An aircraft's type is fixed by its registration, so the type is settled once per
 
 **Built:** `resolve` gives each pass a registration (from its highest-ranked flight that has one) and a type:
 
-1. **The fleet registry** (`registry/fleet.csv`, kept in git), by registration. Each row is the airframe's entry in its country's register, filled by `python3 -m survey fleet` for the registers that can be asked online (the UK's G-INFO and Switzerland's BAZL, searched; Ireland's and Luxembourg's published files, downloaded; `survey/registers.py`), or by a person (`manual`) for the others. LCY's fleet is a few dozen airframes that come back day after day, so once an airframe is in the registry it never needs looking up again. This is what ends the dependence on WebTrak and on tar1090-db.
+1. **The fleet registry** (`registry/fleet.csv`, kept in git), by registration. Each row is the airframe's entry in its country's register, filled by `noise fleet` for the registers that can be asked online (the UK's G-INFO and Switzerland's BAZL, searched; Ireland's and Luxembourg's published files, downloaded; `survey/registers.py`), or by a person (`manual`) for the others. LCY's fleet is a few dozen airframes that come back day after day, so once an airframe is in the registry it never needs looking up again. This is what ends the dependence on WebTrak and on tar1090-db.
 2. Otherwise, **the highest-ranked source's type**: tar1090-db's, through the ADS-B sources, before WebTrak's.
 
 It writes `identity`: `type_source` (`register:uk`, `register:ch`, `manual`, or the source's name), `fleet` (why the fleet registry didn't settle the type: no registration, not in the table, not found, or no type), and `disagree`, listing any source that gives another type and any transponder address other than the register's.
@@ -130,7 +131,7 @@ The registers settled the first watch-list pair on 6 November 2026. Helvetic fli
 
 ### Outputs
 
-Written to `data/<deployment>/` (git-ignored):
+Written to `data/derived/deployments/<deployment>/` (git-ignored), beside `analysis/<source>/`, each ADS-B source's `adsb analyse` results:
 
 | File | Contents |
 |---|---|
@@ -174,7 +175,7 @@ The budget is the guard against drawing attention to the scraper: Phase 2 might 
 
 ## Manifest
 
-One JSON file per deployment, in `tools/deployments/`, kept in git. It names the period, the receptors, which sources to use and how, and the lookup policy. Every command takes its window and paths from it.
+One JSON file per deployment, in `tools/survey/deployments/`, kept in git. It names the period, the receptors, which sources to use and how, and the lookup policy. Every command takes its window and paths from it. Data paths are relative to the data folder (`data/`, or `NOISE_DATA`), so a manifest doesn't change when the data moves; config paths such as `site` are relative to the manifest.
 
 ```json
 {
@@ -186,12 +187,14 @@ One JSON file per deployment, in `tools/deployments/`, kept in git. It names the
   "receptors": {
     "nmt6": {"name": "NMT6, St Pauls Church, Thamesmead", "label": "NMT6", "lat": 51.50535, "lon": 0.11075,
              "ground_elevation_m": 3.0, "mic_height_m": 3.0, "public": true},
-    "garden": {"config": "../adsb/site.json", "name": "Garden", "label": "Garden"}
+    "garden": {"config": "../../adsb/site.json", "name": "Garden", "label": "Garden"}
   },
   "sources": {
-    "adsb": {"adapter": "adsb", "results": "../adsb/data/phase0/results", "logs": "../adsb/data/phase0/logs"},
-    "opensky": {"adapter": "adsb", "results": "../opensky/data/phase0/results", "logs": "../opensky/data/phase0/adsb"},
-    "webtrak": {"adapter": "webtrak", "tool": "../webtrak", "site_dir": "../webtrak/data/lcy", "monitors": {"nmt6": "106"}},
+    "adsb": {"adapter": "adsb", "logs": "raw/adsb/garden", "site": "../../adsb/site.json",
+             "weather": "raw/metars/eglc-2026-11-20.csv"},
+    "opensky": {"adapter": "adsb", "logs": "raw/opensky/2026-11-20", "site": "../../opensky/nmt6-site.json",
+                "weather": "raw/metars/eglc-2026-11-20.csv"},
+    "webtrak": {"adapter": "webtrak", "chunks": "raw/webtrak/lcy", "monitors": {"nmt6": "106"}},
     "fusion": null,
     "airport": null
   }
@@ -208,19 +211,22 @@ Still to be built: WebTrak and the airport as lookups only (asked about single p
 ## Layout
 
 ```text
+pyproject.toml  Makefile              one project, one environment (.venv), one command (noise)
+data/                                 git-ignored: raw/ and derived/ (the survey README describes it)
 tools/
-  adsb/  webtrak/  fusion/            collectors, unchanged
-  deployments/<name>.json             manifests
+  noise/cli.py                        the noise command: build, serve, fleet, and each tool's own commands
+  adsb/  opensky/  webtrak/  fusion/  collectors, each its own package; none keeps data of its own
   survey/
     ARCHITECTURE.md                   this file
+    deployments/<name>.json           manifests; a source's paths are relative to data/
     survey/
-      __main__.py                     build | serve (later: lookup | check)
+      __main__.py                     build | serve | fleet (later: lookup | check)
       manifest.py                     reads a manifest, including private receptors
       schema.py                       table definitions, reading, writing and validation
       geometry.py                     local coordinates, closest approach to each receptor
       adapters/__init__.py            the adapter interface and registry (ADAPTERS)
-      adapters/adsb.py                reads adsb analyse's flights.csv and positions.csv (--all-positions), for
-                                      our logger, adsb.lol or OpenSky (source from the manifest)
+      adapters/adsb.py                runs adsb analyse (--all-positions) on the raw logs when they change, and
+                                      reads its flights.csv and positions.csv, for our logger, adsb.lol or OpenSky
       adapters/webtrak.py             reads the raw chunk cache with webtrak.parse, within the windows
       adapters/fusion.py              reads the Fusion export, once its format is settled
       adapters/airport.py             reads airport records, once we know their format
@@ -240,10 +246,10 @@ tools/
 Commands:
 
 ```bash
-python3 -m survey build  --manifest ../deployments/2026-11-phase0.json   # adapters, link (later match, resolve, checks)
-python3 -m survey serve                                                   # the survey app, at http://127.0.0.1:8766
-python3 -m survey check  --manifest ...                                   # checks only, on an existing build
-python3 -m survey lookup --manifest ... --pass 20261105T0812-GLCYN        # settle one pass by hand
+noise build 2026-11-phase0                              # analysis if out of date, adapters, link, resolve (later match, checks)
+noise serve                                             # the survey app, at http://127.0.0.1:8766
+noise check  2026-11-phase0                             # to do: checks only, on an existing build
+noise lookup 2026-11-phase0 --pass 20261105T0812-GLCYN  # to do: settle one pass by hand
 ```
 
 ## Adding or removing a source

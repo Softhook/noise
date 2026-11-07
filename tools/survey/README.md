@@ -8,12 +8,16 @@ The survey app shows what each source saw on a day, on one page:
 
 It lays out the tracks, heights and noise around a chosen receptor (NMT6, or the garden), and links the same aircraft across sources. The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Status
+
+Part of Phase 0 is built: the manifest, the common tables, the `adsb` and `webtrak` adapters, closest approaches, `link`, the fleet registry with its register lookups (`noise fleet`), the first part of `resolve`, and the survey app (`noise serve`), which shows every source together. `checks`, `match`, the rest of `resolve` and the other lookups are still to do. OpenSky now stands in for the Pi until the Pi has real data. The design, including the parts still to build, is in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Viewing a day
 
-From `tools/survey`:
+From the top of the repository (`make setup` once first):
 
 ```bash
-make build      # once, and again after fetching more data
+make build      # once, and again after fetching more data: analyses what changed, then builds
 make serve      # opens http://127.0.0.1:8766
 ```
 
@@ -28,26 +32,52 @@ Pick a **deployment** and **day**, a **receptor**, and which **sources** to show
   - For WebTrak, the area is `max_km` around any receptor, at any height.
   - *When* a source has data comes from the period in `SOURCE.txt`, for OpenSky and adsb.lol. For the garden's logger, it comes from its health log (give `logs` in the manifest), which shows each 5 minutes it was running, connected, receiving and with its clock synchronised. Without a health log, it's `adsb analyse`'s time covered, less its gaps of over 30 minutes. A shorter outage can then look like a miss.
 
-The app only listens on this computer, and only reads built deployments. **Rebuild** on the page reruns the build after you've fetched more data.
+The app only listens on this computer, and only reads built deployments. **Rebuild** on the page reruns the build after you've fetched more data. It runs in the background, since it may analyse logs for minutes, and the page shows its progress and, if it fails, why. A build that `make build` is already running is left to finish.
+
+## Where the data lives
+
+Every tool keeps its data in one local folder, `data/` at the top of the repository, which git ignores. It belongs to no tool, the survey included: the tools stay separate programs, and the survey reads the data from there like any other. To keep it somewhere else, such as an external disk once the WebTrak cache and adsb.lol days grow, set `NOISE_DATA` to that folder; every tool, the Makefile and the Pi's collect script follow it.
+
+This is the one description of it; the other READMEs point here. It's split by one rule. **`raw/`** is what was collected or downloaded, kept as it came. Nothing overwrites it: `make opensky` refuses a period already fetched unless you give `REPLACE=1`, and `make pi-collect` never overwrites a file it has collected. adsb.lol's day archive is converted to hourly logs and then deleted, so those logs are kept in `raw/` as its record. **`derived/`** is everything worked out from it, which can be deleted and made again with `make build` (and, for the demo and WebTrak's per-monitor files, their own commands).
+
+```text
+data/
+├── raw/
+│   ├── adsb/garden/          the garden logger's logs, as collected from the Pi (make pi-collect)
+│   ├── adsblol/<day>/        adsb.lol days, converted to hourly logs by adsb traces
+│   ├── opensky/<period>/     OpenSky's positions as hourly logs (make opensky), and aircraft-db/
+│   ├── metars/               EGLC's METARs, a file per period (make opensky, or adsb metars)
+│   └── webtrak/lcy/          WebTrak's chunks, by UTC day, and its monitor list
+└── derived/
+    ├── deployments/<name>/   a deployment's build: analysis/<source>/ (adsb analyse, and its viewer.html),
+    │                         common/ (the tables), build.json
+    ├── webtrak/lcy/          each monitor's events, levels and radar, and the WebTrak app's jobs
+    ├── opensky/compare/      opensky compare's reports
+    └── adsb/                 the simulated demo, and the dev logger's logs and results
+```
+
+Each tool writes there by default, so there's nothing to set. Moving the survey to another computer means copying `data/raw/` (and `derived/`, to save rebuilding), plus `tools/adsb/site.json` for the garden.
 
 ## Getting data in
 
-Each source is fetched with its own tool, and the survey reads what that tool saves:
+Each source is fetched with its own tool, into `data/raw/`. A deployment's manifest names the raw files, and `make build` does the rest: for an ADS-B source, it runs `adsb analyse --all-positions` on the deployment's window of its logs (an hour either side, so flights at the edges are whole). It gives `analyse` only the files it needs for that window, and runs it again only when one of those files, the site config, the weather, the adsb code or the Python version has changed, by content. So a logs folder that grows all survey, like the garden's, never makes an earlier deployment rebuild; copying the data to another folder or computer doesn't either; and a rebuild that changes nothing takes a second.
 
 | Source | Fetch it with | Manifest entry |
 |---|---|---|
-| Garden ADS-B | `make pi-collect`, then `adsb analyse --all-positions` (in `tools/adsb`) | `"adsb": {"adapter": "adsb", "results": ..., "logs": ...}` (`logs` for its health log) |
-| OpenSky | `make viewer FROM=... TO=...` (in `tools/opensky`) | `"opensky": {"adapter": "adsb", "results": ..., "logs": ...}` |
-| adsb.lol | `adsb traces`, then `adsb analyse --all-positions` | `"adsblol": {"adapter": "adsb", "results": ...}` |
-| WebTrak | `python3 -m webtrak serve` or `fetch` (in `tools/webtrak`) | `"webtrak": {"adapter": "webtrak", "tool": "../webtrak", "site_dir": ..., "monitors": {"nmt6": "106"}}` |
+| Garden ADS-B | `make pi-collect` | `"adsb": {"adapter": "adsb", "logs": "raw/adsb/garden", "site": "../../adsb/site.json", "weather": "raw/metars/eglc-....csv"}` |
+| OpenSky | `make opensky FROM=... TO=...` | `"opensky": {"adapter": "adsb", "logs": "raw/opensky/2026-11-05", "site": "../../opensky/nmt6-site.json", "weather": "raw/metars/eglc-2026-11-05.csv"}` |
+| adsb.lol | `noise adsb traces` ([how](../adsb/docs/traces.md)) | `"adsblol": {"adapter": "adsb", "logs": "raw/adsblol/2026-11-05", "site": ...}` |
+| WebTrak | `make webtrak` (its download app), or `noise webtrak fetch` | `"webtrak": {"adapter": "webtrak", "chunks": "raw/webtrak/lcy", "monitors": {"nmt6": "106"}}` |
 
-A **deployment** is a manifest in [`tools/deployments/`](../deployments). It names the period, the receptors and the sources, and it's kept in git. Copy one to add a period, then run `make build DEPLOYMENT=<name>`. Paths in a manifest are relative to it, and a source set to `null` is turned off.
+`weather` is optional; without it, heights aren't corrected for QNH. An ADS-B source can give `"results"` instead of `site`, for an analysis run by hand, and then nothing is run for it.
 
-The garden's location is private, so a manifest never holds it. Instead, the garden receptor points at the git-ignored `tools/adsb/site.json`. Until that file exists, the garden is left out, with a warning.
+A **deployment** is a manifest in [`deployments/`](deployments). It names the period, the receptors and the sources, and it's kept in git. Copy one to add a period, then run `make build DEPLOYMENT=<name>` (or `noise build <name>`). Data paths (`logs`, `weather`, `chunks`) are relative to the data folder, so a manifest is unchanged when the data moves; other paths (a `site`, the garden's `config`) are relative to the manifest. A source set to `null` is turned off.
+
+The garden's location is private, so a manifest never holds it. Instead, the garden receptor, and the garden logger's `site`, point at the git-ignored `tools/adsb/site.json` (`../../adsb/site.json` from a manifest). Until that file exists, the garden and its logger are left out, with a warning.
 
 Pass ids are dated by the closest approach to one receptor: the manifest's `pass_receptor`, or else its first public receptor, so they come out the same on a computer without the garden's `site.json`.
 
-Built tables go in `data/<deployment>/common/` (ignored by git): `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen` and `identity`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
+Built tables go in `data/derived/deployments/<deployment>/common/`: `receptors`, `flights`, `positions`, `noise_events`, `levels`, `coverage`, `approaches`, `passes`, `unseen` and `identity`, as CSV. `positions` and `levels`, which have a row for every second or so, are folders with a file per UTC day (`positions/2026-11-05.csv`), so the app reads only the day it shows, however long the deployment. A flight's positions all go in the file for the day it started. [ARCHITECTURE.md](ARCHITECTURE.md#common-tables) describes them. `build.json` has the counts and warnings. A build writes the tables into a new folder and then swaps it in, so the app, if it's open, never reads a mixture of two builds.
 
 ## Aircraft types
 
@@ -59,7 +89,7 @@ make fleet      # look up any registration not yet in the table (online)
 make build      # again, to use what it found
 ```
 
-`make fleet` (`python3 -m survey fleet`) checks the registrations of flights that came within 3 km of a receptor and below 3,000 ft (`--km`, `--ft`), as the passes table starts with. It asks only about those not already in the table, and those that were `not found` 30 days or more ago, one request a second. `--dry-run` lists what it would ask, `--recheck` asks again, and `python3 -m survey fleet G-LCYN HB-AZH` checks just those.
+`make fleet` (`noise fleet`) checks the registrations of flights that came within 3 km of a receptor and below 3,000 ft (`--km`, `--ft`), as the passes table starts with. It asks only about those not already in the table, and those that were `not found` 30 days or more ago, one request a second. `--dry-run` lists what it would ask, `--recheck` asks again, and `noise fleet G-LCYN HB-AZH` checks just those.
 
 Registers it can ask, in `survey/registers.py`:
 
@@ -86,30 +116,30 @@ To add a country, write a function in `survey/registers.py` that takes a registr
 
 | Module | Does |
 |---|---|
-| `survey/manifest.py` | Reads a manifest: window, receptors (including private ones), sources |
+| `survey/manifest.py` | Finds and reads a manifest: window, receptors (including private ones), sources; where the data folder is |
 | `survey/adapters/__init__.py` | The adapter interface, and the registry of adapters by name |
-| `survey/adapters/adsb.py` | Reads `adsb analyse` results: our logger, adsb.lol and OpenSky |
+| `survey/adapters/adsb.py` | Runs `adsb analyse` on an ADS-B source's raw logs when they've changed, and reads its results: our logger, adsb.lol and OpenSky |
 | `survey/adapters/webtrak.py` | Reads WebTrak's raw chunk cache through `tools/webtrak`'s parser: radar, events, 1 s levels |
 | `survey/schema.py` | The common tables' columns, the daily files for positions and levels, and reading and writing them so a reader never sees half a build |
 | `survey/geometry.py` | Local coordinates, closest approach with `at_track_end` (at an edge of the data), the path angle there, and positions along a track |
 | `survey/explain.py` | Why a source has no flight in a pass: no data then, outside its area, above its ceiling, or unexplained |
 | `survey/link.py` | Joins flights from different sources into passes, by registration, or by comparing their tracks when there's no registration; ranks the sources |
 | `survey/resolve.py` | Each pass's registration and type: the fleet table's first, then the sources', with any disagreement |
-| `survey/fleet.py` | `python3 -m survey fleet`: the fleet table, and which registrations to look up |
+| `survey/fleet.py` | `noise fleet`: the fleet table, and which registrations to look up |
 | `survey/registers.py` | Looking an aircraft up in its country's register online: the UK's and Switzerland's searched, Ireland's and Luxembourg's downloaded |
-| `survey/build.py` | `python3 -m survey build`: adapters, approaches, linking, resolving types, the tables, as a list of steps |
+| `survey/build.py` | `noise build`: each source's prepare step and adapter, approaches, linking, resolving types, the tables, as a list of steps |
 | `survey/app.py` | What the page asks for: the deployments, a day, a rebuild; each deployment's small tables, read once and kept until the next build, and its positions and levels read a day at a time |
-| `survey/server.py` | `python3 -m survey serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |
+| `survey/server.py` | `noise serve`: HTTP only, local only, routes to `app.py` and serves `ui/` |
 | `survey/ui/` | The page: `index.html` and `style.css`, `common.js` (state and helpers), `map.js` (plan and profile), `timeline.js`, `passes.js` (table and detail), `types.js` (by aircraft type), `main.js` (loading and start-up) |
 
 ### Extending it
 
-- **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS`, `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Positions and levels can be generators, so a long deployment's rows are read as the build takes them rather than all at once. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `link.SOURCE_RANK` if it should date passes ahead of others, and a colour and name in `ui/common.js`.
+- **A new kind of source** (the Fusion, airport records): a module in `survey/adapters/` with `PATHS` (its data paths), optionally `MANIFEST_PATHS` and `prepare(name, spec, context, out_dir, log, warnings)`, a step that works out derived files from raw ones for the window (as the ADS-B adapter runs `adsb analyse`), `read(name, spec, context, warnings)` returning any of the source tables (`flights`, `positions`, `noise_events`, `levels`, `coverage`), and `limits(spec, context)`. Positions and levels can be generators, so a long deployment's rows are read as the build takes them rather than all at once. Add it to `ADAPTERS` in `survey/adapters/__init__.py`. Its manifest entry then names it as its `adapter`. Give it a place in `link.SOURCE_RANK` if it should date passes ahead of others, and a colour and name in `ui/common.js`.
 - **A new core step** (`match`, `checks`): a module of its own, called from `build.build()` between the existing steps, with its table added to `schema.TABLES`.
 - **A new request for the page:** a method on `app.App`, and a line in `server.py`'s `GET_ROUTES` or `POST_ROUTES`.
 - **A new panel on the page:** a script in `ui/`, loaded in `index.html` before `main.js`, and a call from `render()` in `main.js`.
 
-`make test` runs the tests on made-up data, with no network.
+`make test` (at the top of the repository) runs every tool's tests on made-up data, with no network, including the `noise` command's and a check that every tool agrees where the data folder is.
 
 ## First results: 5 November 2026
 

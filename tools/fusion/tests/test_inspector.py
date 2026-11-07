@@ -1,6 +1,6 @@
-"""Tests for fusion_inspect, using made-up files. They don't show anything about the real format.
+"""Tests for fusion.inspector, using made-up files. They don't show anything about the real format.
 
-Run from the project folder with: python3 -m unittest discover tools/fusion
+Run with `make test`, or from tools/fusion with: python3 -m unittest discover tests
 """
 
 import datetime as dt
@@ -11,7 +11,7 @@ import struct
 import tempfile
 import unittest
 
-import fusion_inspect as fi
+from fusion import inspector as fi
 
 START = dt.datetime(2026, 11, 5, 14, 30, 0)
 UNIX_START = int((START - dt.datetime(1970, 1, 1)).total_seconds())

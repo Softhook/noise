@@ -20,25 +20,26 @@ Afterwards, on a laptop:
 logs + EGLC METARs -> adsb analyse -> flights.csv, positions.csv, summary.txt, viewer.html
 ```
 
-Everything is one Python package, `adsb`, with one command line:
+Everything is one Python package, `adsb`, with one command line. On the laptop it's part of the survey's project, so after `make setup` (at the top of the repository) it's `noise adsb ...`, from any folder:
 
 ```bash
-python3 -m adsb log       --config site.json      # on the Pi, run by systemd
-python3 -m adsb status                             # on the Pi, on each site visit
-python3 -m adsb analyse   --config site.json --logs LOGS --out RESULTS --weather eglc.csv
-python3 -m adsb simulate  demo | logs | serve
-python3 -m adsb traces    --config site.json --out OUT --source NAME INPUT...   # readsb track files to logs
+adsb log       --config site.json      # on the Pi, run by systemd
+adsb status                             # on the Pi, on each site visit
+noise adsb analyse   --config site.json --logs LOGS --out RESULTS --weather eglc.csv
+noise adsb metars    --from 2026-11-05 --to 2026-11-06 --out data/raw/metars/eglc-2026-11-05.csv
+noise adsb simulate  demo | logs | serve
+noise adsb traces    --config site.json --out OUT --source NAME INPUT...   # readsb track files to logs
 ```
 
-Run it from `tools/adsb`, or with `tools/adsb` on `PYTHONPATH`. On the Pi, `deploy/install.sh` installs everything and a plain `adsb` command; see [Setting up the Pi](docs/pi-setup.md).
+You rarely need `analyse` by hand: `make build` runs it on each deployment's ADS-B sources, from their raw logs, whenever they've changed. On the Pi, `deploy/install.sh` installs everything and a plain `adsb` command; see [Setting up the Pi](docs/pi-setup.md). The Pi gets only this package, which uses only the standard library.
 
-The Pi runs headless, and it's run from a laptop in `tools/adsb`. At the garden, the laptop joins the Pi's own Wi-Fi hotspot and uses `PI=10.42.0.1`:
+The Pi runs headless, and it's run from a laptop, with `make` at the top of the repository. At the garden, the laptop joins the Pi's own Wi-Fi hotspot and uses `PI=10.42.0.1`:
 
 ```bash
 make pi-deploy     # copy the code to the Pi and install or update it
 make pi-status     # the site-visit check
 make pi-config     # edit the Pi's site.json
-make pi-collect    # copy the finished logs to data/collected/ and check their checksums
+make pi-collect    # copy the finished logs to data/raw/adsb/garden/ and check their checksums
 ```
 
 ## Layout
@@ -66,33 +67,32 @@ tools/adsb/
   docs/                    plan, Pi setup, log format, analysis method, the simulated day
   site.example.json        config template; the location is a placeholder, and site.name is what outputs call it
   site.dev.json            config for running the logger on a laptop against the simulator
-  Makefile                 development tasks, and the `make pi-*` commands for the Pi
 ```
 
 Modules marked **Pi** run on the Raspberry Pi. They must import only the standard library and each other, never the analysis modules, so the Pi needs nothing installed and can't be broken by analysis changes.
 
 ## Development
 
-Needs Python 3.9 or later (the laptop has 3.9) and nothing else: all the code uses only the standard library. From `tools/adsb`:
+On the Pi it needs Python 3.9 or later and nothing else: all the code uses only the standard library. On the laptop it runs in the project's environment (Python 3.12, `make setup`). The tasks are in the Makefile at the top of the repository (`make help`), and run from there:
 
 ```bash
-make test          # all tests, about 4 s
-make demo          # simulate a day, analyse it, write data/demo/results/viewer.html
-open data/demo/results/viewer.html
+make test          # every tool's tests; this one's take about 4 s
+make demo          # simulate a day, analyse it, write data/derived/adsb/demo/results/viewer.html
+open data/derived/adsb/demo/results/viewer.html
 ```
 
 To run the real logger on a laptop, use two terminals:
 
 ```bash
 make dev-serve     # a fake readsb on port 30154, replaying a simulated day at 10x
-make dev-log       # the logger, writing to data/dev-logs; Ctrl-C to stop
+make dev-log       # the logger, writing to data/derived/adsb/dev-logs; Ctrl-C to stop
 make dev-status    # the site-visit check on those logs
-make dev-analyse   # analyse them into data/dev-results
+make dev-analyse   # analyse them into data/derived/adsb/dev-results
 ```
 
 On a laptop, `adsb status` always warns that the clock isn't known to be synchronised, because `chronyc` isn't there.
 
-The tests can also be run from the project folder with `python3 -m unittest discover tools/adsb`. Anything under `data/` is ignored by git.
+The tests can also be run on their own, from `tools/adsb`, with `python3 -m unittest`. What the logger collects at the garden is raw data (`data/raw/adsb/garden/`); the demo and dev runs are derived (`data/derived/adsb/`). Git ignores both.
 
 Conventions:
 
@@ -118,4 +118,4 @@ This repository is public. Never commit:
 - the garden's coordinates, including in config files, sample logs or screenshots
 - flight logs or analysis results
 
-`.gitignore` excludes `site.json` and the `logs/`, `results/` and `data/` folders in `tools/adsb`. Anything published should be summarised, and shouldn't identify individual private aircraft.
+`.gitignore` excludes `site.json` and the `logs/` and `results/` folders in `tools/adsb`, and all of `data/` at the top of the repository, where the collected logs go. Anything published should be summarised, and shouldn't identify individual private aircraft.

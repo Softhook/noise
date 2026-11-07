@@ -13,7 +13,7 @@ The analysis measures everything from the site in the config's `site` section. T
 1. Download EGLC METARs for the logged period from the [Iowa Environmental Mesonet archive](https://mesonet.agron.iastate.edu/request/download.phtml):
 
    ```bash
-   python3 -m adsb metars --from 2026-11-05 --to 2026-11-06 --out eglc.csv
+   noise adsb metars --from 2026-11-05 --to 2026-11-06 --out data/raw/metars/eglc-2026-11-05.csv
    ```
 
    It asks for a day either side of the period, since the analysis uses the latest report before each position. It uses the request we tested: routine and special reports, in UTC. `--station` changes the airport.
@@ -21,10 +21,10 @@ The analysis measures everything from the site in the config's `site` section. T
    A CSV with `time,qnh_hpa,temp_c` columns also works, for example from the Fusion's weather station.
 
 
-2. Run the analysis, from `tools/adsb`:
+2. Run the analysis. For a deployment, `make build` does this itself, for each ADS-B source in its manifest, for the deployment's window, whenever what it reads has changed, into `data/derived/deployments/<name>/analysis/<source>/` (see the [survey README](../../survey/README.md#getting-data-in)). By hand:
 
    ```bash
-   python3 -m adsb analyse --config site.json --logs LOG_COPY --out results --weather eglc.csv
+   noise adsb analyse --config tools/adsb/site.json --logs data/raw/adsb/garden --out results --weather data/raw/metars/eglc-2026-11-05.csv
    ```
 
    Add `--from 2026-11-05 --to 2026-11-06` to analyse one period, for example to make a smaller viewer for one day. The logs are read in time order and each flight is finished once its aircraft goes quiet. So memory use depends on how many aircraft are in the air at once, not on the length of the survey: about 40 MB for a simulated day.

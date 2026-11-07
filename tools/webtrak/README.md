@@ -20,35 +20,33 @@ WebTrak keeps a rolling window of about 18 months; `range` shows the current one
 
 ## Quick start
 
-Run from `tools/webtrak` (or from the project root with `PYTHONPATH=tools/webtrak`):
+After `make setup` at the top of the repository, it's `noise webtrak ...`, from any folder (`make webtrak`, `make webtrak-follow` and `make webtrak-quality` are short for the first, fifth and last):
 
 ```bash
-cd tools/webtrak
-
 # The web app: start downloads, watch their progress, see statistics (http://127.0.0.1:8765)
-python3 -m webtrak serve
+noise webtrak serve
 
-# Run tests (no network calls)
-python3 -m unittest discover tests
+# Run tests (no network calls): every tool's, from the top of the repository
+make test
 
 # Check available data range and current delay
-python3 -m webtrak range
+noise webtrak range
 
 # List all airport monitors
-python3 -m webtrak monitors
+noise webtrak monitors
 
 # Follow NMT6 live (polls every 30 s for new chunks, backfilling the last hour)
-python3 -m webtrak follow
+noise webtrak follow
 
 # Fetch a historical period (in local airport time)
-python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00"
+noise webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00"
 
 # Several monitors from the same downloads
-python3 -m webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00" --nmt 106,103
+noise webtrak fetch --from "2026-11-05 08:00" --to "2026-11-05 10:00" --nmt 106,103
 
 # Check the saved NMT6 data for gaps and anything that looks wrong (reads the files only)
-python3 -m webtrak quality
-python3 -m webtrak quality --from "2026-11-05 08:00" --to "2026-11-05 11:00" --json report.json
+noise webtrak quality
+noise webtrak quality --from "2026-11-05 08:00" --to "2026-11-05 11:00" --json report.json
 ```
 
 ### Checking the data (`quality`)
@@ -72,12 +70,15 @@ Downloads run as ordinary `fetch`/`follow` processes, so closing the app doesn't
 
 ## Output data structure
 
-Data is stored under `tools/webtrak/data/<site>/` (git-ignored):
+Data is stored with the rest of the survey's, in `data/` at the top of the repository (git-ignored). What WebTrak sends is raw, and kept as it came; what's worked out from it is derived (`--raw` and `--out` choose other folders):
 
 ```text
-tools/webtrak/data/lcy/
+data/raw/webtrak/lcy/
+├── monitors.json                    # The monitor list, as WebTrak last gave it
+└── YYYY-MM-DD/<handle>.txt.gz       # Each chunk as received (UTC day), shared by all monitors; --no-raw turns it off
+
+data/derived/webtrak/lcy/
 ├── jobs/                            # Downloads started from the web app: settings and logs
-├── raw/YYYY-MM-DD/<handle>.txt.gz   # Each chunk as received (UTC day), shared by all monitors; --no-raw turns it off
 └── nmt106/
     ├── state.json          # Saved chunk ranges, and events still waiting for radar
     ├── events.csv          # Noise events matched to closest aircraft approach
@@ -87,7 +88,7 @@ tools/webtrak/data/lcy/
         └── YYYY-MM-DD.csv  # Radar positions within 3 km radius of the monitor
 ```
 
-Each chunk holds every monitor and all radar, so the raw cache lets you add monitors later without downloading again. It takes about 8 KB a chunk, roughly 23 MB a day or 700 MB a month.
+Each chunk holds every monitor and all radar, so the raw cache lets you add monitors later without downloading again, and the survey reads the chunks, not the per-monitor files. A fetch for a period whose chunks are cached rebuilds the per-monitor files without asking WebTrak. It takes about 8 KB a chunk, roughly 23 MB a day or 700 MB a month.
 
 ### Event matching (`events.csv`)
 

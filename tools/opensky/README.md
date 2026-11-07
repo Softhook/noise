@@ -1,37 +1,35 @@
 # OpenSky: aircraft near NMT6
 
-`python -m opensky compare` gets every aircraft that passed near NMT6 (St Pauls Church, Thamesmead) from the [OpenSky Network](https://opensky-network.org)'s research database (Trino), and compares them with the WebTrak data saved by [`tools/webtrak`](../webtrak/README.md). It gives a position about once a second and full-resolution heights, and needs research access.
+`noise opensky compare` gets every aircraft that passed near NMT6 (St Pauls Church, Thamesmead) from the [OpenSky Network](https://opensky-network.org)'s research database (Trino), and compares them with the WebTrak data saved by [`tools/webtrak`](../webtrak/README.md). It gives a position about once a second and full-resolution heights, and needs research access.
 
 We use only Trino. OpenSky's free REST API was tried first and dropped (see [below](#why-not-the-rest-api)).
 
 ## Running it
 
-From `tools/opensky`:
+From the top of the repository:
 
 ```bash
-make setup    # once: .venv with pyopensky
-make compare FROM=2026-11-05T08:01Z TO=2026-11-05T11:01Z    # ARGS="--radius 3000 --geoid 45" to change them
-make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z     # the flights in the ADS-B viewer (below)
-make test     # made-up data and a fake Trino client; no network, no pyopensky needed
+make setup    # once: .venv with every tool, pyopensky included
+make opensky FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z           # a period's positions, and its METARs
+make opensky-compare FROM=2026-11-05T08:01Z TO=2026-11-05T11:01Z   # ARGS="--radius 3000 --geoid 45" to change them
+make test     # every tool's; this one's use made-up data and a fake Trino client, with no network
 ```
 
-### Viewing a day in the ADS-B viewer
+### Viewing a day
 
 1. Once: `make setup`, and set up your OpenSky login (see [Setup](#setup)).
-2. From `tools/opensky`, run `make viewer` with the period in UTC, for example one whole day:
+2. Fetch the period, in UTC, for example one whole day:
 
    ```bash
-   make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z
+   make opensky FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z
    ```
 
-   This takes a minute or two the first time (one OpenSky query per hour), and seconds after that, from the cache. It ends by printing the file to open.
-3. Open `data/2026-10-28/results/viewer.html` in a browser, for example with `open data/2026-10-28/results/viewer.html`. The flights are built into the file, so there's nothing to load or upload, and it works offline.
+   This takes a minute or two the first time (one OpenSky query per hour), and seconds after that, from the cache. It writes OpenSky's positions as hourly logger files to `data/raw/opensky/2026-10-28/` (named after the `FROM` date, so a period of several days goes in its first day's folder), and EGLC's METARs to `data/raw/metars/eglc-2026-10-28.csv`. A period already fetched isn't fetched again, since raw data isn't overwritten: give `REPLACE=1` to fetch it afresh (the METARs are kept unless you do).
+3. Add a deployment for the period in `tools/survey/deployments/` (copy one, and change the dates and folders), then `make build`. That analyses the logs with NMT6 as the site and builds the survey's tables, and `make serve` shows them in the survey app. The ADS-B viewer for the period is `data/derived/deployments/<name>/analysis/opensky/viewer.html`: the flights are built into the file, so it opens offline. It holds OpenSky's data, so keep it private, under OpenSky's research terms. See [In the ADS-B viewer](#in-the-ads-b-viewer) for what goes into it, and [the viewer's guide](../adsb/docs/analysis.md#the-viewer) for how to use it.
 
-Each period goes in a folder named after its `FROM` date, so a period of several days goes in the first day's folder. Add `DIR=data/somewhere` to choose another. Running `make viewer` again for the same folder replaces that folder's OpenSky files and rebuilds the viewer. The viewer holds OpenSky's data, so keep it private, under OpenSky's research terms. See [In the ADS-B viewer](#in-the-ads-b-viewer) for what goes into it, and [the viewer's guide](../adsb/docs/analysis.md#the-viewer) for how to use it.
+`make opensky-compare` runs `noise opensky compare --from ... --to ...`.
 
-`make compare` runs `.venv/bin/python -m opensky compare --from ... --to ...`.
-
-For each hour of the period, it runs one query on `state_vectors_data4` for every airborne aircraft in a box 5 km either side of NMT6, whichever airport it uses. Each query asks for the whole hour, and OpenSky sends each position once, at the time it received it. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
+For each hour of the period, it runs one query on `state_vectors_data4` for every airborne aircraft in a box 5 km either side of NMT6, whichever airport it uses. Each query asks for the whole hour, and OpenSky sends each position once, at the time it received it. It reads 5 minutes either side of the period, from both OpenSky and WebTrak, so an aircraft passing near the start or end has positions on both sides of its closest approach; only passes whose closest approach falls inside the period are kept. It splits each aircraft's positions into passes and works out each pass's closest approach to NMT6. Passes that came within `--radius` (default 3000 m, as WebTrak) are written to `data/derived/opensky/compare/nmt6-trino-<from>.csv`, which git ignores. It then pairs them with WebTrak's radar tracks by time, to within 90 s, and lists each one's NMT6 event and the height difference.
 
 For each pass it gives:
 - the aircraft type and registration (see [Aircraft type](#aircraft-type)),
@@ -59,11 +57,10 @@ For each pass it gives:
 Research access is free for university researchers, but OpenSky has to approve it (My OpenSky → Request Data Access). Then:
 
 ```bash
-cd tools/opensky
-make setup   # python3 -m venv .venv && .venv/bin/pip install pyopensky; .venv is ignored by git
+make setup   # at the top of the repository: .venv, with pyopensky (the project's "opensky" extra); git ignores .venv
 ```
 
-[pyopensky](https://github.com/junzis/pyopensky) is the client OpenSky recommends. It's the only package outside the standard library in this repository, and it is kept in `tools/opensky`. Only `opensky/trino.py` imports it, and only when it makes a query, so the rest of the tool and its tests run on the standard library. `tools/adsb` still uses only the standard library, so the Pi needs nothing installed.
+[pyopensky](https://github.com/junzis/pyopensky) is the client OpenSky recommends. It's the only package outside the standard library in this repository, and only this tool needs it. Only `opensky/trino.py` imports it, and only when it makes a query, so the rest of the tool and its tests run on the standard library. `tools/adsb` still uses only the standard library, so the Pi needs nothing installed.
 
 **Login:** Trino uses your OpenSky **account username and password**, not an API client ID and secret. Put them in pyopensky's `settings.conf`, and keep the file private (`chmod 600`). On a Mac it's at `~/Library/Application Support/pyopensky/settings.conf`:
 
@@ -92,22 +89,16 @@ Some periods are missing from OpenSky's data because of outages. Two of them fal
 
 ### In the ADS-B viewer
 
-`python -m opensky logs` writes the same positions as the ADS-B logger's hourly files, so [`tools/adsb`](../adsb/README.md)'s `adsb analyse` and its viewer read them unchanged, with NMT6 as the site (`nmt6-site.json`):
-
-```bash
-make viewer FROM=2026-10-28T00:00Z TO=2026-10-29T00:00Z    # data/2026-10-28/adsb, then data/2026-10-28/results/viewer.html
-```
-
-`make viewer` runs three steps: `opensky logs` (with `--replace`, which only ever removes the files of an earlier `opensky logs` run), `adsb metars`, then `adsb analyse --all-positions`. It keeps every flight's positions, not just the arrivals and departures, so the [survey app](../survey/README.md) can read the same folder and show OpenSky alongside WebTrak and, later, the garden's logger.
+`noise opensky logs` writes the same positions as the ADS-B logger's hourly files, so [`tools/adsb`](../adsb/README.md)'s `adsb analyse` and its viewer read them unchanged, with NMT6 as the site (`nmt6-site.json`). `make opensky` runs `opensky logs` (with `--replace`, which only ever removes the files of an earlier `opensky logs` run) and `adsb metars`. `make build` then runs `adsb analyse --all-positions` for each deployment that names the folder, with `nmt6-site.json` as its `site`, whenever the logs have changed. It keeps every flight's positions, not just the arrivals and departures, so the [survey app](../survey/README.md) can show OpenSky alongside WebTrak and, later, the garden's logger.
 
 - It uses the same whole-hour queries as `compare`, so hours already fetched come from the cache.
-- Heights go in as feet, as readsb gives them. `alt_geom` is OpenSky's `geoaltitude`, which `adsb analyse` corrects with the config's geoid height, and `alt_baro` is pressure altitude. `make viewer` also downloads EGLC METARs (`adsb metars`), so QNH heights are worked out too, and `QNH minus geometric` compares the two.
+- Heights go in as feet, as readsb gives them. `alt_geom` is OpenSky's `geoaltitude`, which `adsb analyse` corrects with the config's geoid height, and `alt_baro` is pressure altitude. `make opensky` also downloads EGLC METARs (`adsb metars`), so QNH heights are worked out too, and `QNH minus geometric` compares the two.
 - Each record carries the aircraft's type, registration and description (`t`, `r`, `desc`), as readsb's do, so the viewer's "By aircraft type" chart and `summary.txt` work.
 - OpenSky gives no ground speed here. `adsb analyse` works out headings from the positions.
 - `nmt6-site.json` names the site "NMT6, St Pauls Church, Thamesmead", labels it NMT6, and marks it `public`, since WebTrak publishes its location. So the summary and the viewer show its latitude and longitude. Its ground elevation and microphone height are placeholders, so heights above the microphone are approximate.
 - The summary names OpenSky as the source and notes that there's no health log. Gaps over 30 minutes are reported as unchecked. On 28 October there were three, 01:01–02:40 and 04:53–05:35 UTC. Each lay between high overflights, with nothing else within 5 km of NMT6. OpenSky was receiving aircraft over London in every 10 minutes of those hours, so the sky near NMT6 was quiet: London City is closed at night, and Heathrow's first arrivals came after 04:30.
 - Only positions in the 5 km query box are included.
-- The files stay in `data/`, which git ignores, under OpenSky's research terms.
+- The files stay in `data/raw/opensky/` and `data/derived/`, which git ignores, under OpenSky's research terms.
 
 **28 October 2026 (westerly operations):** `adsb analyse` labels all 71 London City flights below 500 m as runway 27 arrivals. They fly a remarkably tight path:
 - 203–215 m south of NMT6 (median 210 m, sd 2 m),
@@ -122,9 +113,9 @@ By type, the 71 were 55 E190, 5 BCS1 (A220-100), 3 DH8D (Dash 8-400), 3 E290 and
 
 OpenSky's state vectors give no aircraft type, so `compare` and `logs` look up every `icao24` in [tar1090-db](https://github.com/wiedehopf/tar1090-db/tree/csv), the database readsb uses on the garden Pi. Both sources therefore give the same ICAO type codes (`E190`, `BCS1`, `A20N`).
 
-- **Saved copies:** each copy is kept in `data/aircraft-db/aircraft-<date downloaded>.csv.gz`, which git ignores. Every run uses the newest one and prints its name, and `logs` writes it into `SOURCE.txt`.
+- **Saved copies:** each copy is kept in `data/raw/opensky/aircraft-db/aircraft-<date downloaded>.csv.gz`, which git ignores. Every run uses the newest one and prints its name, and `logs` writes it into `SOURCE.txt`.
 - **First run:** if there's no copy, it downloads one, about 8 MB.
-- **Updating:** `python -m opensky aircraft --update` saves a newer copy. Keep one copy for a whole stage, as the [plan](../adsb/docs/PLAN.md) says, and pass `--aircraft-db PATH` to repeat a run with an older one.
+- **Updating:** `noise opensky aircraft --update` saves a newer copy. Keep one copy for a whole stage, as the [plan](../adsb/docs/PLAN.md) says, and pass `--aircraft-db PATH` to repeat a run with an older one.
 - **Missing types:** any aircraft without a type is listed as a warning, with its `icao24` and callsign. On 28 October all 264 aircraft were found. On the 3 flights WebTrak also had, the types matched.
 
 ### Things to know about the data

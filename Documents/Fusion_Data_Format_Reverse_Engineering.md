@@ -145,7 +145,7 @@ These become the expected answers in our regression tests.
 
 ### 5. Compare the outputs
 
-Use `tools/fusion/fusion_inspect.py` for these checks: `survey`, `compare`, `level`, `time` and `strings`. Its matches are leads to test, not findings.
+Use `noise fusion` (`tools/fusion/fusion/inspector.py`) for these checks: `survey`, `compare`, `level`, `time` and `strings`. Its matches are leads to test, not findings.
 
 - Map the folder tree, file names and sizes for each run.
 - Compare file size against record count × logging period, to find record lengths and headers.
